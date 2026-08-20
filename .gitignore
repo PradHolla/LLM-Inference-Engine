@@ -1,0 +1,9 @@
+NOTES/
+*.local.md
+__pycache__/
+.venv/
+venv/
+*.pyc
+.env
+results/
+*.jsonl
