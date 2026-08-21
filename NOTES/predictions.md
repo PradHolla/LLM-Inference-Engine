@@ -392,3 +392,158 @@ exactly 4096 tokens, so nothing was over-reserved. Real traffic has ragged lengt
 where a non-paged engine must reserve `max_len` per sequence and paging wins much more.
 This experiment sets the ceiling; it does not yet measure paging's benefit.
 
+
+---
+## 2026-08-21 — Phase 2, step 1: manual decode loop (offline)
+
+Replacing HF `.generate()` with an explicit loop we drive ourselves. No batching yet,
+no server. 512-token prompt, 64 new tokens, greedy, batch 1 -- deliberately identical
+to the Phase 1 measurement conditions so the numbers are directly comparable.
+
+Written before the code was finished and before the box was restarted.
+
+| # | Quantity | Predicted | Derivation | Confidence |
+|---|---|---|---|---|
+| S1 | Manual loop vs `.generate()`, greedy | **token-for-token identical** | Same weights, same argmax, same stopping rule. Any divergence is a bug in cache handling or position ids, not a numerical accident | Very high. If this fails, nothing else in the run is meaningful |
+| S2 | Decode throughput | **23.5 tok/s** (42.6 ms/token), range 22.5-25.0 | Phase 1 measured 43.86 ms/token *through the server*. Removing the streamer thread, the asyncio queue, SSE encoding and the network should return 1-2 ms/token of CPU overhead | Medium |
+| S3 | Prefill time, 512 prompt | **150 ms**, range 130-180 | roofline says 134 ms of pure prefill; Phase 1's 195 ms TTFT included one decode step (42 ms) and server overhead | Medium |
+| S4 | ITL p95 / p50 ratio | **< 1.2** | Phase 1 saw p50 44.6 ms against p95 89.9 ms -- a 2.0x spread. Offline there is no queueing, no network, no event loop, so the spread should collapse | Medium. This is the interesting one |
+
+**S4 is the diagnostic.** If the offline spread collapses to near 1.0, Phase 1's 2x ITL
+tail was the *server* -- scheduling, GIL contention, the streamer handoff -- and not the
+GPU. If it stays near 2.0, the tail is in the model execution itself and the scheduler
+in step 3 inherits a problem it cannot fix.
+
+### Noted in advance, not yet a problem
+
+`DynamicCache` grows by `torch.cat`, which copies the **entire** cache every decode
+step. That makes per-token cost O(L) and total decode O(L^2):
+
+| context | copy per step | at 42 ms/token |
+|---|---|---|
+| 576 tokens (this test) | 0.079 GiB | 0.14 ms, 0.3% -- invisible |
+| 4096 tokens | 0.562 GiB | 1.01 ms, 2.4% -- measurable |
+
+So step 1 cannot detect this, by design. It becomes real at long context and is one of
+the things a preallocated or paged cache eliminates. Do not conclude from a clean step-1
+number that `DynamicCache` is fine; conclude only that 576 tokens is too short to expose
+it.
+
+### Infrastructure note
+
+The box stopped itself on schedule after the KV probe finished -- first live
+confirmation that the modified idle guardrail fires correctly on an inference box,
+where a server process holding KV cache at 0% GPU utilisation looks exactly like idle.
+
+### ACTUALS -- 2026-08-21, step 1 (412-token prompt, 64 new tokens, greedy, batch 1)
+
+| # | Quantity | Predicted | Measured | Verdict |
+|---|---|---|---|---|
+| S1 | Manual loop vs `.generate()` | token-for-token identical | **IDENTICAL, 64 tokens** | correct |
+| S2 | Decode throughput | 23.5 tok/s (22.5-25.0) | **24.4 tok/s** | correct, +3.8% off prediction |
+| S3 | Prefill time | 150 ms (130-180) | **148.5 ms** | correct, 1% off |
+| S4 | ITL p95/p50 | < 1.2 | **1.007** | correct, decisively |
+
+All four correct. The loop is right and the model of it is right.
+
+**Prompt length note.** The prompt resolves to 412 tokens, not 512 -- `make_prompt`
+uses a 4-chars/token heuristic and Qwen3's tokenizer runs closer to 5. This is NOT a
+comparability problem: `engine/manual.py` and `tools/bench.py` use byte-identical
+FILLER text and the identical `target*4` slice, both producing 2048 chars, and Phase 1
+recorded `prompt_chars: 2048`. Phase 1's "512-token prompt" was the same 412 tokens.
+Verified by extracting and comparing both constants rather than assuming.
+
+### S4 was the question worth asking, and the answer is clean
+
+|  | Phase 1, through the server | Step 1, offline | |
+|---|---|---|---|
+| ITL p50 | 44.5 ms | **41.0 ms** | -3.5 ms |
+| ITL p95 | 89.3 ms | **41.3 ms** | -48.0 ms |
+| ITL p99 | 173.8 ms | **41.5 ms** | -132.3 ms |
+| ITL max | 179.4 ms | -- | |
+| **p95/p50 spread** | **2.008** | **1.007** | |
+| samples | 689 | 189 | |
+
+**The entire ITL tail was the serving layer, not the GPU.** Removing FastAPI, the
+`TextIteratorStreamer` thread handoff, the asyncio queue, SSE encoding and the network
+took p99 from 173.8 ms to 41.5 ms. The GPU emits tokens metronomically at 41 ms; every
+millisecond of tail above that was software the model never saw.
+
+Two consequences:
+- The Phase 2 scheduler starts from a clean instrument. The 2x tail is not a property
+  of model execution that a scheduler would inherit and be unable to fix.
+- The serving layer cost 3.5 ms/token at the median (8%) on top of owning 100% of the
+  tail. Whatever replaces it in step 3 has a measured budget to beat.
+
+### Instrument defect found and fixed: warmup must match the measured shape
+
+Rep 0 came in at 202.5 ms TTFT against 148.4 and 148.5 ms for reps 1 and 2 -- a 36%
+outlier that survived warmup. Cause: warmup generated from a 6-token prompt
+("The capital of France is") while the measurement used a 412-token prefill. cuBLAS
+selects kernels per problem shape, so warming the wrong shape warms nothing relevant.
+
+Fixed in `engine/manual.py`: warmup now runs on the actual `input_ids`. The reported
+p50 of 148.5 ms is unaffected -- the median of three absorbed the outlier -- but a mean
+would have reported 166.5 ms, 12% high, from a single un-warmed rep. Another argument
+for percentiles over means, and this one was free to catch only because the per-rep
+numbers were printed rather than just the summary.
+
+
+### Step 1 final, 20 reps with warmup fixed
+
+| Quantity | Value | Samples |
+|---|---|---|
+| TTFT p50 / p95 | **148.4 / 148.5 ms** | 20 |
+| ITL p50 / p95 / p99 | **40.5 / 40.6 / 41.0 ms** | 1,260 |
+| Decode throughput | **24.7 tok/s** | |
+| TTFT spread p95/p50 | **1.001** | |
+| ITL spread p95/p50 | **1.002** | |
+
+The warmup fix removed the rep-0 outlier completely: rep 0 is now 148.5 ms and all 20
+reps fall in 148.4-148.5 ms. This is the most stable instrument the project has had.
+
+### Derived efficiency constants -- one confirms, one does not
+
+    mem_eff     = 27.30 ms floor / 40.5 ms measured = 0.674
+    compute_eff = 54.0 ms at 125 TFLOPS / 148.4 ms  = 0.364
+
+| Constant | roofline default | measured offline | Phase 1 via server |
+|---|---|---|---|
+| `mem_eff` | 0.650 | **0.674** | 0.623 |
+| `compute_eff` | 0.500 | **0.364** | -- |
+
+`mem_eff` at 0.674 slightly beats the 0.65 default and settles the Phase 1 question:
+0.623 was the server tax, not the card. The A10G sustains 67% of spec bandwidth.
+
+`compute_eff` at 0.364 means **roofline overstates prefill speed by 37%**. Attention
+FLOPs, which roofline ignores, are only 1.5% of the weight matmuls at 412 tokens, so
+they do not explain it.
+
+## 2026-08-21 — Phase 2, step 1b: is compute_eff a constant?
+
+Suspicion: it is not. `compute_eff` should rise with prefill length, because a
+412-token prefill is a [412 x 4096] GEMM whose M dimension is too small to fill the
+tensor cores. Roofline treats it as a fixed 0.50 at every length, which would make it
+optimistic for short prompts and pessimistic for long ones.
+
+Measuring prefill-only (`--max-new-tokens 1`) across seven prompt lengths.
+
+| target | actual approx | predicted `compute_eff` (weights-only FLOPs) |
+|---|---|---|
+| 128 | 103 | 0.15 |
+| 256 | 206 | 0.25 |
+| 512 | 412 | 0.364 MEASURED |
+| 1024 | 824 | 0.45 |
+| 2048 | 1648 | 0.52 |
+| 4096 | 3296 | 0.57 |
+| 8192 | 6592 | 0.60 |
+
+Prediction: **monotonically increasing, saturating near 0.6**, never reaching 1.0.
+
+Correction that must be applied when reading the tail of that table: attention FLOPs
+scale as L^2 while weight matmuls scale as L, so the attention share is
+`L x 3.6e-5` -- 1.5% at 412 tokens but **24% at 6,592**. Since roofline counts only
+weight matmuls, apparent `compute_eff` at long prompts is depressed by real work the
+model does not count. Expect the raw curve to flatten or dip at the far end for that
+reason alone, and correct for it before concluding the hardware stopped scaling.
+
