@@ -100,6 +100,10 @@ QUANT_KERNEL_EFF = {"bf16": 1.0, "fp16": 1.0, "fp8": 0.85, "int8": 0.85, "awq4":
 # Nobody hits peak. These are the fudge factors, isolated here so they are
 # arguments rather than hidden assumptions -- and so you can tune them once you
 # have measured reality and know what your stack actually achieves.
+# MEASURED 2026-08-21: naive HF transformers on an A10G achieved 0.623 (22.8 tok/s
+# against a 36.6 tok/s ceiling). Left at 0.65 on purpose -- that 0.623 includes Python
+# overhead on every decode step, so it describes the STACK, not the card. vLLM should
+# do better. Re-derive per stack rather than hard-coding one stack's number here.
 MEM_EFF = 0.65      # fraction of peak bandwidth a real kernel sustains
 COMPUTE_EFF = 0.50  # fraction of peak FLOPs during prefill
 

@@ -191,3 +191,28 @@ for a single un-batched 512-token prefill.
 **Phase 2 target: beat 0.33 req/s without making ITL worse than ~55 ms.**
 
 ---
+## 2026-08-21 — Correction: one Phase 0 prediction was never tested
+
+The 2026-08-20 entry listed three things to check in Phase 1. Two were measured and
+recorded above. The third was not:
+
+> bf16 dies of KV exhaustion above **batch 4** at 4k context
+
+**Status: UNTESTED, carried to Phase 2.** The Phase 1 baseline holds a global lock, so
+batch size was always 1 and KV cache pressure never occurred. Nothing in the Phase 1
+results speaks to this prediction either way.
+
+It stops being theoretical the moment Phase 2 batches anything: bf16 leaves 3.98 GiB
+of KV room, which is roughly 29,000 tokens total across all concurrent requests. At 4k
+context that is about 7 requests -- so the first honest batching experiment should hit
+this wall almost immediately. Test it deliberately rather than discovering it as an OOM.
+
+### Also not applied deliberately
+
+Measured `mem_eff` is 0.623 against the 0.65 default in `tools/roofline.py`. The
+default was NOT changed. 0.623 was measured through naive HF `transformers`, which pays
+Python overhead on every decode step; vLLM should achieve more of peak bandwidth. That
+makes 0.623 a property of the STACK, not of the A10G, and hard-coding it would
+understate every later phase. Re-derive it per stack instead.
+
+---
