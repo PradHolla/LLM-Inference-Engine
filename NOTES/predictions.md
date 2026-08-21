@@ -155,3 +155,39 @@ exception. Confidence in a number should scale with how hard it was cross-checke
 not with how clean it looked.
 
 ---
+## 2026-08-21 — Phase 1 CLOSED: statistically valid baseline
+
+Re-run at 300s per point so percentiles rest on enough samples.
+
+| offered | n | true rps | TTFT p50 | TTFT p95 | TTFT p99 | ITL p50 |
+|---|---|---|---|---|---|---|
+| 0.25 | 90 | 0.29 | 4,727 ms | 15,800 ms | n/a (needs 100) | 45 ms |
+| 0.33 | 109 | 0.33 | 20,385 ms | 36,898 ms | 38,650 ms | 45 ms |
+
+**Capacity: 0.33 req/s, n=109.** Matches the 0.338 req/s derived from measured
+service time to within 2%.
+
+The sample-size guard is visibly doing its job: p99 is withheld at n=90 and
+reported at n=109. Before the fix this run would have printed a confident p99
+from 7 samples.
+
+Note both load points sit at or above capacity, so neither provides an unloaded
+TTFT baseline and the automatic knee detector correctly reports no knee. The
+unloaded reference is the serial run: **TTFT 343 ms client / 195 ms server.**
+
+### PHASE 1 FINAL SCOREBOARD
+
+| Quantity | Predicted | Measured | Gap |
+|---|---|---|---|
+| Weights in VRAM | 15.26 GiB | 15.26 GiB | 0.0% |
+| Decode, batch 1 | 23.8 tok/s | 22.8 tok/s | -4.2% |
+| TTFT @ 512 prompt | 176 ms | 195 ms | +11.0% |
+| Capacity | 0.338 req/s | 0.332 req/s | -1.8% |
+
+Implied `mem_eff` from measurement: **0.623** (guessed 0.65).
+`compute_eff` is the weakest term at +11% on prefill; 0.50 is slightly optimistic
+for a single un-batched 512-token prefill.
+
+**Phase 2 target: beat 0.33 req/s without making ITL worse than ~55 ms.**
+
+---

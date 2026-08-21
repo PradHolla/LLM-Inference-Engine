@@ -270,7 +270,7 @@ def print_row(s: dict) -> None:
     if s["ok"] < min_samples(95):
         warn += f"  \033[33m← n={s['ok']}, need {min_samples(95)} for p95\033[0m"
     fail = f"\033[31m{s['fail']:>5}\033[0m" if s["fail"] else f"{s['fail']:>5}"
-    print(f"  {s['rate']:>6.1f} {s['ok']:>5} {fail} {s['achieved_rps']:>7.2f} "
+    print(f"  {s['rate']:>6.2f} {s['ok']:>5} {fail} {s['achieved_rps']:>7.2f} "
           f"{s['out_tok_s']:>8.0f} │ {_f(s['ttft_p50'],8)} {_f(s['ttft_p95'],7)} "
           f"{_f(s['ttft_p99'],7)} │ {_f(s['itl_p50'],7)} {_f(s['itl_p95'],7)} │ "
           f"{_f(s['e2e_p95'],8)}{warn}")
