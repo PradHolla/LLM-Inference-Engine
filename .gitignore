@@ -1,5 +1,8 @@
-# Local Claude working standards -- deliberately untracked (see conversation)
+# Internal working documents -- deliberately untracked.
+# PROJECT.md is the private source of truth (decisions, environment, rationale).
+# The public face of this repo is README.md and NOTES/predictions.md.
 CLAUDE.md
+NOTES/PROJECT.md
 
 # Python
 __pycache__/
