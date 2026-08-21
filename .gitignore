@@ -1,9 +1,16 @@
-NOTES/
-*.local.md
+# Local Claude working standards -- deliberately untracked (see conversation)
+CLAUDE.md
+
+# Python
 __pycache__/
+*.pyc
 .venv/
 venv/
-*.pyc
+.uv/
+
+# Secrets / local overrides
 .env
-results/
-*.jsonl
+*.local.md
+
+# Server-side request log, written on the GPU box
+baseline/serve.jsonl
