@@ -121,7 +121,30 @@ QUANT_KERNEL_EFF = {"bf16": 1.0, "fp16": 1.0, "fp8": 0.85, "int8": 0.85, "awq4":
 # overhead on every decode step, so it describes the STACK, not the card. vLLM should
 # do better. Re-derive per stack rather than hard-coding one stack's number here.
 MEM_EFF = 0.65      # fraction of peak bandwidth a real kernel sustains
-COMPUTE_EFF = 0.50  # fraction of peak FLOPs during prefill
+# MEASURED 2026-08-21 on A10G + Qwen3-8B bf16, batch 1, via engine/manual.py.
+# compute_eff is NOT a constant -- it rises with prompt length, because a short prefill
+# is a [L x 4096] GEMM whose M dimension cannot fill the tensor cores. The old 0.50
+# default overstated prefill speed by 37% at the project's standard 412-token prompt.
+#
+#      L      TTFT     eff (weight matmuls only)   eff (incl. attention)
+#    113    49.8 ms            0.297                      0.299
+#    213    87.0 ms            0.321                      0.323
+#    412   148.4 ms            0.364                      0.369
+#    812   283.2 ms            0.376                      0.387
+#   1611   484.3 ms            0.436                      0.461
+#   3209   952.3 ms            0.442                      0.493
+#   6407  1968.0 ms            0.427 <- dips              0.525 <- monotonic
+#
+# Read the RIGHT column. This model counts only weight matmuls, and attention FLOPs
+# scale as L^2 against the matmuls' L, reaching 23% of total work at L=6407. The
+# left column dipping at the last row is that omission, not the GPU losing efficiency.
+# Also fitted: t = 16.7 ms + 0.3018 ms/token, so there is ~17 ms of fixed per-call
+# overhead that matters at short prompts and vanishes at long ones.
+#
+# Default is calibrated for prompts of a few hundred tokens, which is what this
+# project benchmarks. Override with --compute-eff for long-context work: use ~0.46 at
+# 1.6k, ~0.49 at 3.2k, ~0.53 at 6.4k.
+COMPUTE_EFF = 0.36  # fraction of peak FLOPs during prefill, at ~400-token prompts
 
 
 def load_hf_config(path: str, params: float | None) -> Model:

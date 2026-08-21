@@ -547,3 +547,44 @@ weight matmuls, apparent `compute_eff` at long prompts is depressed by real work
 model does not count. Expect the raw curve to flatten or dip at the far end for that
 reason alone, and correct for it before concluding the hardware stopped scaling.
 
+
+### ACTUALS -- 2026-08-21, step 1b prefill sweep
+
+| L | TTFT | eff, weights only | eff, incl. attention | predicted | attn share |
+|---|---|---|---|---|---|
+| 113 | 49.8 ms | 0.297 | **0.299** | 0.15 | 0.4% |
+| 213 | 87.0 ms | 0.321 | **0.323** | 0.25 | 0.8% |
+| 412 | 148.4 ms | 0.364 | **0.369** | 0.364 | 1.5% |
+| 812 | 283.2 ms | 0.376 | **0.387** | 0.45 | 2.9% |
+| 1611 | 484.3 ms | 0.436 | **0.461** | 0.52 | 5.8% |
+| 3209 | 952.3 ms | 0.442 | **0.493** | 0.57 | 11.6% |
+| 6407 | 1968.0 ms | 0.427 (dips) | **0.525** | 0.60 | 23.1% |
+
+**Shape: correct. Values: wrong in both directions.** The curve rises monotonically and
+saturates below 1.0 as predicted, but it is far flatter than I guessed -- I predicted a
+0.15 to 0.60 span (4.0x) and measured 0.30 to 0.53 (1.75x). Too pessimistic at short
+prompts, too optimistic at long ones. `compute_eff` is genuinely a function of prompt
+length, which is the thing worth knowing; my sense of how steeply is not calibrated.
+
+**The attention correction, written down in advance, is what saves the reading.** The
+weights-only column dips at the last row, 0.442 to 0.427. Read alone it says the GPU
+stopped scaling past 3k tokens. It did not -- attention is 23.1% of the real work at
+L=6407 and this model counts none of it. Corrected, the curve is monotonic through the
+last point: 0.493 to 0.525. Had that correction not been predicted beforehand, the dip
+would have been a genuinely convincing artifact.
+
+Also fitted: `t = 16.7 ms + 0.3018 ms/token`. About 17 ms of fixed per-call overhead,
+which is 34% of a 113-token prefill and under 1% of a 6.4k one.
+
+### Applied to roofline.py
+
+`COMPUTE_EFF` default changed **0.50 -> 0.36**, with the measured table recorded inline
+and guidance to override for long context (~0.46 at 1.6k, ~0.49 at 3.2k, ~0.53 at 6.4k).
+Roofline now predicts 186 ms of prefill at 512 tokens; the measurement scales to 184 ms.
+That agreement is calibration, not validation -- the default was fitted to this point.
+The honest test is whether the long-context overrides hold up in Phase 3.
+
+Open item: roofline treats `compute_eff` as a scalar. It is a curve. Interpolating from
+the measured table would replace a fudge factor with a measurement, per CLAUDE.md 5,
+but the curve is specific to A10G + Qwen3-8B and would need re-measuring per stack.
+Deferred, not forgotten.

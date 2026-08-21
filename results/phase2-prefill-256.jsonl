@@ -1,0 +1,5 @@
+{"impl": "manual", "rep": 0, "prompt_tokens": 213, "max_new_tokens": 1, "total_tokens": 1, "tokens": [2132], "prefill_s": 0.08741038400000889, "decode_s": [], "total_s": null}
+{"impl": "manual", "rep": 1, "prompt_tokens": 213, "max_new_tokens": 1, "total_tokens": 1, "tokens": [2132], "prefill_s": 0.08689298700005565, "decode_s": [], "total_s": null}
+{"impl": "manual", "rep": 2, "prompt_tokens": 213, "max_new_tokens": 1, "total_tokens": 1, "tokens": [2132], "prefill_s": 0.08704683799999202, "decode_s": [], "total_s": null}
+{"impl": "manual", "rep": 3, "prompt_tokens": 213, "max_new_tokens": 1, "total_tokens": 1, "tokens": [2132], "prefill_s": 0.0868015150000474, "decode_s": [], "total_s": null}
+{"impl": "manual", "rep": 4, "prompt_tokens": 213, "max_new_tokens": 1, "total_tokens": 1, "tokens": [2132], "prefill_s": 0.0870992689999639, "decode_s": [], "total_s": null}
