@@ -241,7 +241,19 @@ def main() -> None:
         t_mem = mem / (g.bandwidth_gb_s * GB * a.mem_eff)
         dq = dequant_ops * m.params
         t_cmp = (2 * m.params * B + dq) / (g.bf16_tflops * 1e12 * a.compute_eff * kernel_eff)
-        t = max(t_mem, t_cmp)
+        # MEASURED 2026-08-21 (engine/static_batch.py, B=1..48 at 476 ctx): memory and
+        # compute do NOT overlap. max(t_mem, t_cmp) -- the textbook roofline -- fits at
+        # small B but is 30% optimistic by B=48. Additive fits within 6% across the
+        # whole range:
+        #       B      measured ITL     max()      t_mem+t_cmp
+        #       8         43.8 ms     41.8 (-5%)   44.7 (+2%)
+        #      16         49.0 ms     43.1 (-12%)  48.9 (-0%)
+        #      32         61.0 ms     45.7 (-25%)  57.3 (-6%)
+        #      48         68.7 ms     48.3 (-30%)  65.8 (-4%)
+        # A decode step cannot hide its weight read under its own matmul: the matmul is
+        # what consumes the weights. "bound by" below therefore names the DOMINANT term,
+        # not a term that makes the other free.
+        t = t_mem + t_cmp
         bound = "memory" if t_mem >= t_cmp else "\033[36mcompute\033[0m"
         print(f"  {B:>6} {mem/GIB:>10.1f}G {t_mem*1000:>7.1f}m {t_cmp*1000:>7.1f}m "
               f"{t*1000:>7.1f}m {B/t:>9,.0f}  {bound}")

@@ -661,3 +661,126 @@ nothing.
 
 Continuous batching in step 3 exists to refill those slots. Expected recovery toward
 the uniform curve is the step 3 prediction, made once this one is measured.
+
+### Two experiments added before running, with 2d as the control 2b needed
+
+2b on its own shows a bad number but not a clean comparison -- it differs from the
+uniform sweep in both batch composition and step count. 2d fixes that: same B=8, same
+512 decode steps, same growing context, every slot useful. 2b and 2d differ in exactly
+one thing, which is whether the slots are doing work anyone asked for.
+
+ITL is modelled at the midpoint context (412 prompt + steps/2) because KV grows during
+a long run and ITL grows with it.
+
+| run | lengths | steps | predicted util | predicted useful tok/s | predicted naive tok/s |
+|---|---|---|---|---|---|
+| 2b ragged, one straggler | `[512, 32 x 7]` | 512 | **18.0%** | **33.9** | 188.4 |
+| 2c ragged, realistic spread | `[256,128,64,64,32,32,16,16]` | 256 | **29.7%** | **56.4** | 190.1 |
+| 2d uniform control | `[512 x 8]` | 512 | 100% | 188.4 | 188.4 |
+
+**The claim: 2b and 2d perform identical GPU work and differ 5.6x in tokens delivered.**
+Same batch size, same step count, same weights read per step. The only difference is
+that in 2b seven of eight rows finished at step 32 and spent the next 480 steps
+computing tokens that are discarded.
+
+`naive_tok_s` is predicted to be ~188-190 in ALL THREE cases, including the two that
+waste most of their work. That is the trap this instrument exists to expose: the
+flattering number is nearly constant while the real one moves 5.6x.
+
+Note on `--ignore-eos`, added after review and defaulted on: every row shares an
+identical prompt and decodes greedily, so all B rows emit identical tokens. A real eos
+would fire on all eight rows at the same step, killing the 512-token straggler along
+with the short rows and erasing the effect being measured. `useful_tokens` was also
+changed to count tokens actually produced rather than requested -- with the original
+formula an early eos would report utilisation above 100%.
+
+### ACTUALS -- 2026-08-21, step 2
+
+#### 2a. Uniform batch sweep
+
+| B | ITL p50 | tok/s | throughput vs B=1 | ITL vs B=1 | predicted tok/s |
+|---|---|---|---|---|---|
+| 1 | 40.5 ms | 24.7 | 1.0x | 1.00x | 25 |
+| 2 | 40.8 ms | 48.9 | 2.0x | 1.01x | 49 |
+| 4 | 41.9 ms | 95.4 | 3.9x | 1.03x | 97 |
+| 8 | 43.8 ms | 182.7 | 7.4x | 1.08x | 191 |
+| 16 | 49.0 ms | 326.6 | 13.2x | 1.21x | 370 |
+| 24 | 54.2 ms | 442.6 | 17.9x | 1.34x | 537 |
+| 32 | 61.0 ms | 524.0 | 21.2x | 1.51x | 695 |
+| 40 | 64.8 ms | 616.9 | 25.0x | 1.60x | -- |
+| 48 | 68.7 ms | **698.1** | **28.3x** | 1.70x | -- |
+
+**Batching works, but sublinearly, and I predicted the wrong shape.** I said 32x
+throughput for 13% more latency. Measured at B=32: 21.2x for 51% more latency. The
+direction and the magnitude of the win are right; the curve bends much earlier than
+predicted.
+
+#### The cause: memory and compute are ADDITIVE, not overlapped
+
+I modelled `ITL = max(t_mem, t_cmp)`, which is the textbook roofline. It is wrong here.
+
+| B | measured | `max(t_mem,t_cmp)` | `t_mem + t_cmp` |
+|---|---|---|---|
+| 8 | 43.8 ms | 41.8 (-4.6%) | 44.7 (+2.1%) |
+| 16 | 49.0 ms | 43.1 (-12.0%) | 48.9 (-0.2%) |
+| 32 | 61.0 ms | 45.7 (-25.1%) | 57.3 (-6.0%) |
+| 48 | 68.7 ms | 48.3 (-29.7%) | 65.8 (-4.3%) |
+
+`max()` is 30% optimistic by B=48. Additive fits within 6% across the entire range.
+
+The reason is physical and obvious in hindsight: **a decode step cannot hide its weight
+read underneath its own matmul, because the matmul is what consumes the weights.** They
+are the same operation, sequenced, not two pipelines to overlap. `max()` would be right
+for two independent units contending for time; it is wrong for one dependent chain.
+
+Applied to `tools/roofline.py`: batch scaling now uses `t_mem + t_cmp`, with the table
+above recorded inline. It now predicts B=32 at 59.4 ms / 539 tok/s against measured
+61.0 / 524, inside 3%.
+
+#### 2b. Ceiling: predicted 38, measured at least 48
+
+B=48 ran with peak allocation 19.94 GiB and did not OOM -- the sweep ended because the
+list ended, not because memory did. Implied activations are **0.032 GiB per sequence**
+at a 412-token prefill, against the 0.080 GiB I predicted from the kvprobe measurement.
+That earlier figure was taken at 4096 context with chunk 512 and evidently folded in
+the `DynamicCache` concat transient, which is not present here. Activation cost per
+token-in-flight is not a single constant across regimes; do not carry it between them.
+
+#### 2c. Static batching waste -- the exact predictions
+
+| run | lengths | util predicted | util measured | useful tok/s | naive tok/s |
+|---|---|---|---|---|---|
+| 2b | `[512, 32 x 7]` | 18.0% | **18.0%** | **31.6** | 175.8 |
+| 2c | `[256,128,64,64,32,32,16,16]` | 29.7% | **29.7%** | **53.3** | 179.4 |
+| 2d | `[512 x 8]` control | 100% | **100%** | 175.8 | 175.8 |
+
+Utilisation matched exactly in both cases, which it should -- it is pure combinatorics.
+Useful throughput came in 7% under prediction for the same reason 2a did: the additive
+compute term was missing from the ITL model.
+
+**The result this step exists to produce:**
+
+    2b and 2d report the SAME naive throughput -- 175.8 tok/s, to four figures.
+    They have the same batch size, the same 512 decode steps, the same ITL
+    (45.5 vs 45.4 ms), and the same 1.015 GiB of KV.
+
+    Useful throughput: 2b = 31.6 tok/s, 2d = 175.8 tok/s.  A 5.56x gap.
+
+Identical GPU work, identical reported throughput, 5.56x difference in tokens anyone
+receives. In 2b, 3,360 of 4,096 slot-steps computed tokens for sequences that had
+already finished. Seven of eight rows completed at step 32 and then occupied the
+machine for another 480 steps producing output that was discarded.
+
+**This is the entire case for continuous batching, and it is invisible to any
+throughput metric that divides by slots instead of by delivered tokens.** Had this tool
+reported only `naive_tok_s`, static batching would look like a solved problem.
+
+#### What step 3 has to beat
+
+    static batching, ragged [512, 32 x 7]:   18.0% utilisation,  31.6 useful tok/s
+    theoretical ceiling (2d, all useful):   100.0% utilisation, 175.8 useful tok/s
+
+Continuous batching should recover most of that gap by admitting a queued request into
+a slot the step it frees. It cannot reach 175.8 -- there is scheduling overhead and the
+admitted requests must prefill -- but anything below about 100 useful tok/s means the
+scheduler is leaving half the available work on the floor.
