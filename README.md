@@ -109,6 +109,7 @@ cache the entire time, so one thinking user costs several non-thinking ones. Tha
 
 ## Hardware
 
-Single NVIDIA A10G, 22.49 GiB usable (sold as 24 GB), ~600 GB/s memory bandwidth.
+Single NVIDIA A10G. Sold as 24 GB; `nvidia-smi` reports 22.49 GiB; CUDA can actually
+address **22.06 GiB** (the difference is driver/ECC reserve). ~600 GB/s memory bandwidth.
 Every number in this repo is specific to that card, and `tools/roofline.py` will
 recompute them for others.

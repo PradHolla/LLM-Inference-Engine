@@ -1,0 +1,2 @@
+{"batch": 8, "ok": false, "tokens": 32768}
+{"summary": {"gpu": "NVIDIA A10G", "model": "Qwen/Qwen3-8B", "weights": 16381490176, "vram_total": 23686938624, "context": 4096, "ts": 1787345576.2706492, "structure": {"kv_per_token": 147456.0, "predicted": 147456, "cache_class": "DynamicCache", "k_shape": [1, 8, 5, 128], "dtype": "torch.bfloat16", "layers": 36}, "growth": {"slope_cache": 147456.0, "slope_alloc": 147456.0, "steps": 8}, "ceiling": {"max_batch": 0, "max_tokens": 0, "rows": [{"batch": 8, "ok": false, "tokens": 32768}]}}}

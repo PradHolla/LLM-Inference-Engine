@@ -61,14 +61,30 @@ class GPU:
     bf16_tflops: float   # dense, no sparsity
 
 
-# VRAM values are what nvidia-smi ACTUALLY reports on the card, not the marketing
-# number and not AWS's DescribeInstanceTypes (which under-reported the A10G by
-# 140 MiB -- measured 23028, API said 22888). An A10G is sold as "24 GB" and gives
-# you 22.49 GiB; that 1.5 GiB gap comes straight out of your KV cache budget.
+# VRAM values are what CUDA can actually ADDRESS, which is none of the three numbers
+# you are likely to reach for. On the A10G, MEASURED 2026-08-21:
+#
+#   24 GB        marketing, not a real quantity
+#   23028 MiB    nvidia-smi memory.total          (22.488 GiB)
+#   22888 MiB    AWS DescribeInstanceTypes        (wrong, under-reports by 140 MiB)
+#   22589 MiB    torch.cuda.mem_get_info() total  (22.060 GiB)  <-- what you can allocate
+#
+# The 439 MiB between nvidia-smi and CUDA is driver/ECC reserve that torch can never
+# touch. A further 258 MiB goes to the CUDA context at init. Budgeting from the
+# nvidia-smi number overstates KV room by 0.43 GiB, or about 3,000 tokens.
+# vLLM computes --gpu-memory-utilization against mem_get_info too, so this is also the
+# right basis for modelling vLLM.
+#
+# NOT MODELLED HERE, and both are large -- see NOTES/predictions.md 2026-08-21:
+#   activations   ~0.086 GiB per concurrent sequence at chunk 512
+#   fragmentation  0.077 + 0.265 GiB per sequence with the default caching allocator,
+#                  ~1.0 GiB flat with PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# The 0.9 utilisation factor below absorbs these by coincidence, not by design.
+#
 #   MEASURED on i-07d8b10bdcf39a099 (g5.2xlarge), driver 595.91.07, 2026-08-21: a10g
 #   The rest are still spec-sheet values -- verify before trusting them.
 GPUS = {
-    "a10g":  GPU("A10G (g5.*)",   23028 / 1024, 600, 125),
+    "a10g":  GPU("A10G (g5.*)",   22589 / 1024, 600, 125),
     "l4":    GPU("L4 (g6.*)",     22888 / 1024, 300, 121),
     "l40s":  GPU("L40S (g6e.*)",  45776 / 1024, 864, 362),
     "t4":    GPU("T4 (g4dn.*)",   16384 / 1024, 320,  65),
