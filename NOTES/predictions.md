@@ -588,3 +588,76 @@ Open item: roofline treats `compute_eff` as a scalar. It is a curve. Interpolati
 the measured table would replace a fudge factor with a measurement, per CLAUDE.md 5,
 but the curve is specific to A10G + Qwen3-8B and would need re-measuring per stack.
 Deferred, not forgotten.
+
+---
+## 2026-08-21 — Phase 2, step 2: static batching
+
+Batch N requests, run them to completion together, no sequence joining or leaving
+mid-flight. That restriction IS static batching, and exposing what it costs is the
+entire purpose of the step.
+
+Prompts are uniform (412 tokens, same text) so that ragged OUTPUT length is the only
+variable. Ragged prompt lengths add a separate padding waste; deliberately excluded
+here so the two effects do not mix.
+
+All predictions use constants measured today: `mem_eff` 0.674, `compute_eff` 0.36,
+KV 144.0 KiB/token, 476 tokens per sequence (412 prompt + 64 out).
+
+### 2a. Uniform lengths -- the clean batching curve
+
+| B | predicted ITL | predicted tok/s | vs batch 1 |
+|---|---|---|---|
+| 1 | 40.7 ms | 25 | 1.0x |
+| 2 | 40.9 ms | 49 | 2.0x |
+| 4 | 41.2 ms | 97 | 3.9x |
+| 8 | 41.9 ms | 191 | 7.7x |
+| 16 | 43.3 ms | 370 | 15.0x |
+| 24 | 44.7 ms | 537 | 21.7x |
+| 32 | 46.1 ms | 695 | 28.1x |
+
+**The claim being tested: 32x the throughput for 13% more latency per token.** That is
+the whole economic argument for batching, and it works because a decode step reads all
+16.4 GB of weights exactly once no matter how many sequences share it. Only the KV
+reads grow with B, and at 476 tokens KV is 0.065 GiB per sequence against 15.26 GiB of
+weights.
+
+**Decode stays memory-bound at every batch size tested.** Compute overtakes memory only
+at B = 213, which is unreachable -- memory runs out first. If any measured point comes
+back compute-bound, the arithmetic above is wrong somewhere.
+
+### 2b. Predicted ceiling, and why it is NOT the KV ceiling
+
+At 4096 context the binding constraint was KV cache (batch 9). At 476 context it is
+**prefill activations**, which is a different limit with a different fix.
+
+    usable after weights + CUDA ctx + fragmentation:      5.552 GiB
+    per sequence:  KV 0.065 GiB  +  prefill activations 0.080 GiB  =  0.145 GiB
+    ceiling = 5.552 / 0.145 = 38.2  ->  predict OOM between B=32 and B=40
+
+Activations scale with **tokens per forward pass** (B x 476 during prefill), not with
+context length, so they dominate exactly when sequences are short and numerous. KV at
+B=38 is only 2.5 GiB of the 5.5. Chunking the prefill would raise this ceiling
+substantially -- which is what chunked prefill is for, and a Phase 3 vLLM flag.
+
+### 2c. Ragged output lengths -- the number that motivates step 3
+
+Setup: B=8, output lengths `[512, 32, 32, 32, 32, 32, 32, 32]`. Static batching cannot
+release a finished sequence, so all 8 slots stay occupied for all 512 steps.
+
+    useful tokens    = 512 + 7 x 32          =   736
+    slot-steps       = 8 x 512               = 4,096
+    slot utilisation = 736 / 4096            =  18.0%
+    useful throughput at ITL 41.9 ms         =  34.3 tok/s
+    uniform-B=8 throughput for comparison    = 191   tok/s
+
+**Predicted: 82% of the GPU's work is thrown away, and useful throughput collapses to
+below double batch-1.** Seven sequences finish at step 32 and then occupy a slot doing
+arithmetic nobody reads for another 480 steps.
+
+The instrument must report BOTH numbers -- naive `B x steps / time` will still show
+~191 tok/s and look healthy. The gap between naive and useful throughput is the
+finding, not a rounding error. If step 2 reports only the naive number it has measured
+nothing.
+
+Continuous batching in step 3 exists to refill those slots. Expected recovery toward
+the uniform curve is the step 3 prediction, made once this one is measured.
