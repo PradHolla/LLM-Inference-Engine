@@ -1191,3 +1191,99 @@ Both readings beat the throughput target. The honest one to quote is 1.24 req/s 
 
 Step 4 (paged allocator) attacks the padding tax. Phase 3's chunked prefill attacks the
 admission stalls that produce the 4x ITL p95 inflation and the 6.74 req/s ceiling.
+
+---
+## 2026-08-22 — Phase 2, step 4: decompose the padding tax before building the allocator
+
+Step 3a measured a tax of 27.4 microseconds per buffer token, 9.4x what the KV-read
+model predicts, and it is the largest remaining inefficiency. Step 4 is meant to attack
+it with a paged allocator. **Whether that can work depends on which of two causes it is,
+and they point in opposite directions:**
+
+| cause | does paging fix it? |
+|---|---|
+| KV reads over padded regions | **yes** -- blocks are allocated per sequence, nothing padded is stored or read |
+| SDPA's masked path being slower than its causal fast path | **no** -- ragged rows need a mask however the KV is stored |
+
+Ragged sequence lengths always require either an attention mask or a custom kernel that
+consumes a block table directly. If the tax is the mask, then PagedAttention's speed
+benefit is inseparable from the CUDA kernel vLLM wrote for it, and a block allocator on
+stock HF buys memory without buying throughput. That would be a negative result worth
+having, and it would reframe step 4 rather than cancel it.
+
+### The experiment
+
+Hold the buffer length, batch size and cache contents FIXED and vary only the mask.
+Everything else identical -- same 8 rows, same prefill, same buffer:
+
+    A  attention_mask=None                        implicit causal, SDPA fast path
+    B  attention_mask=ones(B, L)                   explicit mask that masks nothing
+    C  attention_mask with real zeros (left-pad)   explicit mask that masks
+
+### Predictions
+
+| condition | predicted ITL | reasoning |
+|---|---|---|
+| A no mask | **~45 ms** | matches step 2's static_batch at this shape |
+| B all-ones mask | **~45 ms** | the step 3a isolation run measured 44.7 vs static's 44.6 |
+| C mask with zeros | **~61 ms** | the step 3a full run, where padding was present |
+
+**If C is much slower than B, the tax is the masked kernel path and paging cannot
+recover it on this stack.** If B and C are both slow and A is fast, the isolation run
+was measuring something else and my step 3a conclusion needs revisiting. If all three
+are equal, the tax is neither and I have been wrong about the mechanism twice.
+
+### ACTUALS -- 2026-08-22, mask decomposition
+
+| condition | predicted | measured p50 | vs A |
+|---|---|---|---|
+| A no mask (implicit causal) | ~45 ms | **43.89 ms** | 1.00x |
+| B explicit mask, all ones | ~45 ms | **43.94 ms** | 1.00x |
+| C explicit mask, real zeros | ~61 ms | **54.60 ms** | **1.24x** |
+
+All three predictions correct in direction and ordering. C came in below the 61 ms
+guess because only 4 of 8 rows were padded here, against nearly all of them in step 3a.
+
+**An explicit attention mask that masks nothing is free -- 43.94 against 43.89 ms. A mask
+containing real zeros costs 10.7 ms at this shape.** The tax is SDPA's masked kernel
+path, not KV reads over padded regions.
+
+### This determines what step 4 can be, and the answer is uncomfortable
+
+A paged allocator **cannot recover this tax on stock HF**, for two independent reasons:
+
+1. **Ragged rows need a mask however the KV is stored.** Paging changes where KV lives,
+   not the fact that eight rows of different lengths must be attended in one rectangular
+   call. The mask, and its cost, survive the change.
+2. **A gather-based paged design would not even save peak memory.** To feed SDPA you must
+   materialise a dense `[B, heads, max_len, dim]` tensor from the block table every step.
+   The pool would be smaller, but that transient is exactly the size of today's shared
+   buffer, so peak allocation is unchanged while a full-working-set copy is added.
+
+The fix that does work is **varlen attention** -- FlashAttention's `cu_seqlens` interface
+packs ragged sequences with no padding and no mask, which is what vLLM pairs with its
+PagedAttention kernel. Checked on the box: `flash_attn` and `xformers` are both absent,
+and torch 2.13+cu132 is new enough that a matching prebuilt wheel is unlikely, leaving a
+30-60 minute source build at $1.21/hr with real failure risk.
+
+**Conclusion: PagedAttention's speed benefit is inseparable from the CUDA kernel written
+to consume block tables directly.** The allocator is not the clever part; the kernel is.
+That is a genuinely useful thing to have learned by measurement rather than by reading it
+in the vLLM paper, and it is the correct answer to "why not just write your own engine".
+
+### Phase 2 closing position
+
+`PROJECT.md` said Phase 2 exists so that "the 60% gap becomes your syllabus -- every
+later technique answers a question you generated." Three questions were generated, each
+with a measured number attached:
+
+| question | measured | what answers it |
+|---|---|---|
+| Why is a masked decode step 1.24x a causal one? | +10.7 ms at 412 buffer | varlen attention (Phase 3, vLLM) |
+| Why does every admission stall the whole batch? | ITL p95 201-213 ms vs 50 idle | chunked prefill (Phase 3) |
+| Why does capacity cap at 1.6 of a possible 6.74 req/s? | prefill is 15.9% of wall and rising with B | prefix caching + chunked prefill (Phase 3) |
+
+Recommendation recorded: **do not build a paged allocator whose benefit has been measured
+at zero on this stack.** Carry these three questions into Phase 3 and attribute vLLM's
+advantage to them quantitatively. Building it anyway would be defensible as an exercise,
+but it would be an exercise, not an optimisation, and the notes should say so either way.
