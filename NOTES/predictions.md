@@ -784,3 +784,105 @@ Continuous batching should recover most of that gap by admitting a queued reques
 a slot the step it frees. It cannot reach 175.8 -- there is scheduling overhead and the
 admitted requests must prefill -- but anything below about 100 useful tok/s means the
 scheduler is leaving half the available work on the floor.
+
+---
+## 2026-08-21 — Phase 2, step 3: continuous batching
+
+### First, a design question that had to be settled before any code
+
+Continuous batching needs rows at DIFFERENT sequence lengths in one batch. HF's cache
+API assumes a single shared `cache_position` for the whole batch. That mismatch is the
+reason vLLM wrote its own attention kernels, and it is the actual obstacle in this step.
+
+Proposed way through without custom kernels: **left-pad every row into a common buffer
+and decouple buffer index from RoPE position.** A row's K and V are rotated by RoPE at
+write time, so where it physically sits in the buffer is irrelevant to correctness --
+only the attention mask and `position_ids` matter. If that holds, admission and eviction
+become plain `index_select` and `cat` on the batch dimension.
+
+`engine/cache_probe.py` tests it against batch-1 references, since the only acceptable
+evidence is token-for-token identity:
+
+| test | prediction | confidence |
+|---|---|---|
+| Ragged left-padded batch == unpadded batch-1 | IDENTICAL | high -- standard HF left-padding |
+| Row survives eviction of another row mid-decode | IDENTICAL | medium-high -- depends on mutating `cache.layers[i].keys` in place |
+| Row admitted at step 6 decodes correctly | IDENTICAL | medium -- its zero-padded KV region must be fully nullified by the mask |
+
+If test 3 fails the engine needs a real paged cache before it can work at all, which
+moves step 4 ahead of step 3.
+
+### The capacity model, and the thing it predicts that I did not expect
+
+Every admission requires an exclusive prefill (148.4 ms measured) that stalls the whole
+batch, because a newly admitted request has no KV yet. Decode steps are shared across B.
+Steady state solves `R*prefill + (out_tokens*R/B)*t_step = 1`:
+
+| B | t_step | prefill share of time | capacity req/s | vs Phase 1 (0.332) |
+|---|---|---|---|---|
+| 1 | 40.5 ms | 5.4% | 0.36 | 1.1x |
+| 4 | 41.9 ms | 18.1% | 1.22 | 3.7x |
+| 8 | 43.8 ms | 29.8% | **2.00** | **6.0x** |
+| 16 | 49.0 ms | 43.1% | 2.90 | 8.7x |
+| 32 | 61.0 ms | 54.9% | 3.70 | 11.1x |
+| 48 | 68.7 ms | 61.8% | 4.17 | 12.6x |
+
+**Prefill, not decode, is what caps this server.** As B grows the decode cost per
+request falls but the 148 ms prefill does not, so it goes from 5% of the time budget at
+B=1 to 62% at B=48. The hard ceiling with infinite batch is `1/0.1484 = 6.74 req/s`.
+
+That is the headline prediction of step 3 and it was not obvious beforehand: building a
+better scheduler moves the bottleneck off decode and onto prefill. It is also exactly
+what chunked prefill and prefix caching attack in Phase 3, so Phase 2 ends by generating
+the question Phase 3 answers.
+
+### Targets
+
+    Phase 1 baseline (serialized):              0.332 req/s
+    step 2 static, ragged workload:             31.6 useful tok/s, 18.0% utilisation
+    step 3 predicted at B=8:                    2.00 req/s, 6.0x
+    step 3 predicted at B=32:                   3.70 req/s, 11.1x
+    prefill-only ceiling:                       6.74 req/s
+
+Secondary prediction: ITL p99 will be MUCH worse than step 1's metronomic 41.0 ms,
+because every admission stalls the batch for a full 148 ms prefill. Expect ITL p50 near
+the step-2 value for the batch size, and p99 at roughly p50 + 148 ms. **The scheduler
+buys throughput and pays for it in tail latency** -- if p99 does not degrade, the engine
+is not actually admitting anything mid-flight and the measurement is wrong.
+
+### Cache probe result -- 2026-08-21, all three mechanics VERIFIED
+
+| test | result |
+|---|---|
+| Ragged left-padded batch vs unpadded batch-1 | **IDENTICAL** (both rows, 16 tokens) |
+| Row survives eviction of another row at step 6 | **IDENTICAL** |
+| Row admitted at step 6, decoding mid-flight | **IDENTICAL** (11 tokens) |
+| Existing row unaffected by that admission | **IDENTICAL** |
+
+Left-padding with decoupled RoPE positions works, so continuous batching is buildable on
+stock HF without custom attention kernels. The paged allocator (step 4) is therefore a
+memory-efficiency improvement, not a prerequisite -- which is the correct ordering and
+matches PROJECT.md's plan.
+
+### Step 3a workload prediction: 64 requests, max_batch 8, lengths cycling the 2c spread
+
+    useful tokens = 8 x [256,128,64,64,32,32,16,16] = 4,864
+
+| | steps | utilisation | wall | useful tok/s |
+|---|---|---|---|---|
+| static (arithmetic, groups of 8) | 2,048 | 29.7% | 97.5 s | **49.9** |
+| continuous, batched admissions | 608 | ~90-100% | 34.3 s | **141.8** |
+| continuous, admissions one at a time | 608 | ~90-100% | 36.1 s | 134.6 |
+| decode-only ceiling (no prefill cost) | 608 | 100% | 26.6 s | 182.6 |
+
+**Predicted speedup over static on the identical workload: 2.8x.** Continuous batching
+needs 608 decode steps where static needs 2,048 for the same delivered tokens -- static
+spends the other 1,440 computing for sequences that already finished.
+
+**Predicted prefill share of wall time: 22%.** That is the cost of the fix. The engine
+reaches only 78% of the decode-only ceiling because every admission stalls the batch,
+and this is the measurement that sets up Phase 3's chunked prefill.
+
+Batched admission is predicted to be worth 5% overall (141.8 vs 134.6 tok/s) -- real but
+much smaller than the 18% saving on prefill alone, because prefill is only ~22% of wall
+time. Worth doing, not worth contorting the scheduler for.
