@@ -1072,3 +1072,122 @@ established, is:
 
 Compaction ships. The buffer is bounded at 764 rather than growing without limit, which
 is what makes a server measurable at all.
+
+## 2026-08-21 — Phase 2, step 3b: the engine behind the OpenAI streaming API
+
+Measured with `tools/bench.py` unchanged, open-loop Poisson arrivals, 512-target prompt
+(412 actual) and 64 max output tokens -- byte-identical workload to Phase 1, which is
+the whole reason bench.py's wire format is a hard invariant.
+
+### Predicted capacity
+
+Steady state solves `R*prefill + (out_tokens*R/B)*ITL = 1` with prefill 148.4 ms
+measured. ITL is estimated per batch size from the memory model plus the padding tax
+measured in step 3a (27.4 us per buffer token at 8 rows). Compaction should hold the
+buffer near 412 + 64 + 128 = 604, shorter than step 3a's 764, so ITL should sit below
+step 3a's 59.1 ms.
+
+| max_batch | ITL estimate | predicted capacity | vs Phase 1 (0.332) |
+|---|---|---|---|
+| 4 | 48.9 ms | 1.07 req/s | 3.2x |
+| 8 | 57.3 ms | **1.65 req/s** | **5.0x** |
+| 16 | 74.2 ms | 2.25 req/s | 6.8x |
+| 32 | 107.8 ms | 2.75 req/s | 8.3x |
+
+Hard ceiling from prefill alone, at infinite batch: **6.74 req/s**.
+
+**Headline prediction: 1.65 req/s at max_batch 8, a 5.0x improvement on Phase 1.**
+
+### Confidence, honestly
+
+The `B=8` row is the one I trust -- it interpolates rather than extrapolates from the
+step 3a measurement. **The 16 and 32 rows assume the padding tax scales linearly in
+active rows, which rests on a single data point.** If the tax is really a function of
+buffer length alone rather than rows x buffer, B=32 would come in far better than 107.8
+ms and capacity would be well above 2.75. If it scales worse than linearly, batching
+past 8 could stop paying entirely. Either outcome is informative; I would rather be
+wrong here explicitly than quietly interpolate.
+
+### Secondary predictions
+
+- **The knee sits just below capacity.** Sweeping rates 0.5 / 1.0 / 1.5 / 2.0 at
+  max_batch 8, p95 TTFT should stay flat through 1.5 and depart sharply at 2.0.
+- **ITL should be roughly flat across offered load**, unlike TTFT. Phase 1's ITL was
+  also flat, but for the opposite reason -- it was serialized and never batched. Here it
+  is flat because the batch absorbs load until it saturates. Same shape, different cause,
+  which is worth stating because the Phase 1 chart looks identical.
+- **TTFT will be worse than Phase 1 at low load.** Phase 1 served one request instantly
+  at 195 ms when idle. This server makes a request wait for the next admission and then
+  a shared prefill. Expect idle TTFT near 400-600 ms. **Throughput was bought with
+  latency**, and at low load the baseline genuinely wins.
+- **Client disconnects must not leak slots.** If capacity degrades across successive
+  bench runs on the same server process, the cancellation path is broken.
+
+### ACTUALS -- 2026-08-21, step 3b server measured with unchanged bench.py
+
+`tools/bench.py` ran against the new engine with **no modifications**, which is the
+wire-compatibility invariant paying off across a complete engine rewrite.
+
+#### Single stream (closed loop, 5 requests)
+
+| | Phase 1 baseline | engine server | |
+|---|---|---|---|
+| client TTFT p50 | 343.2 ms | **298 ms** | 13% better |
+| ITL p50 | 44.5 ms | **41.1 ms** | matches step 1's bare loop (40.5) |
+| decode | 22.5 tok/s | **24.3 tok/s** | |
+
+**Prediction S-b1 WRONG.** I predicted idle TTFT of 400-600 ms, worse than Phase 1,
+reasoning that a request must wait for an admission cycle the baseline does not have.
+True in isolation -- but I counted only what the engine ADDS and forgot what it REMOVES:
+the global lock, the `TextIteratorStreamer` handoff, the asyncio queue, the SSE encode.
+Those cost more than admission does. Net 45 ms better, not 100-250 ms worse.
+
+This also kills a tidier story I was ready to tell. "Throughput was bought with latency"
+is false at single stream, where the engine wins on both axes. The trade only appears
+under load, where ITL climbs 41 -> 58 ms.
+
+#### Capacity sweep (open loop, Poisson, 60 s per point)
+
+| offered | achieved | TTFT p50 | TTFT p95 | ITL p50 | ITL p95 |
+|---|---|---|---|---|---|
+| 0.5 | 0.45 | 315 ms | 336 ms | 45 ms | 50 ms |
+| 1.0 | 0.90 | 335 ms | 1,454 ms | 52 ms | 201 ms |
+| 1.5 | 1.24 | 336 ms | 1,593 ms | 55 ms | 205 ms |
+| 2.0 | **1.59** | 12,446 ms | 23,350 ms | 58 ms | 213 ms |
+| 2.5 | **1.62** | 14,136 ms | 31,399 ms | 58 ms | 213 ms |
+
+**Capacity 1.6 req/s against 1.65 predicted -- within 3%.** Throughput saturates at
+1.59-1.62 and TTFT explodes, which is the definition of the knee.
+
+#### Against Phase 1, like for like
+
+| | Phase 1 | engine | |
+|---|---|---|---|
+| capacity | 0.332 req/s | **1.6 req/s** | **4.8x** |
+| TTFT p95 at 0.5 req/s | 25,122 ms | **336 ms** | **75x better** |
+| ITL p50 at capacity | 44.5 ms | 58 ms | 30% worse |
+
+The 75x TTFT figure is the one that matters and it is not a throughput number at all.
+At 0.5 req/s Phase 1 was already 50% past its own capacity and queueing catastrophically;
+the engine is at a third of capacity and barely notices. **Capacity improved 4.8x, and
+the latency AT a fixed useful load improved by nearly two orders of magnitude.**
+
+#### Phase 2 target: met
+
+The target set on 2026-08-21 was "beat 0.33 req/s without ITL exceeding ~55 ms."
+
+    1.24 req/s sustained at ITL p50 55 ms   -- 3.7x, exactly at the ITL budget
+    1.60 req/s at ITL p50 58 ms             -- 4.8x, marginally over budget
+
+Both readings beat the throughput target. The honest one to quote is 1.24 req/s at
+55 ms, since that is the point that satisfies the constraint as written.
+
+#### What remains, with numbers attached
+
+    prefill-only ceiling                       6.74 req/s
+    measured capacity                          1.60 req/s   (24% of it)
+    padding tax to be reclaimed by paging      27.4 us per buffer token, ~36%
+    ITL p95 201-213 ms under load vs 50 idle   admission stalls, chunked prefill's target
+
+Step 4 (paged allocator) attacks the padding tax. Phase 3's chunked prefill attacks the
+admission stalls that produce the 4x ITL p95 inflation and the 6.74 req/s ceiling.

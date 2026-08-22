@@ -124,6 +124,7 @@ class Engine:
     def __init__(self, model, fwd_kw: str | None, max_batch: int, device,
                  eos_ids: set[int], ignore_eos: bool = True,
                  on_complete: Callable[[Request], None] | None = None,
+                 on_token: Callable[[Request, int], None] | None = None,
                  compact_threshold: int = 128):
         self.model = model
         self.fwd_kw = fwd_kw
@@ -132,6 +133,11 @@ class Engine:
         self.eos_ids = eos_ids
         self.ignore_eos = ignore_eos
         self.on_complete = on_complete
+        # Fires once per token produced for a row -- the admission-forward's free
+        # token AND every decode-loop token (see _admit/_decode below). Added for
+        # Phase 2 step 3b (engine/server.py) so a live server can stream tokens out
+        # as they're produced instead of only learning about a row at on_complete.
+        self.on_token = on_token
         # Trim the buffer once this many dead left-pad positions accumulate. Low enough
         # to keep the buffer tight, high enough that the ~2.4 ms copy amortises.
         self.compact_threshold = compact_threshold
@@ -286,7 +292,10 @@ class Engine:
         for i, r in enumerate(newcomers):
             r.admitted_step = self.step_n
             r.first_token_s = ttft
-            r.tokens.append(int(first_tok_list[i]))
+            tok_id = int(first_tok_list[i])
+            r.tokens.append(tok_id)
+            if self.on_token is not None:
+                self.on_token(r, tok_id)
 
         if self.cache is None:
             # First-ever admission: the buffer doesn't exist yet, nothing to pad against.
@@ -350,8 +359,11 @@ class Engine:
 
         next_tok_list = self.nxt.tolist()
         for i, r in enumerate(self.rows):
-            r.tokens.append(int(next_tok_list[i]))
+            tok_id = int(next_tok_list[i])
+            r.tokens.append(tok_id)
             r.itls.append(step_dur)
+            if self.on_token is not None:
+                self.on_token(r, tok_id)
             if r.finish_step is None and self._finished(r):
                 r.finish_step = self.step_n
                 self.wall_end = t1
