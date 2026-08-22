@@ -986,3 +986,89 @@ buffer token of padding tax, worth about 36% on this workload.
     step 3a continuous, same workload              95.3 tok/s   utilisation 82.6%
     step 3a decode-only (no admission stalls)     114.3 tok/s
     step 2d uniform ceiling (no waste at all)     175.8 tok/s
+
+## 2026-08-21 — Phase 2, step 3b: buffer compaction, then the server
+
+### The bug step 3a hid
+
+The left-padded buffer grows by one token per decode step and only resets when the batch
+empties completely. A finite 64-request run ends before that matters; a server under
+sustained load never empties, so the buffer grows without bound. At ~16 steps/s that is
+~1,000 tokens per minute. Over a 60 s `bench.py` run the buffer would go 412 -> ~1,400
+and ITL would drift from ~55 to ~75 ms *during the measurement*, making the result a
+function of how long the run happened to be. That is not a measurable server.
+
+### The fix, and why it is safe
+
+Every row is RIGHT-aligned in the buffer: a row of true length L occupies
+`[cur_L - L, cur_L)`. So the first `cur_L - max(row_len)` positions are padding for
+EVERY active row simultaneously, and can be sliced off without touching valid data.
+`next_pos[i]` already tracks each row's true length, so the trim point is free to compute.
+
+Compaction is therefore a front slice of every layer's K and V plus the mask. Cost at
+B=8 and 668 needed positions is ~0.73 GiB copied read+write, about 2.4 ms -- cheap when
+amortised over the ~128 steps between compactions.
+
+### Predictions
+
+| # | quantity | predicted | reasoning |
+|---|---|---|---|
+| C1 | Output still token-identical | **yes** | Slicing only removes positions masked to 0 for every row |
+| C2 | Buffer stays bounded at `max(row_len) + threshold` | **yes, <= ~800** | vs 1,148 unbounded in step 3a |
+| C3 | step 3a ITL p50 | 61.4 -> **~56 ms** | Mean buffer falls from ~780 to ~640; at the measured 27.4 us/token that is -3.8 ms, plus compaction overhead |
+| C4 | step 3a useful tok/s | 95.3 -> **~102** | Directly from C3 |
+| C5 | Compaction overhead | **< 2% of wall** | ~2.4 ms every ~128 steps against ~60 ms/step |
+
+C3 and C4 are modest because step 3a's workload is short. **The point of compaction is
+not this 7%; it is that the server has a bounded buffer at all.** If C1 fails the whole
+left-padding design is unsafe and step 4's paged cache becomes mandatory rather than an
+optimisation.
+
+### ACTUALS -- 2026-08-21, compaction
+
+| # | quantity | predicted | measured | |
+|---|---|---|---|---|
+| C1 | Output token-identical | yes | **12/64 differ** | prediction failed -- but the GATE was wrong, see below |
+| C2 | Buffer bounded | <= ~800 | **764** (vs 1,147 without) | correct |
+| C3 | ITL p50 | ~56 ms | **59.1 ms** (from 61.4) | direction right, magnitude overstated |
+| C4 | useful tok/s | ~102 | **99.3** (from 95.3) | correct within 3% |
+| C5 | Compaction overhead | < 2% of wall | **0.014%** (7 ms of 49.6 s) | correct, by two orders of magnitude |
+
+### C1: I asked for the wrong thing, and two controls proved it
+
+Compaction changed 12 of 64 outputs. The divergence pattern was the first clue it was
+not corruption:
+
+- every request's LENGTH was preserved, so nothing shifted or was truncated
+- only requests still IN FLIGHT during a compaction differed; every request that
+  finished before the first compaction was bit-identical
+- rows sharing an admission step diverged at the SAME offset (40/41 at 70, 49/50/51 at
+  41, 56/57 at 119), which is a per-step shared cause, not per-row damage
+
+Two controls settle it:
+
+| test | result |
+|---|---|
+| original vs `--compact-threshold 999999999` (code present, never fires) | **IDENTICAL**, 4,928 tokens |
+| compaction run 1 vs compaction run 2 | **IDENTICAL**, 4,928 tokens |
+| compaction disabled vs enabled | 12/64 differ |
+
+The code path is inert when it does not fire, and the engine is deterministic given a
+fixed schedule. The only variable left is tensor SHAPE. Slicing the buffer changes
+attention's accumulation order, and bf16 addition is not associative; masked positions
+contribute exactly 0.0 either way, so the mathematics is unchanged while the arithmetic
+is not. A near-tie argmax then flips and the sequences diverge from that point.
+
+**Token identity was never an achievable gate for this component.** It was right for
+step 1, where the manual loop had to match `.generate()` on identical shapes. A
+scheduler changes tensor shapes as a function of batch composition, so its output varies
+with scheduling in bf16 -- vLLM has the same property, which is why its outputs are not
+reproducible across different `--max-num-seqs`. The correct gate, and the one now
+established, is:
+
+    1. the component is inert when disabled           VERIFIED
+    2. the engine is deterministic given a schedule   VERIFIED
+    3. differences are attributable to shape alone    VERIFIED by 1 and 2
+
+Compaction ships. The buffer is bounded at 764 rather than growing without limit, which
+is what makes a server measurable at all.

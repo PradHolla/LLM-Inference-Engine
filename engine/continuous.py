@@ -123,7 +123,8 @@ class Engine:
 
     def __init__(self, model, fwd_kw: str | None, max_batch: int, device,
                  eos_ids: set[int], ignore_eos: bool = True,
-                 on_complete: Callable[[Request], None] | None = None):
+                 on_complete: Callable[[Request], None] | None = None,
+                 compact_threshold: int = 128):
         self.model = model
         self.fwd_kw = fwd_kw
         self.max_batch = max_batch
@@ -131,6 +132,9 @@ class Engine:
         self.eos_ids = eos_ids
         self.ignore_eos = ignore_eos
         self.on_complete = on_complete
+        # Trim the buffer once this many dead left-pad positions accumulate. Low enough
+        # to keep the buffer tight, high enough that the ~2.4 ms copy amortises.
+        self.compact_threshold = compact_threshold
 
         self.pending: list[Request] = []       # FIFO: pop from front (index 0)
         self.rows: list[Request] = []          # parallel to cache/mask/nxt/next_pos dim 0
@@ -144,6 +148,9 @@ class Engine:
         self.prefill_s: list[float] = []       # one entry per ADMISSION event
         self.decode_s: list[float] = []        # one entry per DECODE step
         self.active_counts: list[int] = []     # len(rows) at each decode step -- slot_steps_used
+        self.compact_s: list[float] = []       # one entry per compaction event
+        self.trimmed = 0                       # total buffer positions reclaimed
+        self.max_buffer = 0                    # high-water buffer length, bounded or not
 
         self.wall_start: float | None = None   # perf_counter at first admission's forward start
         self.wall_end: float | None = None     # perf_counter at last request's finishing decode
@@ -195,6 +202,38 @@ class Engine:
             self.nxt = None
             self.next_pos = None
             self.rows = []
+
+    def _compact(self) -> None:
+        """Trim dead left-padding off the FRONT of the buffer.
+
+        Every row is right-aligned: a row of true length L occupies [cur_L - L, cur_L).
+        So the first cur_L - max(true_len) positions are padding for EVERY active row at
+        once, and slicing them off cannot touch valid data. next_pos already holds each
+        row's true length, so the trim point costs nothing to find.
+
+        Without this the buffer grows by one per decode step and only resets when the
+        batch empties -- which under sustained load never happens. A server would drift
+        its own ITL upward for as long as it stayed busy, making every measurement a
+        function of run length.
+        """
+        if self.cache is None or not self.rows:
+            return
+        cur_L = get_kv(self.cache, 0)[0].shape[2]
+        self.max_buffer = max(self.max_buffer, cur_L)
+        needed = int(self.next_pos.max().item())
+        waste = cur_L - needed
+        if waste < self.compact_threshold:
+            return
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for li in range(n_layers(self.cache)):
+            k, v = get_kv(self.cache, li)
+            set_kv(self.cache, li, k[:, :, waste:, :].contiguous(),
+                   v[:, :, waste:, :].contiguous())
+        self.mask = self.mask[:, waste:].contiguous()
+        torch.cuda.synchronize()
+        self.compact_s.append(time.perf_counter() - t0)
+        self.trimmed += waste
 
     # ---- phase 2: admit -------------------------------------------------------------
     # KNOWN LIMITATION, deliberately measured rather than fixed here:
@@ -326,6 +365,7 @@ class Engine:
         # because a fake torch has no autograd to leak.
         self.step_n += 1
         self._evict()
+        self._compact()
         self._admit()
         self._decode()
 
@@ -364,6 +404,10 @@ def compute_metrics(engine: Engine, completed: list[Request]) -> dict:
         "useful_tok_s_wall": useful_tok_s_wall,
         "useful_tok_s_decode": useful_tok_s_decode,
         "prefill_share": prefill_share,
+        "compact_time": sum(engine.compact_s),
+        "compactions": len(engine.compact_s),
+        "buffer_positions_trimmed": engine.trimmed,
+        "max_buffer_len": engine.max_buffer,
     }
 
 
@@ -463,6 +507,9 @@ def main() -> int:
                         "(default). Identical prompts plus greedy means eos would fire "
                         "on every row at the same offset -- see engine/static_batch.py")
     p.add_argument("--respect-eos", dest="ignore_eos", action="store_false")
+    p.add_argument("--compact-threshold", type=int, default=128,
+                   help="trim the buffer once this many dead left-pad positions "
+                        "accumulate; a huge value disables compaction entirely")
     p.add_argument("--out", default="results/phase2-step3a.jsonl")
     p.add_argument("--warmup", dest="warmup", action="store_true", default=True)
     p.add_argument("--no-warmup", dest="warmup", action="store_false")
@@ -524,8 +571,10 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with out_path.open("a") as out:
-        engine = Engine(model, fwd_kw, args.max_batch, device, eos_ids, args.ignore_eos,
-                         on_complete=lambda r: write_jsonl(out, to_record(r)))
+        engine = Engine(model, fwd_kw, args.max_batch, device, eos_ids,
+                    args.ignore_eos,
+                         on_complete=lambda r: write_jsonl(out, to_record(r)),
+                        compact_threshold=args.compact_threshold)
         for r in requests:
             engine.submit(r)
 
@@ -556,6 +605,11 @@ def main() -> int:
           f"ignores prefill stalls")
     print(f"  prefill_share       {m['prefill_share']*100:>9.1f}%   of wall time spent "
           f"stalled on admission prefills")
+    print(f"  compactions         {m['compactions']:>10}   trimmed "
+          f"{m['buffer_positions_trimmed']:,} dead buffer positions in "
+          f"{m['compact_time']*1000:.0f} ms")
+    print(f"  max_buffer_len      {m['max_buffer_len']:>10}   high-water. Unbounded "
+          f"without compaction -- a busy server never empties its batch.")
 
     print(f"\n  TTFT   p50 {_f(pct(ttft_ms,50),8)} ms   p95 {_f(pct(ttft_ms,95),8)} ms   "
           f"p99 {_f(pct(ttft_ms,99),8)} ms")
