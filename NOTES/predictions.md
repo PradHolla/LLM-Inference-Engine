@@ -886,3 +886,103 @@ and this is the measurement that sets up Phase 3's chunked prefill.
 Batched admission is predicted to be worth 5% overall (141.8 vs 134.6 tok/s) -- real but
 much smaller than the 18% saving on prefill alone, because prefill is only ~22% of wall
 time. Worth doing, not worth contorting the scheduler for.
+
+### Isolation experiment, written before running
+
+Step 3a measured ITL p50 61.4 ms at max_batch 8. Step 2 measured 43.8 ms at B=8, and
+the memory model predicts ~45 ms even after accounting for the grown buffer and the 6.61
+average active rows. A 37% gap needs a cause, not a shrug.
+
+**Hypothesis: passing an explicit `attention_mask` costs a large constant.**
+`static_batch.py` passes NO attention mask -- prompts are uniform and unpadded, so SDPA
+takes its `is_causal=True` fast path with no mask tensor at all. `continuous.py` MUST
+pass an explicit 2-D mask, because left-padded rows have regions that must not be
+attended to. That forces SDPA onto the masked path.
+
+If true, this is a real and previously uncounted cost of the left-padding design, and
+another thing a paged cache removes.
+
+Clean A/B, identical in every other respect -- same batch, same 256 steps, same context
+growth 412 -> 668, no mid-run admissions and no eviction until the end:
+
+    static_batch.py  --batches 8 --max-new-tokens 256      (no mask, no position_ids)
+    continuous.py    --max-batch 8 --n-requests 8 --lengths 256   (explicit mask + position_ids)
+
+**Prediction: continuous lands ~25% higher, near 55 ms against static's ~45 ms.** If the
+two come out equal, the mask is free and the 37% is somewhere else entirely -- most
+likely the per-step Python and tensor bookkeeping in the scheduler, which would be a
+much less interesting answer but needs ruling out either way.
+
+### ACTUALS -- 2026-08-21, step 3a continuous batching
+
+| quantity | predicted | measured | |
+|---|---|---|---|
+| decode steps | 608 | **736** | +21% |
+| slot_steps_used | 4,864 | **4,864** | exact -- fixed by the workload |
+| decode utilisation | 90-100% | **82.6%** | tail drain |
+| static equivalent utilisation | 29.7% | **30.1%** | |
+| **utilisation ratio vs static** | **2.8x** | **2.75x** | correct |
+| prefill share of wall | 22% | **15.9%** | better than predicted |
+| useful tok/s (wall) | 141.8 | **95.3** | -33% |
+| ITL p50 | ~44 ms | **61.4 ms** | +40% |
+| ITL p99 degrades vs step 1's 41.0 ms | yes, ~p50+148 | **69.6 ms** run / 186.4 ms smoke | correct |
+
+Continuous batching does what it claims: 736 decode steps against static's 2,048 for the
+identical delivered tokens, and 82.6% slot utilisation against 30.1%. The 17.4% shortfall
+from full is the **tail drain** of a finite workload -- the last group empties with
+nothing left to refill it. A continuously arriving stream does not pay that.
+
+### Why throughput missed by 33%: left-padding is expensive, and only when it pads
+
+ITL came in at 61.4 ms where step 2 measured 43.8 ms at the same batch size. Two
+experiments were needed to find the cause, and the first one was wrong.
+
+**Failed isolation.** Hypothesis: passing an explicit `attention_mask` forces SDPA off
+its `is_causal=True` fast path. Predicted +25%. Ran continuous with 8 requests admitted
+together, 256 tokens each, against static at the same shape:
+
+    static_batch, no mask            ITL p50  44.6 ms
+    continuous, explicit mask        ITL p50  44.7 ms
+
+Zero cost. Hypothesis apparently dead. **But the control was broken:** admitting all 8
+at once means every row starts at the same length, so the mask is ALL ONES. It masks
+nothing. The experiment removed the padding along with the thing it meant to test.
+
+**The time series settles it.** Per-step ITL against buffer length, at constant 8 active
+rows:
+
+| steps | buffer | active rows | ITL p50 |
+|---|---|---|---|
+| 0-100 | ~462 | 8.0 | 54.9 ms |
+| 100-200 | ~562 | 8.0 | 57.9 ms |
+| 200-300 | ~662 | 8.0 | 60.9 ms |
+| 300-400 | ~762 | 8.0 | 63.3 ms |
+| 400-500 | ~862 | 8.0 | 66.2 ms |
+| 500-600 | ~962 | 6.7 | 68.6 ms |
+| 600-800 | ~1112 | 1.5 | 48.4 ms (drain) |
+
+ITL rises 13.7 ms across 500 tokens of buffer growth: **27.4 microseconds per buffer
+token, against 2.9 predicted by the KV-read model. 9.4x.**
+
+**Conclusion: an attention mask costs nothing when it is trivially full, and a great deal
+when it actually masks.** A full mask is presumably recognised and dispatched to the fast
+kernel; a mask with real zeros forces the explicit path, whose cost scales with buffer
+length. Since left-padding is what puts zeros in the mask, the penalty is proportional to
+how much padding the design carries -- which grows monotonically as the buffer does.
+
+This is a cost of the left-padded design, not of continuous batching. Paged attention
+removes padding entirely, so step 4 should recover most of it: at the model's ~45 ms ITL
+this workload would deliver roughly 130 tok/s rather than 95.3, close to the original
+141.8 prediction.
+
+**Step 4 now has a measured target rather than a principle:** eliminate 27.4 us per
+buffer token of padding tax, worth about 36% on this workload.
+
+### Scoreboard, Phase 2 so far
+
+    Phase 1 serialized server                     0.332 req/s   ITL p50 44.5, p99 173.8 ms
+    step 1 manual loop, batch 1                    24.7 tok/s   ITL p50 40.5, p99  41.0 ms
+    step 2 static, ragged workload                 53.3 tok/s   utilisation 29.7%
+    step 3a continuous, same workload              95.3 tok/s   utilisation 82.6%
+    step 3a decode-only (no admission stalls)     114.3 tok/s
+    step 2d uniform ceiling (no waste at all)     175.8 tok/s
