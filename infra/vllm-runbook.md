@@ -124,6 +124,46 @@ credit a flag for what was really a startup accident.
 
 ---
 
+## 3b. Swapping servers: why the ladder is legitimate
+
+All three engines speak OpenAI-streaming on port 8000, so comparing them is a matter of
+stopping one systemd unit and starting another. `tools/bench.py` contains no
+server-specific code at all -- it knows a URL and POSTs to `/v1/chat/completions`.
+
+```bash
+# Phase 1 baseline -- HF .generate() behind a global lock
+sudo systemd-run --unit=llm-baseline --collect --working-directory=/opt/llm \
+  --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
+  /opt/llm/.venv/bin/python -m uvicorn baseline.server:app --host 0.0.0.0 --port 8000
+
+# Phase 2 our engine -- continuous batching
+sudo systemd-run --unit=llm-engine --collect --working-directory=/opt/llm \
+  --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
+  /opt/llm/.venv/bin/python -m engine.server --max-batch 8 --host 0.0.0.0 --port 8000
+
+# Phase 3 vLLM -- see section 2 for why PATH and --max-model-len are required
+sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
+  --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
+  --setenv=PATH=/opt/llm/.venv-vllm/bin:/usr/local/bin:/usr/bin:/bin \
+  /opt/llm/.venv-vllm/bin/python -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen3-8B --max-model-len 4096 --host 0.0.0.0 --port 8000
+```
+
+| | venv | entrypoint | `--model` validated |
+|---|---|---|---|
+| baseline | `.venv` | `uvicorn baseline.server:app` | no, ignored |
+| our engine | `.venv` | `python -m engine.server` | no, ignored |
+| vLLM | **`.venv-vllm`** | `python -m vllm.entrypoints.openai.api_server` | **yes, 404s** |
+
+Only one server runs at a time -- stop the others first, or the second fails to bind
+port 8000. All three read the same `/opt/llm/hf-cache`, so none re-downloads the model.
+
+**This is what makes `0.332 -> 1.60 -> 5.70 req/s` a real ladder.** Three unrelated
+engines, one client, one protocol, one GPU, one prompt, nothing re-normalised between
+them. Keeping `bench.py` wire-compatible was the most annoying constraint of Phase 2 --
+inventing a cleaner protocol for `engine/server.py` would have been easier -- and it is
+the only reason the comparison means anything now.
+
 ## 4. Measure
 
 `tools/bench.py` works against vLLM unchanged. One flag differs from our own servers:
