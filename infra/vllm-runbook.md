@@ -1,0 +1,198 @@
+# vLLM runbook
+
+How to install, launch, ablate and measure vLLM on the project box. Written after doing
+it once, so the traps below are the ones actually hit, not the ones anticipated.
+
+Versions this was written against: vLLM 0.27.1, torch 2.13.0, transformers 5.15.1,
+CUDA 13.2, NVIDIA A10G (g5.2xlarge), driver 595.91.07.
+
+---
+
+## 1. Install
+
+**vLLM gets its OWN virtualenv.** Do not install it into `/opt/llm/.venv`.
+
+```bash
+uv venv /opt/llm/.venv-vllm --python 3.12
+VIRTUAL_ENV=/opt/llm/.venv-vllm uv pip install vllm
+```
+
+Why separate: `/opt/llm/.venv` runs `engine/` and `baseline/`, and vLLM pins its own
+torch build. Upgrading in place would break both, and the entire point of Phase 3 is
+comparing vLLM *against* them. Losing the ability to re-measure our own engine would
+make every comparison unreproducible.
+
+Cost: about 7 GB of disk and roughly one minute with `uv`. The box has ~100 GB free.
+
+**Set the hold file before starting.** A multi-gigabyte download with the GPU idle looks
+exactly like idleness to `infra/idle-shutdown.sh`, which stops the box after 30 minutes
+of GPU quiet.
+
+```bash
+touch /opt/llm/.no-autoshutdown     # remove it when the work is done
+```
+
+**Verify the engine venv survived**, rather than assuming isolation worked:
+
+```bash
+/opt/llm/.venv/bin/python -c "import torch, transformers; print(torch.__version__, transformers.__version__)"
+# expect: 2.13.0+cu132 5.15.1
+```
+
+---
+
+## 2. Launch
+
+```bash
+sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
+  --setenv=HF_HOME=/opt/llm/hf-cache \
+  --setenv=HF_HUB_OFFLINE=1 \
+  --setenv=PYTHONUNBUFFERED=1 \
+  --setenv=PATH=/opt/llm/.venv-vllm/bin:/usr/local/bin:/usr/bin:/bin \
+  /opt/llm/.venv-vllm/bin/python -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen3-8B --max-model-len 4096 --host 0.0.0.0 --port 8000
+```
+
+Startup takes roughly 2-3 minutes: model load, `torch.compile`, then CUDA graph capture.
+Poll for readiness rather than sleeping a fixed time:
+
+```bash
+until curl -sf -m 3 "http://$IP:8000/health" >/dev/null; do sleep 10; done
+```
+
+### Every argument above is load-bearing
+
+**`--setenv=PATH=/opt/llm/.venv-vllm/bin:...`** — without it the engine dies during
+warmup with `FileNotFoundError: 'ninja'`. FlashInfer JIT-compiles kernels at startup and
+shells out to `ninja`, which lives in the venv's `bin`. `systemd-run` starts from a
+minimal environment, so the venv's `bin` is not on PATH and the subprocess cannot find a
+binary that is definitely installed. The error names the tool, not the cause.
+
+**`--max-model-len 4096`** — Qwen3-8B advertises 40,960 tokens of context. At 144 KiB of
+KV per token, one max-length sequence needs 5.6 GiB against roughly 3.6-4.6 GiB of KV
+budget, so vLLM refuses to start. Any value comfortably above the workload works.
+
+**`HF_HOME=/opt/llm/hf-cache`** — reuses the 16 GB model already on the root volume.
+Detached processes never load a login shell, so this must be set inline; relying on
+`/etc/profile.d` silently re-downloads the model to `~/.cache/huggingface`.
+
+**`systemd-run`, never `nohup ... &` over ssh** — see `CLAUDE.md` section 3.
+
+---
+
+## 3. Read the configuration out of the log, never assume it
+
+```bash
+journalctl -u vllm --no-pager -o cat | grep -E "enable_prefix_caching|enable_chunked_prefill"
+journalctl -u vllm --no-pager -o cat | grep "GPU KV cache size"
+```
+
+vLLM 0.27.1 defaults, confirmed from a running server rather than the docs:
+
+| setting | default |
+|---|---|
+| `enable_prefix_caching` | **True** |
+| `enable_chunked_prefill` | **True** |
+| `max_num_batched_tokens` | 2048 |
+| `max_num_seqs` | 128 |
+| attention backend | FLASH_ATTN |
+
+The first two matter enormously: neither `engine/` nor `baseline/` has them, so "vLLM
+defaults vs our engine" is **not** a like-for-like comparison. Older vLLM releases had
+both off, so documentation and blog posts written against those versions are misleading.
+
+Defaults can also be read directly:
+
+```bash
+/opt/llm/.venv-vllm/bin/python -c "
+import dataclasses
+from vllm.config import SchedulerConfig
+for f in dataclasses.fields(SchedulerConfig):
+    print(f.name, f.default)"
+```
+
+### TRAP: the KV cache size varies between identical launches
+
+Two consecutive starts of the exact same command produced **26,176** and then **33,424**
+tokens of KV cache, a 28% difference. vLLM sizes its cache by profiling free GPU memory
+at startup, so any transient allocation during that profile changes the budget.
+
+**Record `GPU KV cache size` from each run's own log and report it beside the result.**
+A capacity difference between two configurations is not attributable to the flag until
+their KV budgets are confirmed comparable. Without this, an ablation will confidently
+credit a flag for what was really a startup accident.
+
+---
+
+## 4. Measure
+
+`tools/bench.py` works against vLLM unchanged. One flag differs from our own servers:
+
+```bash
+uv run tools/bench.py --url "http://$IP:8000" --model "Qwen/Qwen3-8B" \
+  --sweep 3,4,5,6,7 --duration 60 --prompt-tokens 512 --max-tokens 64 --no-think \
+  --unique-prefix --out results/phase3-something.jsonl
+```
+
+**`--model "Qwen/Qwen3-8B"` is required.** `bench.py` defaults to `--model test`, which
+`baseline/server.py` and `engine/server.py` both ignore. vLLM validates it and returns
+`404 The model 'test' does not exist`, which surfaces as every request failing and the
+summary printing `nan` rather than as an obvious error.
+
+**`--unique-prefix` is required for an honest capacity number.** Without it every request
+sends a byte-identical prompt, which is the perfect-hit case for a prefix cache. Measured
+on this box: 18.6 req/s cached against 5.7 req/s uncached, a 3.3x difference that is
+purely a benchmark artifact. Report the uncached number; report the cached one only with
+its caveat.
+
+Keep `--duration 60` to stay comparable with the Phase 1 and Phase 2 sweeps.
+
+---
+
+## 5. Run an ablation
+
+`infra/vllm-ablate.sh` automates restart, health-poll, KV-size capture and sweep. The
+pattern is one flag changed per run, with everything else held fixed:
+
+```bash
+./infra/vllm-ablate.sh "A-nocache" "--no-enable-prefix-caching" "--unique-prefix" "3,4,5,6,7"
+```
+
+### Pair each flag with a workload where it can act
+
+Ablating prefix caching under `--unique-prefix` measures nothing, because there are no
+shared prefixes to hit. That run is still worth doing as a **control**: if it moves, the
+harness is not measuring what it claims and every other result is suspect.
+
+| flag | workload that exercises it |
+|---|---|
+| `--no-enable-prefix-caching` | identical prompts (and unique, as a control) |
+| `--no-enable-chunked-prefill` | unique prefixes |
+| `--kv-cache-dtype fp8` | unique prefixes |
+| `--max-num-batched-tokens` | unique prefixes |
+| `--max-num-seqs` | unique prefixes |
+
+---
+
+## 6. Shut down
+
+```bash
+sudo systemctl stop vllm
+rm -f /opt/llm/.no-autoshutdown     # re-arm the idle guardrail
+./infra/down.sh                      # stop the box; never terminate
+```
+
+Leaving the hold file in place defeats the guardrail entirely and bills $1.21/hour
+indefinitely.
+
+---
+
+## 7. Summary of traps, in the order they were hit
+
+| symptom | cause |
+|---|---|
+| `FileNotFoundError: 'ninja'` during warmup | venv `bin` not on PATH under systemd |
+| engine refuses to start, KV too small | `--max-model-len` defaulted to 40,960 |
+| every request fails, metrics print `nan` | `bench.py` sent `--model test`; vLLM validates it |
+| suspiciously high throughput | prefix caching hitting on an identical benchmark prompt |
+| capacity differs between identical runs | vLLM's startup memory profile sized KV differently |
