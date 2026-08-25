@@ -1287,3 +1287,208 @@ Recommendation recorded: **do not build a paged allocator whose benefit has been
 at zero on this stack.** Carry these three questions into Phase 3 and attribute vLLM's
 advantage to them quantitatively. Building it anyway would be defensible as an exercise,
 but it would be an exercise, not an optimisation, and the notes should say so either way.
+
+---
+## 2026-08-25 — Phase 3, baseline: vLLM with defaults
+
+Same box, same `bench.py`, same 412-token prompt and 64 output tokens as Phase 1 and as
+our own engine. That invariant is the only reason these three numbers sit on one axis.
+
+### Derivation
+
+Decode, using the additive model validated in step 2 to within 6%, and the measured
+constants `mem_eff` 0.674 and `compute_eff` 0.364:
+
+| batch | t_mem | t_cmp | ITL | decode-only capacity |
+|---|---|---|---|---|
+| 8 | 41.9 ms | 2.9 ms | 44.8 ms | 2.79 req/s |
+| 16 | 43.3 ms | 5.8 ms | 49.1 ms | 5.09 req/s |
+| 32 | 46.1 ms | 11.6 ms | 57.7 ms | 8.66 req/s |
+| 64 | 51.6 ms | 23.3 ms | 74.9 ms | 13.35 req/s |
+
+Prefill, from our own measured sweep (3,209 tokens in 952 ms = **3,370 tok/s** at large
+batch): a 412-token prompt costs **122 ms** of GPU work, so the prefill-only ceiling is
+**8.18 req/s**. Note that is higher than the 6.74 req/s ceiling our engine faced, because
+our engine prefilled one admission batch at a time at 148 ms per request while vLLM packs
+prefill tokens more efficiently.
+
+Concurrency is capped by KV, not by the scheduler: at `--gpu-memory-utilization 0.9`
+there are 3.60 GiB of KV room, which is 26,200 tokens, or **55 concurrent requests** at
+476 tokens each.
+
+Combining, at the B=32 to B=64 range that a 55-sequence cap implies:
+
+    B=32   capacity 4.21 req/s   prefill 51% of wall
+    B=64   capacity 5.07 req/s   prefill 62% of wall
+
+### Predictions
+
+| # | Quantity | Predicted | Confidence |
+|---|---|---|---|
+| V1 | Capacity, vLLM defaults | **4.0-4.8 req/s**, central estimate **4.4** | Medium |
+| V2 | vs our engine (1.60 req/s) | **2.5-3.0x** | Medium |
+| V3 | vs Phase 1 (0.332 req/s) | **13-14x** | Medium |
+| V4 | ITL p50 at capacity | **60-80 ms**, HIGHER than our 58 ms | Medium |
+| V5 | Concurrent sequences at saturation | **~55**, KV-limited not scheduler-limited | High -- pure arithmetic |
+| V6 | Single-request TTFT | **250-350 ms**, comparable to our 298 ms | Low |
+
+**V4 is the one worth stating plainly: vLLM's ITL should be WORSE than ours, not better.**
+Not because it is slower per unit work, but because it runs a far larger batch. Higher
+batch means more KV read per step, so each individual token is slower while total
+throughput is much higher. If vLLM shows both higher throughput AND lower ITL, my model
+of where its advantage comes from is wrong and needs revisiting.
+
+`PROJECT.md` predicted before Phase 2 began that a hand-written engine would reach "maybe
+40% of vLLM's throughput". At 1.60 req/s that implies vLLM at 4.0 req/s -- independently
+consistent with the arithmetic above, which is mild reassurance that both are sane.
+
+### What must be recorded, not assumed
+
+Recent vLLM enables **chunked prefill and prefix caching by default**, where older
+versions did not. If the defaults already include them, then "vLLM baseline" is not a
+clean comparison against our engine, which has neither -- and the ablation must DISABLE
+them to isolate their contribution rather than enabling them.
+
+**Read the actual configuration out of the server's startup log and record it before
+interpreting any number.** Assuming the defaults would silently make every attribution in
+Phase 3 wrong.
+
+### Install constraint
+
+Our engine's venv has `torch 2.13.0+cu132`. vLLM pins its own torch build. vLLM gets a
+SEPARATE venv at `/opt/llm/.venv-vllm`; upgrading in place would break `engine/` and
+destroy the ability to re-measure our own engine for comparison.
+
+### Correction, written before the sweeps: the defaults are not comparable
+
+vLLM 0.27.1 ships with **`enable_prefix_caching=True` and `enable_chunked_prefill=True`**,
+read out of the engine's own startup log rather than assumed. Our engine has neither, so
+"vLLM defaults vs our engine" is not a like-for-like comparison, and the V1 prediction of
+4.0-4.8 req/s implicitly assumed prefill still cost something.
+
+`bench.py` sends a byte-identical 412-token prompt on every request, which is the
+perfect-hit case for a prefix cache. Measured at single stream:
+
+| | TTFT p50 | ITL p50 |
+|---|---|---|
+| identical prompts (cache hits) | **190 ms** | 34.0 ms |
+| `--unique-prefix` (cache misses) | **293 ms** | 34.0 ms |
+| our engine | 298 ms | 41.1 ms |
+
+ITL is unchanged at 34.0 ms either way, confirming prefix caching affects prefill only.
+With the cache defeated, vLLM's TTFT equals ours to within 2%.
+
+**So vLLM's single-stream advantage decomposes into two independent parts:**
+
+    TTFT advantage   entirely prefix caching        190 vs 293 ms
+    ITL advantage    entirely kernel efficiency     34.0 vs 41.1 ms
+
+### The ITL number revises a Phase 2 conclusion
+
+vLLM decodes at 34.0 ms against our bare offline loop's 40.5 ms -- **16% faster at batch
+1, where there is no batching or scheduling advantage at all.** Back-solved against the
+27.30 ms roofline floor:
+
+| stack | `mem_eff` achieved |
+|---|---|
+| Phase 1 server | 0.623 |
+| our bare offline loop | 0.674 |
+| **vLLM** | **0.803** |
+
+Phase 2 concluded that 0.674 was "a property of the stack, not the card", and that
+Phase 1's 0.623 was server overhead. **That was half right.** A further 16% was sitting
+in per-step Python: cache bookkeeping, mask concatenation, argmax, the `.item()` sync.
+vLLM captures a decode step as a CUDA graph and replays it in one launch.
+
+This is a THIRD axis, separate from everything Phase 2 measured. Phase 2 attacked
+scheduling -- how many requests share one weight read. This is kernel efficiency -- how
+much of the hardware a single step uses. Our engine could have been ~16% faster at every
+batch size without touching its scheduler.
+
+### Revised sweep predictions
+
+With prefix cache hits, prefill approaches zero and capacity becomes decode-bound. Using
+vLLM's measured `mem_eff` of 0.803 and the ~70-sequence KV cap (33,424 tokens / 476):
+
+    cached    B=70, ITL ~70 ms, no prefill cost   ->  ~15 req/s
+    uncached  B=70, plus 122 ms prefill per req   ->  ~5.4 req/s
+
+| # | Quantity | Predicted |
+|---|---|---|
+| V7 | Capacity, defaults, identical prompts | **12-16 req/s** |
+| V8 | Capacity, defaults, `--unique-prefix` | **4.5-6 req/s** |
+| V9 | Ratio between them | **~2.8x**, entirely attributable to prefix caching |
+| V10 | ITL p50 at saturation | **65-80 ms** both ways, since decode is unaffected by caching |
+
+**V8 is the honest headline number** -- it is the one that describes traffic where users
+send different prompts. V7 describes a benchmark artifact and should never be quoted
+without its caveat.
+
+### ACTUALS -- 2026-08-25, vLLM 0.27.1 baseline
+
+| # | Quantity | Predicted | Measured | |
+|---|---|---|---|---|
+| V5 | KV cache tokens | 26,200 | **26,176** then **33,424** | see reproducibility note |
+| V7 | Capacity, identical prompts | 12-16 req/s | **18.6 req/s** | missed high |
+| V8 | Capacity, `--unique-prefix` | 4.5-6 req/s | **5.7 req/s** | correct |
+| V9 | Ratio between them | ~2.8x | **3.26x** | close |
+| V10 | ITL p50 at saturation | 65-80 ms | **77 ms** cached, 56 ms uncached | half correct |
+
+#### The ladder, all measured on one box with one unchanged benchmark client
+
+| stage | capacity | vs previous | vs Phase 1 |
+|---|---|---|---|
+| Phase 1 naive server | 0.332 req/s | -- | 1.0x |
+| our engine (Phase 2) | 1.60 req/s | 4.8x | 4.8x |
+| **vLLM, unique prompts** | **5.70 req/s** | **3.6x** | **17.2x** |
+| vLLM, identical prompts | 18.6 req/s | 3.3x | 56x |
+
+`PROJECT.md` guessed before Phase 2 began that a hand-written engine would reach "maybe
+40% of vLLM's throughput". **We reached 28%** -- same ballpark, slightly worse, and the
+missing 72% is now attributable rather than mysterious.
+
+#### Why V7 missed: prefix caching saves KV MEMORY, not only prefill compute
+
+I predicted the cached case from compute alone -- prefill goes to zero, so capacity
+becomes decode-bound at the ~70 concurrent sequences the KV budget allows. That was
+incomplete. When every request shares a byte-identical 412-token prefix, vLLM stores
+those blocks **once** and points every sequence at them. Only the generated tokens are
+unique:
+
+    KV budget                        33,424 tokens
+    concurrency WITHOUT sharing         70 sequences   (476 tokens each)
+    concurrency WITH shared prefix     516 sequences   (64 unique tokens each)
+                                                       -> 7.3x more fit in the same memory
+
+Little's Law on the measurement (18.62 req/s, ~5 s mean end-to-end) implies **~93
+concurrent requests in flight** -- comfortably past the 70 that unshared KV would allow,
+and direct evidence the blocks are being shared.
+
+**So prefix caching has two distinct effects, and I had only modelled one.** It removes
+prefill compute, AND it multiplies effective concurrency by deduplicating KV. On a
+workload with a long shared system prompt, the second effect may matter more than the
+first.
+
+#### Reproducibility hazard worth recording
+
+The identical launch command produced **26,176 tokens** of KV on one start and **33,424**
+on the next -- a 28% difference. vLLM sizes its cache by profiling free GPU memory at
+startup, so whatever transient allocations exist during that profile change the budget.
+
+**Consequence for the ablations: a capacity difference between two configurations is not
+attributable to the flag until their KV sizes are confirmed equal.** Every ablation run
+must have its KV cache size read out of its own startup log and recorded alongside its
+result, or the phase will attribute to a flag what was really a startup accident.
+
+#### vLLM has a tail too
+
+At 6 req/s uncached, ITL p50 56 ms against **p95 405 ms**. Chunked prefill reduces
+admission stalls; it does not remove the fact that prefill work competes with decode for
+the same GPU. Our engine's equivalent was p50 58 / p95 213 ms at its own saturation.
+
+#### Instrument note
+
+`bench.py` flagged the 24, 28 and 32 req/s cached points as **invalid** -- 134, 301 and
+more requests dropped against the 512 max-inflight cap. Those points are excluded rather
+than reported. A saturated open-loop generator that silently drops arrivals reports a
+throughput ceiling that is really a client limit.
