@@ -1492,3 +1492,124 @@ the same GPU. Our engine's equivalent was p50 58 / p95 213 ms at its own saturat
 more requests dropped against the 512 max-inflight cap. Those points are excluded rather
 than reported. A saturated open-loop generator that silently drops arrivals reports a
 throughput ceiling that is really a client limit.
+
+---
+## 2026-08-25 — Phase 3 ablations: attribute the 3.6x
+
+Baseline established: vLLM 5.70 req/s uncached, 18.6 req/s with cache hits, against our
+engine's 1.60. Now isolate which technique earns which part of that.
+
+### Design: the workload has to match the flag under test
+
+Ablating prefix caching under `--unique-prefix` measures **nothing** -- there are no
+shared prefixes to hit, so on and off are identical. That is not a wasted run; it is the
+control that proves the harness measures what I think it does. Each flag is therefore
+paired with the workload where it can act:
+
+| run | config | workload | isolates |
+|---|---|---|---|
+| A | `--no-enable-prefix-caching` | unique prefixes | **control** -- expect no change |
+| B | `--no-enable-chunked-prefill` | unique prefixes | chunked prefill |
+| C | `--no-enable-prefix-caching` | identical prompts | prefix caching |
+| D | `--kv-cache-dtype fp8` | unique prefixes | KV quantisation |
+
+### Predictions
+
+| # | Run | Predicted capacity | Reasoning |
+|---|---|---|---|
+| A1 | prefix caching off, unique | **5.5-5.9 req/s, unchanged** | nothing to cache. If this moves, the harness or my model is wrong |
+| A2 | chunked prefill off, unique | **4.5-5.2 req/s**, a 10-20% drop | prefill can no longer share a step with decode, so each one blocks |
+| A3 | chunked prefill off, ITL p95 | **600-1000 ms**, up from 405 | this is the admission-stall mechanism our own engine suffered |
+| A4 | prefix caching off, identical | **5.5-5.9 req/s**, collapsing from 18.6 | proves the 18.6 was entirely cache hits |
+| A5 | fp8 KV, unique | **5.7-6.5 req/s**, barely changed | KV per token halves 144 -> 72 KiB, roughly doubling concurrency to ~140. But capacity here is PREFILL-bound at 5.7, not memory-bound, so more concurrency buys little |
+
+**A5 is the interesting one.** The obvious expectation is that halving KV doubles
+throughput. It should not, because the binding constraint is prefill compute, and fp8 KV
+does nothing for compute. If fp8 gives a large gain, my claim that this workload is
+prefill-bound is wrong.
+
+**A4 is the strongest check.** If disabling prefix caching on identical prompts does NOT
+collapse capacity to the uncached number, then something other than caching is producing
+the 18.6 and the baseline write-up needs correcting.
+
+### Mandatory per-run record
+
+Every run records its **KV cache size from its own startup log**. The identical command
+produced 26,176 and then 33,424 tokens on consecutive starts, so a capacity difference is
+not attributable to a flag until the KV budgets are confirmed comparable.
+
+### ACTUALS -- 2026-08-25, Phase 3 ablations
+
+| config | workload | req/s | vs base | KV tokens | ITL p95 |
+|---|---|---|---|---|---|
+| baseline, both flags on | unique | 5.79 | 1.00x | 33,424 | 456 ms |
+| A `--no-enable-prefix-caching` | unique | 6.05 | **1.04x** | 33,424 | 513 ms |
+| B `--no-enable-chunked-prefill` | unique | 5.66 | **0.98x** | 25,952 | 612 ms |
+| D `--kv-cache-dtype fp8` | unique | 6.44 | **1.11x** | 52,368 | 481 ms |
+| baseline, both flags on | identical | 18.62 | 1.00x | 33,424 | 101 ms |
+| C `--no-enable-prefix-caching` | identical | 6.38 | **0.34x** | 33,424 | 513 ms |
+
+| # | Predicted | Measured | |
+|---|---|---|---|
+| A1 | 5.5-5.9, unchanged | **6.05, +4%** | correct -- control passes |
+| A2 | 4.5-5.2, a 10-20% drop | **5.66, -2%** | **wrong** -- far less impact on throughput |
+| A3 | ITL p95 600-1000 ms | **612 ms** | correct |
+| A4 | 5.5-5.9, collapsing from 18.6 | **6.38** | correct |
+| A5 | 5.7-6.5, barely changed | **6.44** | correct |
+
+#### The control passed, which makes the rest trustworthy
+
+Disabling prefix caching on unique prompts changed capacity by +4% -- within noise, and
+if anything slightly faster, since maintaining cache metadata costs a little when it
+never hits. Nothing to cache, no effect. The harness measures what it claims to.
+
+#### Chunked prefill buys tail latency, not throughput
+
+I predicted a 10-20% capacity drop and got 2%. The prediction was wrong about *what the
+flag does*. Capacity barely moved, but **ITL p95 went 456 -> 612 ms, 34% worse**, which
+is precisely the admission-stall mechanism our own engine suffered from. Chunked prefill
+splits a long prefill across steps so it stops blocking everyone's decode. That is a
+latency intervention. It does not create GPU throughput that was not there.
+
+Caveat recorded: run B's KV budget was 25,952 tokens against the baseline's 33,424, a
+22% difference from vLLM's startup memory profile. Since this workload is prefill-bound
+rather than KV-bound, that should not move capacity much -- and the D result below
+supports it -- but the two runs are not perfectly matched and the number carries that
+asterisk.
+
+#### fp8 KV confirms the workload is prefill-bound
+
+fp8 raised the KV budget 1.57x, from 33,424 to 52,368 tokens, and bought **+11% capacity**.
+The naive expectation is that halving KV per token roughly doubles throughput. It does
+not, because the binding constraint here is prefill compute, and fp8 KV does nothing for
+compute. A5 predicted "barely changed, 5.7-6.5"; measured 6.44.
+
+#### Prefix caching is worth 2.9x -- on a workload built to flatter it
+
+18.62 -> 6.38 req/s when disabled on identical prompts. That confirms the entire cached
+baseline was cache hits. It is a real capability, and on production traffic with a long
+shared system prompt it would matter. On this benchmark it measures an artifact we
+constructed by holding the prompt constant.
+
+Note 6.38 uncached-identical slightly exceeds 5.79 uncached-unique: the identical-prompt
+runs still share tokenisation and allocator behaviour even without caching.
+
+### The headline: the famous flags explain almost none of the gap
+
+    our engine                                   1.60 req/s
+    vLLM on realistic traffic                    5.79 req/s      3.6x
+
+    explained by chunked prefill                 ~2%
+    explained by prefix caching                  ~0%   (nothing to cache)
+    UNEXPLAINED by either flag                   3.5x
+
+**On traffic where users send different prompts, vLLM's advantage is not its two most
+famous scheduling features.** It is the kernels and the core engine: FlashAttention's
+varlen path (no padding, no mask -- the exact tax we measured at 1.24x in Phase 2 step 4),
+CUDA graphs replacing per-step Python (`mem_eff` 0.803 against our 0.674), torch.compile,
+and a paged allocator that packs far more sequences into the same memory.
+
+That is the answer to the question Phase 2 was designed to generate. We predicted the
+gap would be explained by chunked prefill and prefix caching, because those are the
+techniques with names. **Measurement says the gap is mostly in the parts with no
+marketing: kernel quality and memory packing.**
