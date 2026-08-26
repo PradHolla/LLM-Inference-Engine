@@ -9,6 +9,7 @@
 # On a g5.xlarge a forgotten box is ~$170/week; this caps that at the threshold.
 #
 # To prevent shutdown during long CPU-only work:  touch "$HOLD"
+# The hold EXPIRES after HOLD_MAX_H hours (default 6) -- see the check below.
 
 APP_DIR="${APP_DIR:-/opt/app}"
 THRESHOLD_PCT="${IDLE_GPU_PCT:-5}"
@@ -41,10 +42,25 @@ HOLD="$APP_DIR/.no-autoshutdown"
 # every request that has ever completed; a monotonic counter cannot miss one.
 # ---------------------------------------------------------------------------
 
-# Manual hold -- reset the counter and do nothing.
+# Manual hold -- reset the counter and do nothing, BUT ONLY WHILE IT IS FRESH.
+#
+# A hold file is a promise to come back and remove it. That promise was broken on
+# 2026-08-25: set before a long ablation run and still present 29 hours later, by
+# which time it had burned roughly $30 of idle GPU. A permanent hold does not weaken
+# the guardrail, it deletes it -- and the failure is silent, because everything looks
+# like it is working.
+#
+# So the hold now expires. Past HOLD_MAX_H hours it is read as forgotten rather than
+# intended, and idle checking resumes. Long jobs that genuinely need more should re-touch
+# the file (a running job can do that trivially) or raise HOLD_MAX_H deliberately.
+HOLD_MAX_H="${HOLD_MAX_H:-6}"
 if [ -f "$HOLD" ]; then
-    echo 0 > "$STATE"
-    exit 0
+    HOLD_AGE_H=$(( ( $(date +%s) - $(stat -c %Y "$HOLD" 2>/dev/null || echo 0) ) / 3600 ))
+    if [ "$HOLD_AGE_H" -lt "$HOLD_MAX_H" ]; then
+        echo 0 > "$STATE"
+        exit 0
+    fi
+    logger -t idle-shutdown "hold file is ${HOLD_AGE_H}h old (limit ${HOLD_MAX_H}h) - treating as stale, resuming idle checks"
 fi
 
 # Highest utilization across all GPUs. If nvidia-smi is missing or the driver
