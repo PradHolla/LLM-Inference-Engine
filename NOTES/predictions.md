@@ -1613,3 +1613,103 @@ That is the answer to the question Phase 2 was designed to generate. We predicte
 gap would be explained by chunked prefill and prefix caching, because those are the
 techniques with names. **Measurement says the gap is mostly in the parts with no
 marketing: kernel quality and memory packing.**
+
+---
+## 2026-08-25 — Phase 3 ablations, part 2: the two scheduler knobs
+
+Defaults read from `SchedulerConfig` rather than assumed: **`max_num_batched_tokens=2048`,
+`max_num_seqs=128`** (KV caps effective concurrency near 70 regardless).
+
+### `--max-num-batched-tokens` — the prefill chunk size
+
+This workload is prefill-bound, so this is the knob most likely to move capacity. The
+mechanism is our own `compute_eff` curve from Phase 2: prefill efficiency rises with the
+number of tokens in a single forward pass, because a small GEMM cannot fill the tensor
+cores. Bigger chunks mean fewer, fatter prefill passes.
+
+Interpolating that measured curve, and calibrating so the 2048 row reproduces the
+measured 5.79:
+
+| budget | implied `compute_eff` | prefill work/request | predicted capacity |
+|---|---|---|---|
+| 1,024 | ~0.40 | 135 ms | **~5.1 req/s** (-12%) |
+| 2,048 (default) | ~0.47 | 115 ms | 5.79 measured |
+| 8,192 | ~0.53 | 102 ms | **~6.3 req/s** (+9%) |
+
+Secondary: **larger chunks should make ITL p95 worse**, because a fatter prefill pass
+occupies a step that decodes are waiting on. This is the same tradeoff chunked prefill
+exists to manage, seen from the other side.
+
+### `--max-num-seqs` — the concurrency cap
+
+This is vLLM's version of our engine's `max_batch`, so it traces the throughput-versus-ITL
+tradeoff directly. Using vLLM's measured `mem_eff` of 0.803:
+
+| cap | predicted ITL | predicted capacity |
+|---|---|---|
+| 16 | ~42 ms | **~3.5 req/s** |
+| 32 | ~50 ms | **~4.6 req/s** |
+| 64 | ~67 ms | **~5.5 req/s** |
+| 128 (default, KV-limited to ~70) | 56-90 ms | 5.79 measured |
+
+**The shape is the point, not the individual numbers.** Capacity should rise and ITL
+should worsen together, monotonically, because they are the same tradeoff measured two
+ways. If capacity saturates while ITL keeps climbing, the extra concurrency is buying
+nothing and the KV ceiling is binding instead.
+
+| # | Prediction |
+|---|---|
+| A6 | `max-num-batched-tokens` 1024 -> **~5.1**, 8192 -> **~6.3** |
+| A7 | Larger batched-token budget makes **ITL p95 worse** |
+| A8 | `max-num-seqs` 16/32/64 -> **3.5 / 4.6 / 5.5 req/s**, monotonic |
+| A9 | ITL falls monotonically as the cap falls: **~42 / 50 / 67 ms** |
+
+### ACTUALS -- 2026-08-25, `--max-num-seqs` (clean)
+
+| cap | KV tokens | effective batch | ITL p50 | measured | model | predicted |
+|---|---|---|---|---|---|---|
+| 16 | 27,280 | 16 | 40 ms | **3.65** | 3.55 | 3.5 |
+| 32 | 18,816 | 32 | 42 ms | **5.01** | 4.85 | 4.6 |
+| 64 | 18,560 | **39** (KV-capped) | 46 ms | **5.35** | 5.06 | 5.5 |
+| 128 default | 33,424 | **70** (KV-capped) | 56 ms | **5.79** | 5.78 | -- |
+
+A8 predicted 3.5 / 4.6 / 5.5; measured 3.65 / 5.01 / 5.35. A9 predicted ITL 42/50/67;
+measured 40/42/46 -- shape right, magnitudes lower.
+
+One formula reproduces every row, and nails the baseline to two decimals:
+
+    R = 1 / (0.122 prefill  +  (64 / B) * ITL)
+
+**`--max-num-seqs 64` never ran 64 sequences.** Its KV budget held only 39
+(18,560 / 476). Effective concurrency is `min(max_num_seqs, KV_tokens / tokens_per_request)`
+-- the flag is a ceiling, not a floor, and KV was binding. Reading that row as "64
+sequences" would have been wrong, and the model only fits once the effective value is used.
+
+**Diminishing returns, explained rather than observed.** 16 -> 32 buys 1.37 req/s;
+39 -> 70 buys 0.44. Decode cost per request falls as concurrency rises, but the ~122 ms
+of prefill does not move. The asymptote is 1/0.122 = **8.2 req/s regardless of batch size**.
+
+### `--max-num-batched-tokens` was confounded, and the first re-run failed on my bug
+
+Raw results, before correction:
+
+| budget | KV tokens | effective batch | capacity | implied prefill |
+|---|---|---|---|---|
+| 1,024 | 17,840 | 37 | 5.19 | 114 ms |
+| 2,048 | 33,424 | 70 | 5.79 | 122 ms |
+| 8,192 | 25,504 | 54 | 5.69 | 117 ms |
+
+KV budgets differ by 87% across configs that should vary only in prefill chunk size, and
+the capacity ordering matches the KV ordering. Backing prefill cost out of the model
+gives **114 / 122 / 117 ms -- flat within noise**, suggesting the spread is effective
+concurrency rather than the flag. That is an inference, not a measurement.
+
+Re-run with KV pinned via `--kv-cache-memory-bytes`. Two failures worth recording:
+
+- **My harness bug.** `set -- $cfg` did not word-split as intended, so `$2` was empty and
+  vLLM got `--max-num-batched-tokens` with no value. All three configs died identically,
+  which is the signature of a harness fault rather than a config problem. Fixed by
+  calling the driver explicitly instead of unpacking a loop variable.
+- **vLLM's own hint is stale.** Its startup log suggests
+  `Replace gpu_memory_utilization config with --kv-cache-memory=...`, but the actual flag
+  is `--kv-cache-memory-bytes`. Following the tool's advice verbatim fails.
