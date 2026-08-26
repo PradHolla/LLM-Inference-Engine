@@ -1713,3 +1713,47 @@ Re-run with KV pinned via `--kv-cache-memory-bytes`. Two failures worth recordin
 - **vLLM's own hint is stale.** Its startup log suggests
   `Replace gpu_memory_utilization config with --kv-cache-memory=...`, but the actual flag
   is `--kv-cache-memory-bytes`. Following the tool's advice verbatim fails.
+
+### ACTUALS -- 2026-08-25, `--max-num-batched-tokens` with KV pinned
+
+`--kv-cache-memory-bytes 2576980378` gives every config an identical 17,472-token budget,
+removing the startup-profile variance that made the first attempt uninterpretable.
+
+| budget | KV tokens | capacity | ITL p50 |
+|---|---|---|---|
+| 1,024 | 17,472 | **5.12** | 39-45 ms |
+| 2,048 | 17,472 | **5.09** | 39-45 ms |
+| 8,192 | 17,472 | **5.18** | 39-45 ms |
+
+**A6 and A7 are both WRONG.** A6 predicted 5.1 -> 6.3 across the range, a 24% spread;
+measured spread is **1.8%** across an 8x change in chunk size. A7 predicted larger chunks
+would worsen ITL p95; ITL is flat.
+
+#### Why: the budget is never filled
+
+My reasoning was that a bigger chunk means a fatter prefill GEMM, and our Phase 2
+`compute_eff` curve says fatter GEMMs are more efficient. The curve is right. The premise
+is not -- there is never enough queued prefill work to fill even the smallest budget:
+
+    arrival rate                  5.0 req/s
+    prefill tokens arriving       2,060 tok/s
+    decode step                   45 ms  ->  22 steps/s
+    prefill tokens per step       93 on average
+
+    budget 1,024   utilised  9.1%   headroom 11.0x
+    budget 2,048   utilised  4.5%   headroom 22.1x
+    budget 8,192   utilised  1.1%   headroom 88.4x
+
+**The smallest budget tested is already 11x larger than the work available.** Raising a
+ceiling nothing is touching cannot change anything. The flag would bind at much higher
+arrival rates, or with prompts long enough that a single prefill exceeds the budget and
+must be split -- which is precisely the case chunked prefill exists for, and precisely
+the case this workload does not produce.
+
+This is the same class of error as reading `--max-num-seqs 64` as "64 sequences". **Both
+flags are ceilings. A ceiling only matters when something is pressing against it**, and
+in both cases the binding constraint was elsewhere -- KV there, arrival rate here.
+
+The correct way to have predicted this was to check the utilisation of the budget before
+predicting the effect of changing it. The arithmetic above takes one line and would have
+turned A6 from a wrong prediction into a correct one.
