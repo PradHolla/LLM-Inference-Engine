@@ -1757,3 +1757,67 @@ in both cases the binding constraint was elsewhere -- KV there, arrival rate her
 The correct way to have predicted this was to check the utilisation of the budget before
 predicting the effect of changing it. The arithmetic above takes one line and would have
 turned A6 from a wrong prediction into a correct one.
+
+---
+## 2026-08-26 — Phase 3 CLOSED
+
+Deliverable: latency-vs-throughput curves for nine configurations, published as a chart.
+`tools/curve.py` collapses the raw per-request JSONL into curve points, recomputing
+throughput over the observed span rather than trusting bench.py's printed summary.
+
+### Final attribution, realistic (unique-prompt) traffic
+
+| technique | capacity effect | note |
+|---|---|---|
+| prefix caching | **0%** | 2.9x on shared prompts; nothing to cache otherwise |
+| chunked prefill | ~2% | but **34% better ITL p95** -- a latency fix, not a throughput one |
+| fp8 KV cache | **+11%** | 1.57x the KV budget; workload is prefill-bound |
+| `--max-num-batched-tokens` | **0%** | never binding, 9% utilised at the smallest setting |
+| **unexplained by any flag** | **3.5x** | kernels and core engine |
+
+### The ladder
+
+    Phase 1 naive server     0.332 req/s
+    our engine               1.60  req/s    4.8x
+    vLLM, unique prompts     5.70  req/s    3.6x over ours, 17.2x over Phase 1
+    vLLM, identical prompts 18.6   req/s    prefix cache hits -- benchmark artifact
+
+### Predictions scored
+
+| # | Predicted | Measured | |
+|---|---|---|---|
+| V5 | 26,200 KV tokens | 26,176 / 33,424 | correct then invalidated by startup variance |
+| V7 | 12-16 req/s cached | 18.6 | missed high -- prefix caching also saves KV MEMORY |
+| V8 | 4.5-6 req/s unique | 5.7 | correct |
+| V10 | ITL 65-80 ms at saturation | 77 cached / 56 unique | half correct |
+| A1 | prefix caching off = no change | +4% | correct -- **the control passed** |
+| A2 | chunked prefill off = -10-20% | -2% | **wrong about what the flag does** |
+| A3 | ITL p95 600-1000 ms | 612 ms | correct |
+| A4 | cached collapses to ~5.5-5.9 | 6.38 | correct |
+| A5 | fp8 barely changes capacity | +11% | correct |
+| A6 | chunk size 1024 vs 8192 = 24% | 1.8% | **wrong -- budget never filled** |
+| A8 | max-num-seqs 3.5/4.6/5.5 | 3.65/5.01/5.35 | correct |
+
+Eight correct, three wrong. The three misses share one shape: **I predicted the effect of
+raising a ceiling without first checking whether anything was pressing against it.**
+`--max-num-seqs 64` was capped at 39 by KV; `--max-num-batched-tokens 1024` ran at 9%
+utilisation; prefix caching had nothing to cache. One line of arithmetic on utilisation
+would have caught all three before predicting.
+
+### What Phase 2 generated and Phase 3 answered
+
+| question from Phase 2 | answer |
+|---|---|
+| Why is a masked decode step 1.24x a causal one? | varlen attention removes it -- part of the unexplained 3.5x |
+| Why does every admission stall the batch? | chunked prefill; worth 34% on ITL p95, ~0% on capacity |
+| Why cap at 1.6 of a possible 6.74 req/s? | prefill-bound. vLLM's own asymptote is 8.2 req/s for the same reason |
+
+### Carried into Phase 4
+
+- **fp8 KV cache is already measured at +11%** on this workload. Phase 4 covers weight
+  quantisation, which is a different axis, and must measure the third thing neither phase
+  has touched: **output quality**.
+- vLLM's KV budget varies 28% between identical launches. Pin `--kv-cache-memory-bytes`
+  for every Phase 4 comparison; `--gpu-memory-utilization` is not reproducible.
+- This workload is prefill-bound at 412 prompt / 64 output. Quantisation results will
+  differ on a decode-heavy workload, and Phase 4 should measure at least one of each.
