@@ -62,6 +62,17 @@ PASSES = [
 ]
 
 ANSWER_RE = re.compile(r"ANSWER\s*:\s*([^\n]*)", re.IGNORECASE)
+# Qwen3 is heavily trained to close a maths answer with \boxed{}, and it does so even when
+# the prompt demands "ANSWER: <integer>". Calibration measured 16% of COMPLETED, CORRECT
+# responses ending in \boxed{N} with no ANSWER: line -- graded wrong by an earlier version of
+# this file, with the model at 100% on everything it did state.
+#
+# This is NOT the loose fallback the design forbids. \boxed{} is an explicit, unambiguous
+# answer declaration, structurally identical to ANSWER:, and accepting it makes grading MORE
+# uniform across configurations rather than less. Hunting for a bare integer in prose remains
+# forbidden. The marker that matched is recorded per item, so a configuration that changes
+# convention is visible instead of silently mis-scored.
+BOXED_RE = re.compile(r"\\boxed\s*\{((?:[^{}]|\{[^{}]*\})*)\}")   # one nested level, for \\boxed{\\text{42}}
 THINK_CLOSE = re.compile(r"</think\s*>", re.IGNORECASE)
 
 
@@ -73,10 +84,19 @@ def post_thinking(text: str) -> str:
     return text[hits[-1].end():] if hits else text
 
 
-def extract(text: str) -> str | None:
-    """Last ANSWER: in post-thinking content. No fallback -- see the module docstring."""
-    m = ANSWER_RE.findall(post_thinking(text))
-    return m[-1].strip() if m else None
+def extract(text: str) -> tuple[str | None, str | None]:
+    """Last explicit answer marker in post-thinking content, and which marker it was.
+
+    Both markers are scanned and the one appearing LATEST wins, because that is the model's
+    final stated answer regardless of which convention it reached for.
+    """
+    body = post_thinking(text)
+    hits = [(m.start(), m.group(1), "answer") for m in ANSWER_RE.finditer(body)]
+    hits += [(m.start(), m.group(1), "boxed") for m in BOXED_RE.finditer(body)]
+    if not hits:
+        return None, None
+    _, raw, marker = max(hits, key=lambda h: h[0])
+    return raw.strip(), marker
 
 
 def normalize(raw: str | None, slice_: str) -> str | None:
@@ -88,7 +108,9 @@ def normalize(raw: str | None, slice_: str) -> str | None:
     """
     if raw is None:
         return None
-    s = raw.strip().strip("*").strip().rstrip(".").strip()
+    s = raw.strip()
+    s = re.sub(r"\\(?:text|mathrm)\s*\{([^{}]*)\}", r"\1", s)   # \boxed{\text{18}}
+    s = s.strip().strip("*").strip().strip("$").strip().rstrip(".").strip()
     if slice_ == "longctx":
         s = re.sub(r"[^A-Za-z0-9]", "", s).upper()
         return s or None
@@ -99,10 +121,11 @@ def normalize(raw: str | None, slice_: str) -> str | None:
 
 def grade(rec: dict) -> dict:
     """Pure function of a saved record. Re-runnable offline; that is why text is saved."""
-    raw = extract(rec.get("text") or "")
+    raw, marker = extract(rec.get("text") or "")
     got = normalize(raw, rec["slice"])
     want = normalize(rec["answer"], rec["slice"])
     rec["extracted_raw"] = raw
+    rec["marker"] = marker
     rec["extracted"] = got
     rec["parsed"] = got is not None
     rec["correct"] = (got == want) if got is not None else False
@@ -471,13 +494,20 @@ def cmd_selftest(args):
         ("ANSWER: 18.5", "math", None, "non-integer rejected, not rounded"),
         ("", "math", None, "empty completion"),
         ("<think>reasoning ran out of tokens", "math", None, "truncated mid-thinking"),
+        (r"### Final Answer\n$$\n\boxed{3}\n$$", "math", "3", "boxed, Qwen3's real habit"),
+        (r"\boxed{108}", "math", "108", "boxed bare"),
+        (r"\boxed{1,000}", "math", "1000", "boxed with separator"),
+        (r"\boxed{\text{42}}", "math", "42", "boxed wrapping text"),
+        (r"ANSWER: 42\n\boxed{37}", "math", "37", "latest marker wins, boxed after"),
+        (r"\boxed{37}\nANSWER: 42", "math", "42", "latest marker wins, ANSWER after"),
+        (r"<think>\boxed{42}</think>\nANSWER: 37", "math", "37", "boxed inside thinking ignored"),
         ("ANSWER: 6K0X", "longctx", "6K0X", "code"),
         ("ANSWER: 6k0x", "longctx", "6K0X", "code case-normalised"),
         ("ANSWER: `6K0X`", "longctx", "6K0X", "code in backticks"),
     ]
     bad = 0
     for text, sl, want, why in cases:
-        got = normalize(extract(text), sl)
+        got = normalize(extract(text)[0], sl)
         ok = got == want
         bad += not ok
         print(f"  {'ok  ' if ok else 'FAIL'}  {why:<42} {text[:34]!r:<38} -> {got!r}")

@@ -2069,3 +2069,105 @@ the KV cache (P4-9: 6144 costs about 6,000 tokens of cache against 4096), which 
 concurrency, which lowers throughput. A thinking-heavy workload is therefore doubly expensive
 -- each request occupies KV longer *and* the server can hold fewer of them. That is the
 Phase 7 thesis appearing as an operational constraint in Phase 4.
+
+## P4-11  Calibration results, 2026-08-28. Two instrument bugs and one wrong design target.
+
+### The determinism gate PASSED
+
+    2 sequential requests, same item, batch 1: lengths 1939 / 1939, identical: True
+
+`temperature: 0` **does** override Qwen3's `generation_config.json` (temperature 0.6,
+top_p 0.95) in vLLM 0.27.1. This was the single most damaging open unknown in the phase: had
+it failed, sampling noise would have swamped every effect and no quality number from this
+server would have meant anything. Run this gate first, every session.
+
+Thinking transport confirmed empirically: `think_path` = `inline_tags` on 119 of 120, i.e.
+`<think>` arrives inside `content`, as `reasoning_parser=''` implied. The one exception was a
+truncated response that never emitted `</think>`.
+
+### BUG 1: 16% of correct answers were graded wrong
+
+    acc 84.2%   unparseable 15.8%   truncated 0.8%
+    parsed AND wrong: 0 of 120
+
+Those two lines together are the diagnosis. **Every answer the model actually stated was
+correct**, and the entire 15.8% "failure" was the extractor missing an answer that was
+present. 18 of the 19 unparseable responses had `finish_reason == "stop"`, so they were not
+truncated -- they finished, correctly, in a format the grader did not read.
+
+The cause: Qwen3 is trained to close a maths answer with `\boxed{}` and does so even when the
+prompt demands `ANSWER: <integer>`:
+
+    ### Final Answer
+    $$
+    \boxed{3}
+    $$
+
+**Why this would have been fatal rather than merely annoying.** Quantization changes output
+formatting. A configuration that reaches for `\boxed{}` slightly more often would have scored
+lower for a reason with nothing to do with reasoning quality, and the effect would have been
+indistinguishable from the damage the phase exists to measure. It would not have raised an
+error; it would have produced a plausible, wrong, confidently-reported number.
+
+Fixed by accepting `\boxed{}` as a second explicit marker, taking whichever marker appears
+LAST, and recording which one matched per item so a configuration that changes convention is
+visible rather than silently mis-scored. Measured split after the fix: **103 `answer`, 16
+`boxed`, 1 neither.**
+
+This is not the loose fallback section 2c forbids. `\boxed{}` is an explicit answer
+declaration, structurally identical to `ANSWER:`. Hunting for a bare integer in prose remains
+forbidden, and `The answer is 42.` still yields nothing.
+
+### BUG 2: the no-thinking slice measured its own token cap
+
+    k=2  90.9% acc,   0.0% truncated
+    k=4  66.7%       14.3%
+    k=8   9.3%       83.7%
+    k=16  0.0%      100.0%
+
+`max_tokens 256` was a guess, and at k=16 it truncated every single item. That slice measured
+the ceiling, not the model. Raised to 1024 for the real runs.
+
+### The thinking-token distribution, which is what calibration was for
+
+| k | p50 | p95 |
+|---|---|---|
+| 2 | 1,060 | 1,997 |
+| 4 | 954 | 3,160 |
+| 8 | 1,230 | 2,145 |
+| 16 | 1,590 | 2,789 |
+
+P4-8 predicted 250 tokens p50 at k=2 and 1,400 at k=16. **Measured 1,060 and 1,590.** Wrong
+by 4x at the easy end and roughly right at the hard end, because the model has a large fixed
+thinking overhead and adds only modestly per step: 8x the reasoning steps costs 1.5x the
+tokens, not 8x.
+
+The design's placeholder `max_tokens 2048` would have truncated about a third of k=16. Real
+runs use **5120** for thinking, which also leaves headroom for the new k=32 level, and 1024
+for no-thinking.
+
+### The design target of 60-85% base accuracy was WRONG, and that is a correction to my own reasoning
+
+After fixing bug 1, accuracy with thinking on is **100 / 95.2 / 100 / 95.6 percent** at
+k = 2 / 4 / 8 / 16, and every remaining miss is a truncation or a missing marker rather than
+a wrong answer. Qwen3-8B does not make arithmetic errors on 16 chained integer operations
+when allowed to think.
+
+`phase4-eval-design.md` section 3b required base accuracy inside 60-85% "or the dose curve has
+no headroom". **That requirement was imported from standard evaluation and does not apply to
+this design.** In a standard eval you compare two models on absolute accuracy, and a ceiling
+hides differences. Here the comparison is paired against the same model: `b` counts items
+bf16 got right and the quantized model got wrong, so **a reference at 100% is the most
+sensitive possible configuration** -- every quantization error is pure signal with no
+dilution from items the reference already failed.
+
+The real risk is not a ceiling, it is a task so easy that quantization cannot break it
+either, which returns `b = 0` and an ambiguous null. Mitigated by keeping a spread of
+difficulty rather than by lowering accuracy: **k regenerated as 4 / 8 / 16 / 32**, weighted
+toward the top (45 / 75 / 105 / 135), k=2 dropped as pure ceiling with no information, and
+two other item families (gsm8k, longctx) carried as independent evidence.
+
+**And the no-thinking slice is where the headroom actually lives.** Thinking-on is at the
+ceiling; thinking-off collapses with chain length. That makes T2 the slice most able to show
+damage and T1 the slice that tests the amplification claim, which is close to the opposite of
+what the design assumed.
