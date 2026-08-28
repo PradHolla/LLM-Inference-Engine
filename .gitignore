@@ -17,3 +17,6 @@ venv/
 
 # Server-side request log, written on the GPU box
 baseline/serve.jsonl
+
+# Third-party datasets, refetchable in one line (see NOTES/phase4-eval-design.md)
+data/

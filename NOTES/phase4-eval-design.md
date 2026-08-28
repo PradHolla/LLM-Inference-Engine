@@ -132,9 +132,47 @@ because the question is **not** "how good is Qwen3-8B at maths". It is "does fp8
 answers bf16 gives". For a paired within-model comparison, contamination-freedom and
 difficulty control are worth more than resembling a leaderboard.
 
-The harness reads items from a JSONL file, so a real dataset can be substituted later
-without touching the harness. Recommended if budget allows: a 200-item GSM8K subsample as
-an external sanity check that the absolute accuracy is in a normal range.
+### 3a-bis. And one real dataset, for a reason that is not "more data"
+
+Added 2026-08-28: **200 items from the published GSM8K test set.** Not because the paired
+design needs more power -- it does not -- but because the synthetic set has one structural
+blind spot it can never cover.
+
+Synthetic items are graded by a tool written here, against answers generated here, in a
+format invented here. **They cannot detect a broken harness.** If thinking mode is silently
+off, the chat template is misapplied, `max_tokens` truncates earlier than intended, or the
+extraction regex is subtly wrong, every synthetic number comes back plausible and nothing
+raises. That is incidents 2, 3, 10 and 11 -- the instrument producing plausible numbers
+rather than an error.
+
+GSM8K has published baselines for this model class. If bf16 lands near the known figure,
+the whole pipeline is validated end to end in one shot. If it lands 30 points low, the
+harness is broken and no synthetic result should be believed. **It is an instrument check
+first and a second item family second.**
+
+    curl -o data/gsm8k-test.jsonl https://raw.githubusercontent.com/openai/\
+      grade-school-math/master/grade_school_math/data/test.jsonl
+
+1,319 items, 732 KB, MIT licensed. `data/` is gitignored -- refetchable in one line -- but
+the 200 converted items are committed inside `results/phase4-items.jsonl`, so the
+experiment is reproducible on an offline box without the download.
+
+**Contamination is certain and does not matter here.** GSM8K predates Qwen3 and is surely
+in its training data. But the comparison is paired: bf16 and the quantized model carry
+identical contamination, and damage to a recalled answer is still damage. For the
+instrument check, the published baselines being compared against carry the same
+contamination too. Contamination inflates the absolute score; it invalidates neither use.
+
+TRAP, found while building it: an "answer must not appear verbatim in the question" check
+was written, and it flagged 16 of 200 items -- because small integers like 2 and 4 occur
+naturally in word problems. A check that fires on 8% of a curated benchmark is a broken
+check, not a broken dataset. It was removed. The conversion check that survives is the
+useful one: re-extract each answer from the untouched source rationale and compare.
+
+Two other conversion details, both verified: 14 of the 1,319 published answers are
+comma-grouped (`1,000`) and are normalised on load, and 2 are negative -- **so the grader
+must accept a leading minus sign and strip thousands separators from the model's reply
+too.** All finals are integers; none are decimal.
 
 ### 3b. Chain length as a dose variable -- the central experiment
 
@@ -165,6 +203,7 @@ interesting result.
 | **T1** maths-think | 360 | ON | amplification along the chain-length dose curve | exact integer |
 | **T2** maths-nothink | 360 (same items) | OFF | the same maths without the chain -- isolates amplification from arithmetic | exact integer |
 | **T3** longctx-retrieve | 90 | OFF | the Phase 6 web-search shape; the axis KV quant attacks | exact string |
+| **T4** gsm8k | 200 | ON and OFF | **instrument check** against published baselines, plus a second, natural-language item family | exact integer |
 
 T1 and T2 run the **identical items**. If quantization damage is amplified by thinking, the
 excess discordance over each condition's own floor is larger in T1 than in T2. That is a
@@ -198,12 +237,14 @@ Rough token accounting per configuration:
     T1  360 items x ~800 output tokens = 288,000
     T2  360 items x ~150               =  54,000
     T3   90 items x ~120               =  10,800
+    T4  200 items x ~600 (think on)    = 120,000
+    T4  200 items x ~150 (think off)   =  30,000
                                          -------
-                                         353,000 tokens
+                                         503,000 tokens
 
 At B=32 the A10G decode step is `t_mem = 16.39 GB / (600 GB/s x 0.803) = 34 ms` producing 32
-tokens, so roughly 850 tok/s: **about 7 minutes of generation per configuration.** Four
-configurations plus model loads is well under an hour, near $1.
+tokens, so roughly 850 tok/s: **about 10 minutes of generation per configuration.** Five
+configurations plus model loads is a little over an hour, near $1.30.
 
 ---
 
@@ -301,6 +342,7 @@ prediction that had to be corrected before measurement is evidence the method wo
 |---|---|---|---|
 | 1 | this document | no | Claude, xhigh |
 | 2 | `tools/mkitems.py` and hand-verification of a sample | no | Claude |
+| 2b | GSM8K conversion, faithfulness check against source rationales | no | Claude -- DONE |
 | 3 | `tools/qualeval.py` -- fixed-concurrency runner, saves full text | no | Claude |
 | 4 | offline grader test against synthetic completions | no | Claude |
 | 5 | difficulty calibration: bf16 sample, tune `k` for 60-85% base accuracy | yes, small | Claude |

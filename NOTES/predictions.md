@@ -1944,3 +1944,39 @@ check is the first GPU task of the phase and it is deliberately cheap.
 - fp8 measuring 2.5x on the 512/64 workload -> the bandwidth model is wrong by 2x and every
   roofline prediction in this project inherits the error.
 - int4 showing *less* damage than fp8 -> a checkpoint mismatch, not a real result.
+
+## P4-7  GSM8K as an instrument check (added 2026-08-28, before running)
+
+200 items from the published GSM8K test set were added to the item file. Their job is not
+statistical power -- the paired design already has that -- but to catch a broken harness,
+which synthetic items structurally cannot do. See `phase4-eval-design.md` section 3a-bis.
+
+**Predicted bf16, thinking ON: high 80s to mid 90s percent.** GSM8K is considered saturated
+for current reasoning models in this size class, and Qwen3-8B is certainly trained on it.
+
+CAVEAT, and it limits how hard this check can be leaned on: **I do not have a verified
+published GSM8K figure for Qwen3-8B to hand.** The Qwen3 card leads with AIME, MATH and
+LiveCodeBench, because GSM8K stopped discriminating between good models years ago. The band
+above is inferred from the model class, not read off a table, and section 1 of `CLAUDE.md`
+says not to quote a remembered number. **Look up the real figure on the model card before
+treating any deviation as a harness bug.**
+
+How to read the result:
+
+| bf16 GSM8K, thinking on | what it means |
+|---|---|
+| 85-95% | pipeline validated -- chat template, thinking toggle, extraction, grading all sane |
+| 60-85% | suspicious. Check thinking is actually on and that `max_tokens` is not truncating |
+| under 60% | **harness is broken.** No synthetic number from the same run is believable |
+| above 98% | check the answer is not leaking into the prompt, and that grading is not matching too loosely |
+
+**Predicted thinking OFF: 60-80%**, a much larger drop than the synthetic k=2 items will
+show, because GSM8K problems need two to four real steps rather than one bookkeeping
+operation.
+
+Secondary prediction, and the one that would be worth something: **fp8 and int4 should show
+LESS damage on GSM8K than on synthetic k=16.** GSM8K chains are short -- two to four steps
+against sixteen -- so if the amplification claim in section 5b is right, the dose is lower
+here. If GSM8K instead shows *more* damage than k=16, the synthetic items are measuring
+something narrower than reasoning and the dose curve does not generalise. That is the single
+most useful thing this slice can tell us beyond the instrument check.

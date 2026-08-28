@@ -13,6 +13,14 @@ Two item families, both graded by exact match so no LLM judge is involved:
            genuinely the number of sequential reasoning steps. k is the DOSE VARIABLE --
            NOTES/phase4-eval-design.md section 3b explains why the whole design hangs on it.
 
+  gsm8k    real grade-school word problems, converted from the published test set. NOT the
+           primary quality measurement -- it is the INSTRUMENT CHECK. Synthetic items are
+           graded by a tool written here, against answers generated here, in a format
+           invented here, so they structurally cannot detect a broken harness. GSM8K has
+           published baselines for this model, so if bf16 lands near the known number the
+           whole pipeline -- chat template, thinking toggle, extraction, grading, server
+           flags -- is validated end to end. That is incidents 2, 3, 10 and 11.
+
   longctx  a unique fact buried at a controlled depth in a long filler document, with two
            distractor facts of identical shape so the model must retrieve the right one
            rather than pattern-match the format.
@@ -176,6 +184,45 @@ def make_longctx(rng, depth, idx, target_tokens=4000):
             "depth": depth, "prompt": body, "answer": codes[0]}
 
 
+def make_gsm8k(rows, n, rng):
+    """Convert the published GSM8K test set into our item schema.
+
+    Contamination is certain -- GSM8K predates Qwen3 and is surely in its training data --
+    and does not matter for either use here. The comparison is PAIRED, so bf16 and the
+    quantized model carry identical contamination; damage to recalled answers is still
+    damage. And for the instrument check we WANT the same contamination as the published
+    baselines being compared against.
+    """
+    picked = rng.sample(rows, min(n, len(rows)))
+    items = []
+    for i, r in enumerate(picked):
+        m = re.search(r"####\s*(.+?)\s*$", r["answer"])
+        if not m:
+            continue
+        ans = m.group(1).replace(",", "")     # 14 of 1319 finals are comma-grouped
+        if not re.fullmatch(r"-?\d+", ans):
+            continue
+        items.append({"id": f"gsm8k-{i:04d}", "slice": "gsm8k",
+                      "prompt": r["question"].strip() + "\n\n" + ANSWER_INT,
+                      "answer": ans, "source_answer": r["answer"]})
+    return items
+
+
+def selftest_gsm8k(item):
+    """Re-extract the final answer from the untouched source rationale."""
+    m = re.search(r"####\s*(.+?)\s*$", item["source_answer"])
+    if not m:
+        return f"{item['id']}: no #### in source"
+    if m.group(1).replace(",", "") != item["answer"]:
+        return f"{item['id']}: source says {m.group(1)!r}, file says {item['answer']!r}"
+    # No "answer leaks into the question" check. It was tried and removed: it fired on 16
+    # of 200 items because small integers like 2 and 4 naturally occur in a word problem's
+    # text. A check that flags a curated benchmark 8% of the time is a broken check, not a
+    # broken dataset. What matters here is that the CONVERSION is faithful, which is the
+    # comparison above.
+    return None
+
+
 # --- selftest: independently re-derive every maths answer from the TEXT ---------
 
 PAT_START = re.compile(r"begins with (\d+) ")
@@ -225,6 +272,9 @@ def main():
     ap.add_argument("--depths", default="0.1,0.5,0.9")
     ap.add_argument("--n-longctx", type=int, default=30, help="items per depth")
     ap.add_argument("--longctx-tokens", type=int, default=4000)
+    ap.add_argument("--gsm8k", default="data/gsm8k-test.jsonl",
+                    help="path to the published GSM8K test.jsonl; '' to skip")
+    ap.add_argument("--n-gsm8k", type=int, default=200)
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--show", type=int, default=0, help="print N sample items and exit")
     args = ap.parse_args()
@@ -236,6 +286,16 @@ def main():
     for d in [float(x) for x in args.depths.split(",")]:
         items += [make_longctx(rng, d, i, args.longctx_tokens)
                   for i in range(args.n_longctx)]
+    if args.gsm8k and args.n_gsm8k:
+        try:
+            rows = [json.loads(l) for l in open(args.gsm8k) if l.strip()]
+        except FileNotFoundError:
+            print(f"gsm8k source not found at {args.gsm8k}; fetch it with:\n"
+                  "  curl -o data/gsm8k-test.jsonl https://raw.githubusercontent.com/"
+                  "openai/grade-school-math/master/grade_school_math/data/test.jsonl",
+                  file=sys.stderr)
+            return 1
+        items += make_gsm8k(rows, args.n_gsm8k, rng)
 
     if args.show:
         for it in items[:args.show]:
@@ -245,13 +305,17 @@ def main():
         return 0
 
     bad = [e for e in (selftest_math(i) for i in items if i["slice"] == "math") if e]
+    bad += [e for e in (selftest_gsm8k(i) for i in items if i["slice"] == "gsm8k") if e]
     if bad:
         print(f"SELFTEST FAILED: {len(bad)} items", file=sys.stderr)
         for e in bad[:10]:
             print("  " + e, file=sys.stderr)
         return 1
     n_math = sum(1 for i in items if i["slice"] == "math")
+    n_g = sum(1 for i in items if i["slice"] == "gsm8k")
     print(f"selftest: {n_math} maths items replay from their own text to the stated answer")
+    if n_g:
+        print(f"selftest: {n_g} gsm8k answers re-extract from their untouched rationale")
 
     if args.selftest:
         return 0
@@ -265,6 +329,9 @@ def main():
         print(f"  math k={k}: {len(ans)} items, answers {min(ans)}-{max(ans)}")
     lc = [i for i in items if i["slice"] == "longctx"]
     print(f"  longctx: {len(lc)} items, prompt ~{len(lc[0]['prompt'])//4} tokens")
+    g = [i for i in items if i["slice"] == "gsm8k"]
+    if g:
+        print(f"  gsm8k:   {len(g)} items from the published test set")
     return 0
 
 
