@@ -1980,3 +1980,37 @@ against sixteen -- so if the amplification claim in section 5b is right, the dos
 here. If GSM8K instead shows *more* damage than k=16, the synthetic items are measuring
 something narrower than reasoning and the dose curve does not generalise. That is the single
 most useful thing this slice can tell us beyond the instrument check.
+
+## P4-8  Calibration run, predicted before executing (2026-08-28, box up)
+
+Server: vLLM 0.27.1, bf16, `--max-model-len 6144`, `--max-num-seqs 12`. 120 maths items
+sampled across all four k, thinking on, `max_tokens` deliberately set to 4096 so the true
+token distribution is observable rather than clipped.
+
+**Thinking-token count.** A k-step chain needs roughly one short paragraph of working per
+step, and Qwen3 tends to re-verify at the end:
+
+| k | predicted completion tokens p50 |
+|---|---|
+| 2 | 250 |
+| 4 | 450 |
+| 8 | 800 |
+| 16 | **1,400**, p99 around 2,800 |
+
+If p99 at k=16 lands above 3,000 then the design's placeholder `max_tokens 2048` would have
+truncated roughly a third of the hardest slice and read it as reasoning failure. That is the
+single thing this run exists to prevent.
+
+**Base accuracy, thinking on**, repeating P4-6: 99 / 97 / 90 / **70** percent for k = 2 / 4 /
+8 / 16. The eval needs the hardest level inside 60-85 percent. Above 90 and the dose curve
+has no headroom, so `k` extends to 24 or 32 and the item file is regenerated before any
+quantized run.
+
+**Determinism.** `check-determinism` must pass. Qwen3's `generation_config.json` sets
+temperature 0.6 / top_p 0.95, and whether the request's `temperature: 0` overrides it in
+vLLM 0.27.1 is genuinely unknown. If two identical greedy requests differ, every quality
+number from this server is noise and the phase stops until it is fixed.
+
+**Thinking transport.** Unknown whether vLLM splits `<think>` into `reasoning_content`
+without `--reasoning-parser` set. `qualeval.py` handles both and records which, so this run
+answers it rather than assuming.

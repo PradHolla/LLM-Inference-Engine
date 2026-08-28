@@ -244,6 +244,10 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     sel = [i for i in items if i["slice"] == slice_]
     rng = random.Random(args.order_seed)
     rng.shuffle(sel)                       # same order every configuration
+    if args.limit:
+        # Calibration only. Taken AFTER the shuffle so the subsample is spread across k
+        # rather than being the first N of one level.
+        sel = sel[:args.limit]
     label = f"{slice_}/{'think' if think else 'nothink'}"
     print(f"  {label:<18} {len(sel):>4} items  max_tokens={max_tokens}", flush=True)
 
@@ -318,6 +322,8 @@ async def cmd_run(args):
         for slice_, think, mt in passes:
             if think and args.max_tokens_think:
                 mt = args.max_tokens_think
+            if not think and args.max_tokens_nothink:
+                mt = args.max_tokens_nothink
             await run_pass(args, items, slice_, think, mt, fh)
     print(f"\nwrote {out}")
     return 0
@@ -514,6 +520,9 @@ def main():
     r.add_argument("--max-tokens-think", type=int, default=0,
                    help="override the thinking passes once calibration has measured p99")
     r.add_argument("--order-seed", type=int, default=7)
+    r.add_argument("--limit", type=int, default=0,
+                   help="calibration only: cap items per pass. A real run uses all of them")
+    r.add_argument("--max-tokens-nothink", type=int, default=0)
     r.add_argument("--out", default="")
 
     d = sub.add_parser("check-determinism"); common(d)
