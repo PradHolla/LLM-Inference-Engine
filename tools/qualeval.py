@@ -61,7 +61,12 @@ PASSES = [
     ("longctx", False, 64),
 ]
 
-ANSWER_RE = re.compile(r"ANSWER\s*:\s*([^\n]*)", re.IGNORECASE)
+# [ \\t]* NOT \\s* around the colon, and [^\\n]+ not [^\\n]*. \\s crosses newlines, so the
+# case-insensitive "Answer:" inside a "### Final Answer:" heading swallowed the line break
+# and captured the WHOLE NEXT LINE ("ANSWER: 72") as the answer. normalize then rejected it
+# and the item scored unparseable with a correct answer sitting one line below. Requiring at
+# least one character on the SAME line makes the heading match nothing and the real marker win.
+ANSWER_RE = re.compile(r"ANSWER[ \t]*:[ \t]*([^\n]+)", re.IGNORECASE)
 # Qwen3 is heavily trained to close a maths answer with \boxed{}, and it does so even when
 # the prompt demands "ANSWER: <integer>". Calibration measured 16% of COMPLETED, CORRECT
 # responses ending in \boxed{N} with no ANSWER: line -- graded wrong by an earlier version of
@@ -504,6 +509,9 @@ def cmd_selftest(args):
         ("", "math", None, "empty completion"),
         ("<think>reasoning ran out of tokens", "math", None, "truncated mid-thinking"),
         (r"### Final Answer\n$$\n\boxed{3}\n$$", "math", "3", "boxed, Qwen3's real habit"),
+        ("### Final Answer:\nANSWER: 72", "math", "72", "heading 'Answer:' must not eat the next line"),
+        ("**Final Answer:**\n\nANSWER: 3060", "math", "3060", "bold heading, blank line between"),
+        ("Final Answer:\n", "math", None, "bare heading alone yields nothing"),
         (r"\boxed{108}", "math", "108", "boxed bare"),
         (r"\boxed{1,000}", "math", "1000", "boxed with separator"),
         (r"\boxed{\text{42}}", "math", "42", "boxed wrapping text"),

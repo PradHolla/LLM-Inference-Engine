@@ -2221,3 +2221,45 @@ batch composition changes the numerics. Keeping the longer reference would have 
 asymmetry inside `d0`, the very quantity that is supposed to isolate it. Paying $0.46 to
 delete a confound that would otherwise need arguing away is the right trade in a phase whose
 entire discipline is that every configuration runs identically.
+
+## P4-13  Extraction bug 2, found mid-run and fixed offline (2026-08-28)
+
+bf16-a's `math/think` pass reported 7.0% unparseable at k=16 and 3.2% at k=32, with
+`parsed AND wrong: 1` of 180. Inspecting the saved text showed four of the six had a correct
+answer plainly present:
+
+    ### Final Answer:
+    ANSWER: 72
+
+The regex was `ANSWER\s*:\s*([^\n]*)` with `IGNORECASE`. Two mistakes compounding:
+
+1. `IGNORECASE` makes it match `Answer:` inside the heading **"### Final Answer:"**.
+2. `\s` matches newlines, so `\s*` after that colon swallowed the line break, and `([^\n]*)`
+   then captured the entire NEXT line as the answer -- the literal string `"ANSWER: 72"`.
+
+`normalize` correctly refused that as a non-integer, so the item scored unparseable while a
+correct answer sat one line below. **The grader was defeated by the model agreeing with it.**
+
+Fixed to `ANSWER[ \t]*:[ \t]*([^\n]+)`: horizontal whitespace only, and at least one
+character required on the same line. The heading now matches nothing and the real marker
+wins. Verified against the four real completions, all four recover, and three regression
+cases were added to `selftest` (heading followed by the marker, bold heading with a blank
+line, bare heading alone must still yield nothing). 35 cases pass.
+
+### Why this cost no GPU time, by design
+
+Design section 2c required the full completion text be written for every item, on the
+grounds that "a grading bug is inevitable and should not cost GPU time to fix". **That
+decision has now paid for itself twice in one session** -- the `\boxed{}` bug in calibration
+and this one -- both diagnosed and fixed against saved output while the GPU carried on with
+the next run.
+
+### CONSEQUENCE: bf16-a and bf16-b will be graded by different code
+
+bf16-a is running with the pre-fix grader loaded in memory; bf16-b will launch with the fix.
+Their stored `correct` fields are therefore not comparable, and **the `compare` step at the
+end of the chained script will report a wrong `d0`.**
+
+The fix is not to touch the running job. It is to run `qualeval.py grade` over BOTH files
+before comparing, which re-scores from saved text with one version of the code and costs
+nothing. Recorded here so the chain's own compare output is not mistaken for the real floor.
