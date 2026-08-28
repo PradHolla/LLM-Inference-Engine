@@ -162,9 +162,26 @@ class Rec:
     e2e: float | None = None
     status: str = "ok"
     error: str | None = None
+    attempts: int = 1
 
 
-async def one(client, url, item, cfg, think, max_tokens, seed):
+async def one(client, url, item, cfg, think, max_tokens, seed, attempts=3):
+    """Retry transient transport errors. A dropped connection must not become a missing
+    item: compare() joins on id, so lost items silently shrink the denominator, and they
+    do not go missing at the same rate for every configuration. That is a biased sample,
+    which is worse than a slow run."""
+    for a in range(attempts):
+        r = await _one(client, url, item, cfg, think, max_tokens, seed)
+        if r.status != "exception":
+            r.attempts = a + 1
+            return r
+        if a < attempts - 1:
+            await asyncio.sleep(1.5 * (a + 1))
+    r.attempts = attempts
+    return r
+
+
+async def _one(client, url, item, cfg, think, max_tokens, seed):
     r = Rec(config=cfg, slice=item["slice"], id=item["id"], thinking=think,
             k=item.get("k"), depth=item.get("depth"), answer=item["answer"],
             prompt_chars=len(item["prompt"]))
@@ -276,6 +293,7 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     # being the first N of one level, and so the SAME N items are chosen for every
     # configuration (order_seed is fixed). That is what lets a capped run still pair against
     # an uncapped one: compare joins on item id and drops the surplus.
+    label = f"{slice_}/{'think' if think else 'nothink'}"
     cap = args.limit
     for spec in (args.limit_pass or "").split(","):
         if not spec.strip():
@@ -283,9 +301,14 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
         sl, mode, n = spec.split(":")
         if sl == slice_ and (mode == "think") == bool(think):
             cap = int(n)
+    # `is not None`, not truthiness: a cap of 0 means SKIP THIS PASS, and `if cap:` silently
+    # treated it as "no cap" and ran all 180 items instead of none.
     if cap:
         sel = sel[:cap]
-    label = f"{slice_}/{'think' if think else 'nothink'}"
+    elif cap == 0 and args.limit_pass and f"{slice_}:{'think' if think else 'nothink'}:0" \
+            in args.limit_pass.replace(" ", ""):
+        print(f"  {label:<18} skipped (capped at 0)", flush=True)
+        return []
     print(f"  {label:<18} {len(sel):>4} items  max_tokens={max_tokens}", flush=True)
 
     sem = asyncio.Semaphore(args.concurrency)
@@ -295,7 +318,14 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     stop = asyncio.Event()
     probe = asyncio.create_task(probe_batch(args.url, stop, samples))
 
-    limits = httpx.Limits(max_connections=args.concurrency + 8)
+    # max_keepalive MUST be set alongside max_connections. Left at its default of 20
+    # against 40 max_connections, the pool evicts and closes connections under fast
+    # turnover, and the next request reuses a dead one and dies instantly with ReadError.
+    # Measured: 36% failures on the fast no-thinking pass against 1% on the slow thinking
+    # pass -- the opposite of a network timeout, which is what this was first misdiagnosed
+    # as. bench.py sets the two equal and never had the problem.
+    limits = httpx.Limits(max_connections=args.concurrency + 8,
+                          max_keepalive_connections=args.concurrency + 8)
     async with httpx.AsyncClient(limits=limits, timeout=args.timeout) as client:
         async def work(item):
             async with sem:
