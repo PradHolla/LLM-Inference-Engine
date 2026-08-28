@@ -77,12 +77,25 @@ Therefore the design has a control, in exactly the role `A-nocache-unique` playe
 
     C0: bf16 run A vs bf16 run B, same items, same concurrency, different process
 
-`d0`, the discordance rate from C0, is the **noise floor**. No quantization result counts
-unless it beats the floor. A treatment that lands at the floor has demonstrated nothing --
-which is a valid, publishable outcome and the most likely one for fp8.
+`d0`, the discordance rate from C0, is the **noise floor**.
 
-This is the single element a naive eval omits, and without it every number in the phase is
-uninterpretable.
+CORRECTION to this section as first drafted, which said "no result counts unless it beats
+the floor". That conflates two different questions, and only one of them needs `d0`:
+
+| question | test | needs `d0`? |
+|---|---|---|
+| Is the quantized model **less accurate**? | McNemar asymmetry: `b` (bf16 right, quant wrong) against `c` (the reverse) | **no** |
+| Does it **change answers** more than noise does? | discordance rate against `d0` | **yes** |
+
+Symmetric nondeterminism inflates `b` and `c` equally, so it dilutes McNemar's power but
+does not bias it -- the accuracy verdict is valid without the floor. The floor is still
+required, for three things: interpreting how much actually changed, knowing whether the test
+had any power at all, and detecting a configuration that shuffles answers without moving
+accuracy. Both numbers get reported; they answer different questions.
+
+`d0` is itself an estimate with an error bar -- at `d0 = 4%` on n=360 its standard error is
+1.0 point, so it is `4% +/- 2%`, not exactly 4%. Do not compare a treatment against it as
+though it were a constant.
 
 ### 2c. Grading is a second instrument and can be silently wrong
 
@@ -98,6 +111,16 @@ Mitigations, all mandatory:
 - **Full completion text is written to the JSONL for every item.** A grading bug is then
   re-runnable offline against saved output and costs no GPU time to fix. This is cheap and
   non-negotiable.
+- **Extract the LAST `ANSWER:` in the reply, and only from post-thinking content.** A model
+  reasoning aloud will write "ANSWER: 42", reconsider, and finish with 37. Taking the first
+  match grades the abandoned answer. Related: vLLM only splits reasoning into
+  `reasoning_content` when `--reasoning-parser` is set; otherwise the `<think>` block arrives
+  inside `content`. **The harness must handle both and record which path it took**, or the
+  thinking-token count is silently zero.
+- **No loose fallback.** If the format is absent, do not go hunting for the last integer in
+  the reply. A fallback that fires more often for one configuration than another silently
+  applies a different grading standard to each, which is precisely the class of bug that
+  produces plausible numbers instead of errors.
 - `unparseable` is its own outcome, never folded into `wrong`. A quantized model that stops
   following an output format is a real finding; a regex that stopped matching is a bug; they
   must be distinguishable without re-running.
@@ -219,16 +242,42 @@ test, chosen because Phase 6 hands the model retrieved documents for a living.
 
 ### 3d. Run conditions, identical for every configuration
 
-- **Fixed concurrency 32.** Not 1. Concurrency 1 would be cheaper per token to reason about
-  but costs roughly 2.9 GPU-hours per configuration, and it measures a condition no user is
-  ever in. 32 is the deployed condition, and it means the noise floor already contains
-  batch-composition nondeterminism -- which is the honest floor.
+- **Pin `--max-num-seqs`, do not merely fix client concurrency.** This is the correction
+  that matters most in this section. Firing 32 concurrent requests does **not** give every
+  configuration a batch of 32: a maths item is roughly 200 prompt + 2048 max output = 2,250
+  tokens, so bf16's 33,424-token cache holds about 14 of them while fp8's ~87,000 holds all
+  32. The configurations would then run at different batch sizes, and by incident 22
+  different batch sizes change the numerics -- producing discordance that is not quality
+  damage at all. **Every quality run pins `--max-num-seqs` to what the SMALLEST budget
+  (bf16) can hold: 12 for maths and gsm8k, 6 for longctx.** Verify the achieved value from
+  the server's own metrics rather than assuming the flag took.
+- **Client concurrency 32, capped by the pin above.** Concurrency 1 would cost roughly 2.9
+  GPU-hours per configuration and measures a condition no user is ever in.
 - **Same item order every run**, from a fixed shuffle seed. Removes one variance source
   without hiding the one being measured.
-- `temperature: 0.0`, request `seed` set, `max_tokens` 2048 for T1 and 256 for T2/T3.
-- Same server flags across configurations except the one under test, with
-  `--kv-cache-memory-bytes` pinned. `--gpu-memory-utilization` is not reproducible: Phase 3
-  saw 26,176 and 33,424 tokens from identical launches.
+- `temperature: 0.0`, request `seed` set. `max_tokens` **is set from calibration, not
+  guessed** -- see the trap below.
+- Same server flags across configurations except the one under test.
+
+**TRAP: pinning the KV cache to a COMMON value would nullify the entire phase.** Phase 3's
+lesson was to pin `--kv-cache-memory-bytes` because `--gpu-memory-utilization` gave 26,176
+and 33,424 tokens on identical launches. Carried over carelessly, that becomes "give every
+configuration the same KV budget" -- which hands the quantized configurations bf16's cache
+and deletes the KV-capacity mechanism being measured. The result would be a clean, confident,
+completely artificial null.
+
+    pin PER CONFIGURATION, to a value measured once for that configuration.
+    NOT to one value shared across configurations.
+
+The pin buys reproducibility between repeat launches of the same configuration. It must
+never be used to equalise budgets across configurations.
+
+**TRAP: `max_tokens = 2048` for the thinking slice is a guess, and a wrong guess is
+invisible.** A k=16 chain with thinking may well exceed it. If it does, the item grades wrong
+for running out of room rather than for reasoning badly, and if a quantized model thinks
+longer it truncates more and looks less accurate for the wrong reason. **Calibration must
+report the thinking-token distribution at k=16 and `max_tokens` must be set above its p99**,
+with the truncation rate reported beside every accuracy number regardless.
 
 ### 3e. Cost
 
@@ -291,8 +340,25 @@ is the case where quantization should do nothing; if it moves, the harness is su
 | Q0a | bf16 | fp16 | baseline, and half of the noise-floor control |
 | Q0b | bf16 | fp16 | second bf16 run, same items -- **the control** |
 | Q1 | fp8 | fp16 | sm86 has no native fp8; runs via Marlin dequant. Memory saving yes, tensor-core throughput no |
-| Q2 | int4 AWQ | fp16 | pre-quantized checkpoint; calibrated on data unlike this workload |
+| Q2 | int4 w4a16 | fp16 | `RedHatAI/Qwen3-8B-quantized.w4a16`, built with llm-compressor for vLLM |
+| Q2b | int4 AWQ | fp16 | `pytorch/Qwen3-8B-AWQ-INT4` -- **optional but valuable**, see below |
 | Q3 | fp8 | fp8 | stacks the +11% already measured in Phase 3; KV error accumulates with length, so T3 is the slice that matters |
+
+**Q1 needs no download.** vLLM quantizes bf16 weights to fp8 at load time via
+`--quantization fp8`. Verify this on the box before planning around it.
+
+**The int4 checkpoint choice may dominate the int4 result, which is why there are two.**
+`PROJECT.md` section 5b warned that a pre-quantized checkpoint is "calibrated on data unlike
+your workload"; the two available checkpoints make that concrete. `pytorch/Qwen3-8B-AWQ-INT4`
+is calibrated on **ten samples from `mmlu_abstract_algebra`**, and its own card reports 56
+against bf16's 58 on that very task -- the one it was tuned for. That is a demonstration
+checkpoint, not a serving one. `RedHatAI/Qwen3-8B-quantized.w4a16` is built with
+llm-compressor specifically for vLLM and is the primary.
+
+Running both turns a caveat into a measurement. **If the two int4 checkpoints differ from
+each other by more than either differs from bf16, then "int4 quality" is not a property of
+int4 at all -- it is a property of whoever calibrated the checkpoint.** That would be the
+most useful single result in the phase, and it costs one extra download and 25 minutes.
 
 ---
 
@@ -345,7 +411,7 @@ prediction that had to be corrected before measurement is evidence the method wo
 | 2b | GSM8K conversion, faithfulness check against source rationales | no | Claude -- DONE |
 | 3 | `tools/qualeval.py` -- fixed-concurrency runner, saves full text | no | Claude |
 | 4 | offline grader test against synthetic completions | no | Claude |
-| 5 | difficulty calibration: bf16 sample, tune `k` for 60-85% base accuracy | yes, small | Claude |
+| 5 | difficulty calibration: bf16 sample -- tune `k` for 60-85% base accuracy AND record the thinking-token distribution to set `max_tokens` | yes, small | Claude |
 | 6 | re-measure bf16 baseline at `--max-model-len 6144` | yes | implementer |
 | 7 | run Q0a/Q0b, establish `d0` | yes | implementer |
 | 8 | run Q1/Q2/Q3 on both workloads | yes | implementer |
@@ -354,3 +420,36 @@ prediction that had to be corrected before measurement is evidence the method wo
 Steps 1-4 cost nothing and the box stays stopped. Step 5 is the first GPU spend and it is
 small; without it the eval risks a ceiling or floor effect that would make every later
 comparison meaningless.
+
+
+---
+
+## 9. Design review, 2026-08-28, before writing the runner
+
+Held deliberately between designing the experiment and building the instrument, because a
+flaw found here costs nothing and the same flaw found after a sweep costs money and a rerun.
+Eight findings; the first three would each have damaged the phase.
+
+| # | finding | severity | status |
+|---|---|---|---|
+| 1 | Pinning `--kv-cache-memory-bytes` to a **common** value across configurations deletes the KV mechanism and guarantees a null result | **critical** | fixed, section 3d |
+| 2 | Fixed client concurrency does not fix batch size -- bf16 fits 14 maths items, fp8 fits 32, and by incident 22 that alone changes answers | **major** | fixed, pin `--max-num-seqs` per slice |
+| 3 | At a flat 90 items per level, a true 2-point drop at k=16 is ~1.8 asymmetric items out of ~5 discordant. Unresolvable | **major** | fixed, items reallocated 30/60/120/150 |
+| 4 | "Nothing counts unless it beats the floor" conflated the accuracy question with the stability question. McNemar is unbiased under symmetric noise | design error | fixed, section 2b |
+| 5 | `max_tokens 2048` for k=16 thinking was a guess; truncation would be read as reasoning failure | **major** | fixed, calibration now sets it |
+| 6 | The int4 checkpoint may dominate the int4 result. One available checkpoint is calibrated on ten samples of abstract algebra | **major** | turned into a measurement, Q2 vs Q2b |
+| 7 | `ANSWER:` written mid-thinking and later revised would be graded instead of the final answer | moderate | fixed, last-match, post-thinking only |
+| 8 | `d0` was treated as an exact constant; at n=360 it is `4% +/- 2%` | minor | recorded, section 2b |
+
+**Cost of the review: zero GPU-seconds.** Findings 1 and 2 would both have produced clean,
+confident, entirely artificial numbers -- the failure mode section 10 of `CLAUDE.md` names as
+the one that destroys a project like this one. Neither would have raised an error.
+
+### Still open, to resolve on the box before the real runs
+
+- Does `--quantization fp8` work on sm86 in vLLM 0.27.1, or is a pre-quantized checkpoint
+  needed for Q1 too?
+- Does `--reasoning-parser` need setting for Qwen3 on this version, and does `bench.py`'s
+  existing `reasoning_content` handling already imply it does not?
+- Confirm the published GSM8K figure for Qwen3-8B from the model card before reading any
+  deviation as a harness bug (`predictions.md` P4-7).

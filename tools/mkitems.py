@@ -267,8 +267,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="results/phase4-items.jsonl")
     ap.add_argument("--seed", type=int, default=20260828)
-    ap.add_argument("--k", default="2,4,8,16", help="maths chain lengths")
-    ap.add_argument("--n-math", type=int, default=90, help="items per chain length")
+    ap.add_argument("--k", default="2:30,4:60,8:120,16:150",
+                    help="chain length:count pairs. Counts are DELIBERATELY UNEVEN -- at a "
+                         "flat 90 per level, a true 2-point drop at k=16 shows up as ~1.8 "
+                         "asymmetric items out of ~5 discordant, which no test can resolve. "
+                         "k=2 is a ceiling with thinking on and needs almost "
+                         "nothing; k=16 is where the effect lives and gets the items.")
     ap.add_argument("--depths", default="0.1,0.5,0.9")
     ap.add_argument("--n-longctx", type=int, default=30, help="items per depth")
     ap.add_argument("--longctx-tokens", type=int, default=4000)
@@ -281,8 +285,9 @@ def main():
 
     rng = random.Random(args.seed)
     items = []
-    for k in [int(x) for x in args.k.split(",")]:
-        items += [make_math(rng, k, i) for i in range(args.n_math)]
+    for spec in args.k.split(","):
+        k, n = (int(x) for x in spec.split(":"))
+        items += [make_math(rng, k, i) for i in range(n)]
     for d in [float(x) for x in args.depths.split(",")]:
         items += [make_longctx(rng, d, i, args.longctx_tokens)
                   for i in range(args.n_longctx)]
