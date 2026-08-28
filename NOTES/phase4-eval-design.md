@@ -409,8 +409,8 @@ prediction that had to be corrected before measurement is evidence the method wo
 | 1 | this document | no | Claude, xhigh |
 | 2 | `tools/mkitems.py` and hand-verification of a sample | no | Claude |
 | 2b | GSM8K conversion, faithfulness check against source rationales | no | Claude -- DONE |
-| 3 | `tools/qualeval.py` -- fixed-concurrency runner, saves full text | no | Claude |
-| 4 | offline grader test against synthetic completions | no | Claude |
+| 3 | `tools/qualeval.py` -- runner, offline regrade, paired McNemar | no | Claude -- DONE |
+| 4 | instrument verification, end to end, no GPU | no | Claude -- DONE |
 | 5 | difficulty calibration: bf16 sample -- tune `k` for 60-85% base accuracy AND record the thinking-token distribution to set `max_tokens` | yes, small | Claude |
 | 6 | re-measure bf16 baseline at `--max-model-len 6144` | yes | implementer |
 | 7 | run Q0a/Q0b, establish `d0` | yes | implementer |
@@ -453,3 +453,66 @@ the one that destroys a project like this one. Neither would have raised an erro
   existing `reasoning_content` handling already imply it does not?
 - Confirm the published GSM8K figure for Qwen3-8B from the model card before reading any
   deviation as a harness bug (`predictions.md` P4-7).
+
+
+---
+
+## 10. Instrument verification, 2026-08-28
+
+`CLAUDE.md` section 2: assume any new measurement tool is wrong until proven otherwise.
+`bench.py` shipped with two bugs that produced plausible numbers rather than errors, so
+`qualeval.py` was not trusted until it had been run end to end against known ground truth.
+
+### 10a. Unit level -- `qualeval.py selftest`
+
+19 extraction cases and 6 exact-McNemar values, no server. The extraction cases are the
+adversarial ones, not the happy path: `ANSWER: 42` followed later by `ANSWER: 37` must yield
+37; `<think>ANSWER: 42</think> ... ANSWER: 37` must ignore the abandoned answer inside the
+thinking block; `The answer is 42.` must yield **nothing**, because hunting for a loose
+integer is the fallback that would grade two configurations by different standards.
+The McNemar values were checked by hand: `b=8, c=2` gives `2 x (45+10+1)/1024 = 0.109375`.
+
+### 10b. End to end -- against a fake server with a CONSTRUCTED difference
+
+A throwaway OpenAI-streaming server was written whose correctness is controllable per item.
+Two runs were then set up to differ in a way whose exact answer was known in advance:
+
+    server A   accuracy 0.8, seed 1, thinking via reasoning_content
+    server B   same seed, same items, with 10 items KNOWN to be correct in A inverted,
+               3 items truncated, and thinking via inline <think> tags
+
+    predicted: b = 10, c = 0, McNemar p = 2/2^10 = 0.001953125
+
+Measured on the flipped slice: **b = 10, c = 0, p = 0.0020.** The truncated items surfaced
+as `truncated 0.8%` and `unparseable 0.8%`, separately from wrong, and the three that
+produced no output at all were marked `empty` rather than silently graded as incorrect.
+Both thinking paths were exercised in one test -- 360 records on `reasoning_content` and 360
+on `inline_tags` -- which is the failure that would otherwise report a thinking-token count
+of zero on whichever path was not implemented.
+
+### 10c. Two defects the verification found
+
+- **The unpaired-record warning never fired.** It was conditioned on the pair count
+  differing from *both* input totals, so a run where only B lost records reported nothing.
+  A silently shrinking denominator is how a biased sample reaches a conclusion. Fixed to
+  warn whenever either side loses records, naming both counts.
+- **The batch-size probe returned `med 0 max 0`, and the first explanation for it was
+  wrong.** It was written off as an artifact of a fake server answering in microseconds; a
+  second run with an injected per-token delay returned `med 0 max 0` again, so that
+  explanation had been recorded before it was tested. The real cause is the probe's sampling
+  interval: it polls once per second, and a fake-server pass finishes inside one interval, so
+  the only sample taken is the one before any request has landed. Fixed by sampling four
+  times a second and, more importantly, by **reporting the sample count and warning when
+  every sample reads zero** -- because a probe that reads zero looks identical whether the
+  metric name is wrong, the endpoint is missing, or the server is genuinely idle, and on the
+  real box that ambiguity is expensive. This is incident 5 in miniature: the observation was
+  believed before it was checked.
+
+### 10d. What this verification still cannot cover
+
+The fake server is deterministic by construction, so `check-determinism` passing against it
+proves only that the code path runs. **The real check is on the box**, against vLLM, where
+Qwen3's `generation_config.json` sets `temperature 0.6 / top_p 0.95` and the question of
+whether the request's `temperature: 0` overrides it is genuinely open. If it does not, every
+quality number from that server is noise. Run `check-determinism` first, every session,
+before anything else.
