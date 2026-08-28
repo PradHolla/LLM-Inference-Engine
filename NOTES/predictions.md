@@ -2171,3 +2171,53 @@ two other item families (gsm8k, longctx) carried as independent evidence.
 ceiling; thinking-off collapses with chain length. That makes T2 the slice most able to show
 damage and T1 the slice that tests the amplification claim, which is close to the opposite of
 what the design assumed.
+
+## P4-12  Cost control, and the detection limit it buys (decision 2026-08-28)
+
+The quality runs pin `--max-num-seqs 12` so every configuration decodes at the same batch
+size (design 3d). That pin is what makes the comparison valid, and it is also what makes the
+runs slow: **measured 249 tok/s at B=12**, against the 850 tok/s the design assumed at B=32.
+The control costs 3.4x the wall clock. That tension was not costed when the design was
+written.
+
+    measured per configuration, all four passes, 360 maths + 200 gsm8k:   ~65 min
+    five configurations:                                          5.5 hr, about $6.60
+
+`math/think` alone is 39 of those 65 minutes: 360 items at roughly 1,600 tokens each. It is
+also the pass sitting at a 100% ceiling. **Cut to 180 items**, which halves the dominant cost
+and leaves the other three passes untouched.
+
+### What that costs in statistical power, stated plainly
+
+With the reference at 100%, `c` is approximately zero and every quantization error lands in
+`b`, so the exact McNemar reduces to `p = 2 / 2^b`.
+
+| true error rate | expected `b` at n=180 | p |
+|---|---|---|
+| 2% | 3.6 | 0.125, not significant |
+| 3% | 5.4 | 0.06, marginal |
+| 4% | 7.2 | 0.016, significant |
+| 6% | 10.8 | 0.001 |
+
+**The detection floor on `math/think` at n=180 is roughly a 4% error rate.** Section 5b puts
+int4 at 1-3% average and fp8 under 1%, so this pass can resolve int4 damage and **cannot**
+resolve fp8 damage.
+
+That is an acceptable trade only because it is written down before the run: **a null result
+on `math/think` for fp8 must be reported as "no damage detectable above a 4% floor", never as
+"no damage".** The slices that carry the fp8 question are `math/nothink` (360 items, and the
+only slice with real headroom -- accuracy collapses with chain length there) and `gsm8k`
+(200 items, both conditions).
+
+### bf16-a was restarted rather than allowed to finish
+
+The first bf16-a launch was 155 records into a 360-item thinking pass when the cut was
+decided. It was killed and relaunched at 180 rather than kept, discarding about 23 minutes of
+GPU (roughly $0.46).
+
+Reason: a 360-item pass and a 180-item pass are **not the same run condition.** Queue depth
+over time and the tail drain differ, batch composition follows from both, and by incident 22
+batch composition changes the numerics. Keeping the longer reference would have put that
+asymmetry inside `d0`, the very quantity that is supposed to isolate it. Paying $0.46 to
+delete a confound that would otherwise need arguing away is the right trade in a phase whose
+entire discipline is that every configuration runs identically.

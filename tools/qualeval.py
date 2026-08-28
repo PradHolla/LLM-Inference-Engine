@@ -267,10 +267,19 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     sel = [i for i in items if i["slice"] == slice_]
     rng = random.Random(args.order_seed)
     rng.shuffle(sel)                       # same order every configuration
-    if args.limit:
-        # Calibration only. Taken AFTER the shuffle so the subsample is spread across k
-        # rather than being the first N of one level.
-        sel = sel[:args.limit]
+    # Per-pass caps. Taken AFTER the shuffle, so a subsample is spread across k rather than
+    # being the first N of one level, and so the SAME N items are chosen for every
+    # configuration (order_seed is fixed). That is what lets a capped run still pair against
+    # an uncapped one: compare joins on item id and drops the surplus.
+    cap = args.limit
+    for spec in (args.limit_pass or "").split(","):
+        if not spec.strip():
+            continue
+        sl, mode, n = spec.split(":")
+        if sl == slice_ and (mode == "think") == bool(think):
+            cap = int(n)
+    if cap:
+        sel = sel[:cap]
     label = f"{slice_}/{'think' if think else 'nothink'}"
     print(f"  {label:<18} {len(sel):>4} items  max_tokens={max_tokens}", flush=True)
 
@@ -551,7 +560,12 @@ def main():
                    help="override the thinking passes once calibration has measured p99")
     r.add_argument("--order-seed", type=int, default=7)
     r.add_argument("--limit", type=int, default=0,
-                   help="calibration only: cap items per pass. A real run uses all of them")
+                   help="cap EVERY pass at N. Calibration only; prefer --limit-pass")
+    r.add_argument("--limit-pass", default="",
+                   help="cap one pass: 'math:think:180'. Comma-separate several. The "
+                        "thinking passes dominate cost (math/think is 60 percent of a run) "
+                        "and sit at a 100 percent ceiling, where each item is maximally "
+                        "informative, so halving them loses little")
     r.add_argument("--max-tokens-nothink", type=int, default=0)
     r.add_argument("--out", default="")
 
