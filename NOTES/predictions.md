@@ -2014,3 +2014,58 @@ number from this server is noise and the phase stops until it is fixed.
 **Thinking transport.** Unknown whether vLLM splits `<think>` into `reasoning_content`
 without `--reasoning-parser` set. `qualeval.py` handles both and records which, so this run
 answers it rather than assuming.
+
+## P4-9  Measured at launch, 2026-08-28: KV budget at the Phase 4 server settings
+
+    vLLM 0.27.1, bf16, --max-model-len 6144 --max-num-seqs 12
+    GPU KV cache size: 27,280 tokens        (read from the server's own log)
+
+**This revises the arithmetic in P4-2, which used Phase 3's 33,424.** That figure was
+measured at `--max-model-len 4096`; raising the limit to 6144 costs KV, because vLLM reserves
+against the longest sequence it must be able to serve.
+
+    tokens per request at 4096/1024 = 5120
+    bf16 concurrency = 27,280 / 5120 = 5.3      (was predicted 6.5)
+
+The direction of P4-2 is unchanged and the gap widens slightly: a smaller bf16 batch means
+quantization has more headroom to recover, so **fp8 on the capacity workload should now beat
+the predicted 2.5-3.0x rather than fall short of it.** Recording the revision here rather
+than editing P4-2, per the append-only rule.
+
+Observed KV budgets across this project so far, all the same model on the same GPU:
+
+| max_model_len | other flags | KV tokens |
+|---|---|---|
+| 4096 | Phase 3 defaults, launch 1 | 26,176 |
+| 4096 | Phase 3 defaults, launch 2 | 33,424 |
+| 4096 | later ablation launches | 17,472 |
+| 6144 | `--max-num-seqs 12` | **27,280** |
+
+A 2x spread. Any comparison that does not read this number from each run's own log is
+uninterpretable, which is why the design pins it per configuration and never across.
+
+**Also settled from the config, without an experiment:** `reasoning_parser=''`. vLLM has no
+reasoning parser configured, so Qwen3's `<think>` block arrives inline in `content` rather
+than split into `reasoning_content`. `qualeval.py` handles both and records which path it
+took; the calibration run confirms it empirically.
+
+## P4-10  Early signal from the determinism probe, before calibration finished
+
+The determinism check runs one **k=2** item with `max_tokens=512`. The server reported it
+finishing with `finished_reason="length"` -- it exhausted 512 tokens without reaching an
+answer.
+
+P4-8 predicted **250 tokens p50 at k=2**. The easiest level in the whole item set is already
+past double that. If k=2 needs more than 512, the predicted 1,400 at k=16 is going to be far
+too low, and the design's placeholder `max_tokens 2048` would have truncated much more than
+the hardest slice.
+
+This is exactly what the calibration run exists to catch, and it is being caught before any
+quantized configuration was launched rather than after.
+
+**A tension this exposes, worth carrying into the rest of the phase:** thinking tokens and KV
+capacity fight each other directly. Raising `max_model_len` to fit longer reasoning shrinks
+the KV cache (P4-9: 6144 costs about 6,000 tokens of cache against 4096), which lowers
+concurrency, which lowers throughput. A thinking-heavy workload is therefore doubly expensive
+-- each request occupies KV longer *and* the server can hold fewer of them. That is the
+Phase 7 thesis appearing as an operational constraint in Phase 4.
