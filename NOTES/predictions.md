@@ -1821,3 +1821,126 @@ would have caught all three before predicting.
   for every Phase 4 comparison; `--gpu-memory-utilization` is not reproducible.
 - This workload is prefill-bound at 412 prompt / 64 output. Quantisation results will
   differ on a decode-heavy workload, and Phase 4 should measure at least one of each.
+
+---
+
+# Phase 4 -- quantization
+
+Written 2026-08-28, box stopped, no Phase 4 measurement taken. Protocol in
+`NOTES/phase4-eval-design.md`.
+
+## The model used for every throughput prediction below
+
+GPU time per request = prefill + this request's share of decode.
+
+    prefill(P)  = 2 N P / (peak_flops x compute_eff)
+                  N = 8,190,735,360   peak = 125e12   compute_eff = 0.36 @512, 0.50 @4096
+
+    t_step(B)   = W_bytes / (BW x mem_eff)      BW = 600e9, mem_eff = 0.803 (vLLM, Phase 3)
+                  bf16  W = 16.39e9 B  ->  34.0 ms
+                  fp8   W =  8.19e9 B  ->  17.0 ms, call it 22 ms after Marlin dequant
+                  int4  W =  5.0e9  B  ->  10.4 ms, call it 16 ms after Marlin dequant
+
+    decode      = out_tokens x t_step(B) / B
+
+sm86 has no native fp8, so both quantized formats dequantize into bf16 tensor cores. The
+dequant penalties above (17->22, 10.4->16) are the least defensible numbers here and are
+the first thing to check against measurement.
+
+## P4-1  Weight quantization on the PHASE 3 workload (512 / 64)
+
+    prefill      = 2 x 8.19e9 x 512 / (125e12 x 0.36)        = 0.186 s
+    B in flight  = 17 (Little's Law on the Phase 3 measurement)
+    decode bf16  = 64 x 0.034 / 17                           = 0.128 s
+    total                                                    = 0.314 s  -> 3.19 req/s
+
+    fp8   decode = 64 x 0.022 / 17 = 0.083, prefill +10% = 0.205, total 0.288 -> 1.09x
+    int4  decode = 64 x 0.016 / 17 = 0.060, prefill +15% = 0.214, total 0.274 -> 1.15x
+
+**Predicted: fp8 +5 to +20%, int4 +10 to +30% on the Phase 3 workload.**
+
+CORRECTION to `phase4-eval-design.md` section 7 as first drafted, which said "roughly 0%".
+That is right for *KV* quantization and wrong for *weight* quantization, and doing the
+arithmetic is what caught it. Two different mechanisms are in play and only one of them is
+idle here:
+
+- the **KV-capacity** mechanism does nothing, because KV is 29% utilised and B is not
+  KV-bound. This is the prefix-caching lesson exactly.
+- the **decode-bandwidth** mechanism still works, because every decode step reads all the
+  weights regardless of how full the KV cache is.
+
+The model says the second is worth only ~10% here because decode is 41% of the request's
+GPU time at 64 output tokens. A large measured gain on this workload would mean the
+bandwidth model is wrong, not that quantization is better than expected.
+
+## P4-2  Weight quantization on the CAPACITY-PRESSURE workload (4096 / 1024)
+
+    prefill      = 2 x 8.19e9 x 4096 / (125e12 x 0.50)       = 1.073 s
+    tokens/req   = 5120
+    B(bf16)      = 33,424 / 5120 = 6.5   -> 6
+    decode bf16  = 1024 x 0.034 / 6                          = 5.80 s
+    total                                                    = 6.87 s  -> 0.146 req/s
+                                                                decode is 84% of the work
+
+    fp8   B = 87,000/5120 = 17;  decode = 1024 x 0.022/17 = 1.33; prefill 1.18; total 2.51
+    int4  B = 106,000/5120 = 20; decode = 1024 x 0.016/20 = 0.82; prefill 1.23; total 2.05
+
+**Predicted: fp8 2.5-3.0x, int4 3.0-3.5x.** Both mechanisms are live here -- B rises
+because KV rooms opens, and each step is cheaper because there are fewer weight bytes.
+
+The gap between P4-1 and P4-2 is the entire thesis of the phase. Same technique, same
+hardware, same model: **1.1x or 2.7x depending only on which workload it is measured on.**
+
+## P4-3  fp8 KV stacked on fp8 weights (Q3), 4096 / 1024
+
+fp8 KV gave 1.57x the KV budget in Phase 3. B rises 17 -> 26, decode 1.33 -> 0.87 s,
+total 2.51 -> 2.05 s. **Predicted +20% over Q1 on the capacity workload**, against the +11%
+measured on 512/64 -- larger because here KV is actually the binding constraint.
+
+## P4-4  The noise floor is itself a dose-response curve
+
+`d0` is the bf16-vs-bf16 discordance. A maths answer is a single integer at the end of a
+chain; one flipped token anywhere upstream changes it completely. Longer chain, more
+opportunities for batch-composition reassociation to change a token.
+
+**Predicted d0: ~1% at k=2, ~2% at k=4, ~4% at k=8, ~6-8% at k=16.**
+
+If this holds it is the most useful thing the control produces, because it means **a naive
+eval that skipped the control would report roughly 7 points of "quantization damage" at
+k=16 that is nothing but bf16 disagreeing with itself.** That is the specific fiction this
+design exists to prevent.
+
+## P4-5  Quality
+
+| | prediction |
+|---|---|
+| fp8 excess discordance over `d0` | under 2 points at every k, not significant -> **adopt** |
+| int4 excess over `d0` | ~1 point at k=2 rising to ~8 at k=16 -> **fails rule 2 at k=16** |
+| does excess rise monotonically with k? | **yes for int4, no for fp8** -- this is the amplification claim |
+| int4 mean thinking tokens vs bf16 | **+10 to +25%** -- less decisive, longer chains |
+| int4 truncation rate | under 2x bf16, so not disqualified on rule 3 |
+| Q3 (fp8 KV) on T3 longctx | 2-5 points worse than Q1, roughly **flat across depth** -- the error accumulates with total sequence length, not with where the needle sits |
+
+## P4-6  Base accuracy, needed to confirm the items are calibrated
+
+The eval is worthless at a ceiling or a floor. Target band 60-85% at the hardest level.
+
+| k | thinking ON | thinking OFF |
+|---|---|---|
+| 2 | 99% | 90% |
+| 4 | 97% | 70% |
+| 8 | 90% | 35% |
+| 16 | **70%** | 10% |
+
+If k=16 with thinking on comes back above 90%, the dose curve has no headroom at the top
+and `k` must be extended to 24 or 32 before spending anything on the quantized runs. That
+check is the first GPU task of the phase and it is deliberately cheap.
+
+## What would falsify the design
+
+- `d0` near zero at every k -> the control is not exercising batch-composition variance,
+  probably because concurrency 32 is not being reached. Check achieved concurrency before
+  believing any quality number.
+- fp8 measuring 2.5x on the 512/64 workload -> the bandwidth model is wrong by 2x and every
+  roofline prediction in this project inherits the error.
+- int4 showing *less* damage than fp8 -> a checkpoint mismatch, not a real result.
