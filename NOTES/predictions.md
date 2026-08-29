@@ -2263,3 +2263,124 @@ end of the chained script will report a wrong `d0`.**
 The fix is not to touch the running job. It is to run `qualeval.py grade` over BOTH files
 before comparing, which re-scores from saved text with one version of the code and costs
 nothing. Recorded here so the chain's own compare output is not mistaken for the real floor.
+
+## P4-14  THE PHASE 4 RESULT, measured 2026-08-28/29
+
+### Throughput: the same technique, two workloads
+
+| config | KV tokens | conc @5120 | 512/64 | ratio | 4096/1024 | ratio |
+|---|---|---|---|---|---|---|
+| bf16 | 26,176 | 5.1 | 6.01 req/s | 1.00x | 0.26 req/s | 1.00x |
+| fp8 | 73,264 | 14.3 | 6.45 req/s | **1.07x** | 0.53 req/s | **2.04x** |
+| int4 w4a16 | 95,648 | 18.7 | 6.95 req/s | **1.16x** | 0.61 req/s | **2.35x** |
+
+**Quantization is worth 2x more on one workload than the other, from workload choice alone.**
+Run this phase on Phase 3's workload -- the obvious, lazy choice -- and the conclusion is
+"quantization is nearly worthless", confidently wrong by a factor of two.
+
+### Scorecard
+
+| # | predicted | measured | |
+|---|---|---|---|
+| P4-1 small, int4 | +10-30% | +16% | correct |
+| P4-1 small, fp8 | +5-20% | +7% | correct |
+| P4-2 big, fp8 | 2.5-3.0x | 2.04x | **missed low** |
+| P4-2 big, int4 | 3.0-3.5x | 2.35x | **missed low** |
+| fp8 KV tokens | 81,638 | 73,264 | -10% |
+| fp8 capacity, anchored on int4 | 0.454 req/s | 0.53 req/s | -14% |
+| fp8/int4 ratio | 0.907 | 0.869 | **correct to 4%** |
+
+### Why both P4-2 predictions missed low, one cause
+
+**KV traffic per decode step scales with batch size, so concurrency self-limits.**
+
+    config  B     weights   KV read/step   bytes/step
+    bf16    5.1   16.39 GB     3.47 GB      19.86 GB
+    fp8    14.3    8.19 GB     9.71 GB      17.90 GB
+    int4   18.7    6.12 GB    12.71 GB      18.83 GB
+
+Every extra sequence adds roughly 0.68 GB of KV reads per step. At 4,608 tokens of context
+the KV term OVERTAKES the weight term, so bytes-per-step barely fall and the step time stays
+near 40 ms for all three. The gain is therefore not "cheaper steps" but only "the same 40 ms
+divided across more requests". P4-2 assumed concurrency converts cleanly into throughput; it
+does not, and the correction is the same shape as incident 17 -- a term that was assumed
+independent is not.
+
+**The ratio survived what the absolutes did not.** fp8/int4 was predicted 0.907 and measured
+0.869, correct to 4%, while both absolute predictions were ~25% off. The estimate errors
+(`compute_eff`, `mem_eff`, the Marlin penalties) are shared between configurations and cancel
+in a ratio. **Anchor on a measured configuration and predict ratios; never trust the absolute
+from a roofline with three fudge factors in it.**
+
+### Why the fp8 KV prediction missed 10%
+
+Predicted from `params x 1 byte = 7.628 GiB`. Real fp8 weights are larger: per-tensor scale
+factors are stored alongside, and vLLM leaves embeddings, `lm_head` and norms in bf16. The
+0.8 GiB residual is exactly that. int4 predicted far better because its weight size was taken
+from the **measured on-disk checkpoint** (5.7 GiB), not from a theoretical bits-per-param.
+Measure the artifact; do not derive it.
+
+### Quality, against the d0 noise floor
+
+| | accuracy | McNemar p | answer drift | vs d0 (1.8%) |
+|---|---|---|---|---|
+| bf16-b (control) | 88.4% | 0.51 | 1.8% | -- |
+| fp8 | 89.3% | 0.84 | 6.1% | 3.4x |
+| int4 | 86.8% | 0.0501 | 7.7% | 4.3x |
+
+**Damage as a fraction of what bf16 got right**, which is the number the aggregate hides:
+
+| slice | fp8 | int4 |
+|---|---|---|
+| math/think, all k | 1% | **1%** |
+| math/nothink k4 | 0% | **0%** |
+| math/nothink k8 | 3% | **3%** |
+| math/nothink k16 | 0% | **9%** |
+| math/nothink k32 | 11% | **37%** |
+
+0 -> 3 -> 9 -> 37 percent. **The dose-response curve exists and is monotonic in chain
+length.** At k=32 int4 destroys more than a third of what bf16 solved, while the aggregate
+reports a 2.1 point drop.
+
+### THE FINDING THAT CONTRADICTS PROJECT.md SECTION 5b
+
+Section 5b, the project's central quality hypothesis:
+
+> "Thinking amplifies it -- this is the project-critical one. A reasoning chain is 1,000+
+> sequential tokens where each conditions the next, so small per-token errors compound."
+
+**Measured: the opposite.** With thinking ON, int4 breaks 1% of what bf16 got right. With
+thinking OFF, at the same chain length, it breaks 37%.
+
+Thinking does not amplify quantization damage. It **absorbs** it -- given room to reason the
+model catches and repairs its own perturbed arithmetic; denied that room the errors propagate
+straight to the answer.
+
+Caveat, stated rather than buried: `math/think` sits at 98-100% and so has less room to show
+damage than `nothink` at 42.9%. But the measure above is already damage per opportunity, and
+1-of-179 against 10-of-27 is not a ceiling artifact.
+
+**Consequence for Phase 7:** quantization and thinking budget are coupled. An int4 model may
+need to think to stay accurate, which spends the KV that quantization just freed. The
+scheduler cannot treat "which quantization" and "how many thinking tokens" as independent
+knobs.
+
+### Token cost, and a second wrong prediction
+
+P4-5 predicted int4 would think 10-25% LONGER. Measured **-3.8%**, slightly shorter. It was
+**fp8** that ran long, at **+13.5%** on math/think, which was predicted for neither.
+
+### Pre-registered decision rules, applied honestly
+
+- **fp8**: accuracy rule passes (p=0.84). Token rule **fails** -- 13.5% against a 10% bar.
+  Reported as: no accuracy cost, measurable output drift at 3.4x the floor, and a 13.5% token
+  tax on reasoning that must be netted against its 2.04x capacity win.
+- **int4**: rule 2 as written tests k=8, where excess over d0 is 2.5 points, under the 5-point
+  bar -- **it passes as written**. But the rule was written before calibration created k=32,
+  where the excess is 28.5 points. Reported as failing in spirit, passing in letter, with both
+  stated. The goalposts are not moved in either direction after the fact.
+
+### Detection limits, so the nulls are not overread
+
+`math/think` at n=180 with the reference at ~100% has a floor near a 4% error rate. **fp8's
+null on that slice means "no damage detectable above 4%", not "no damage".**
