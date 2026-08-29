@@ -20,25 +20,55 @@ and it is worthless unless it was written down first.
 `NOTES/predictions.md` is the running log of every prediction, its derivation, the
 measured result, and the explanation for any gap.
 
-## Status: Phase 1 of 7 complete
+## Status: Phases 0-4 of 7 complete
 
-Qwen3-8B, bf16, on a single A10G (AWS `g5.2xlarge`).
+Qwen3-8B on a single A10G (AWS `g5.2xlarge`). Three engines, one benchmark harness, one
+GPU, nothing renormalised between them:
 
-| Quantity | Predicted | Measured | Gap |
-|---|---|---|---|
-| Weights in VRAM | 15.26 GiB | 15.26 GiB | 0.0% |
-| Decode, batch 1 | 23.8 tok/s | 22.8 tok/s | -4.2% |
-| TTFT @ 512-token prompt | 176 ms | 195 ms | +11.0% |
-| Capacity | 0.338 req/s | 0.332 req/s | -1.8% |
+| Serving stack | Capacity | vs previous |
+|---|---|---|
+| Phase 1, HuggingFace `.generate()` behind a lock | 0.332 req/s | -- |
+| Phase 2, our own continuous-batching engine | 1.60 req/s | 4.8x |
+| Phase 3, vLLM | 5.70 req/s | 3.6x |
 
-The headline finding is not in that table. **Inter-token latency stayed flat at 44 ms
-across a 5x range of offered load**, while time-to-first-token went from 354 ms to
-7,293 ms. That is the fingerprint of a serialized server: per-token speed cannot
-degrade when only one request is ever on the GPU, so every bit of contention becomes
-queue wait instead.
+**17.2x end to end.** The number that matters more is latency under load: at 0.5 req/s
+the naive server's p95 time-to-first-token was 25,122 ms and our engine's was 336 ms.
+**75x**, at a load the baseline could not survive at all.
 
-Batch-1 decode is already within 4% of the memory-bandwidth roofline. There is nothing
-left to win on single-stream speed. The entire remaining problem is capacity.
+### Phase 4: quantization is worth 2x more on one workload than another
+
+The same technique, the same GPU, the same model, the same client. Only the request
+shape changed:
+
+| | 512 in / 64 out | 4096 in / 1024 out |
+|---|---|---|
+| fp8 weights | 1.07x | **2.04x** |
+| int4 w4a16 | 1.16x | **2.35x** |
+
+On small requests the KV cache sits ~29% full, so freeing memory buys nothing and only
+the bandwidth term survives. On requests shaped like a real web-search turn the cache is
+the binding constraint and the same flag is transformative. **Benchmarking quantization
+on the workload you already had set up is how you get this wrong by a factor of two.**
+
+Quality was measured against a noise floor, because a model does not agree with itself:
+batch composition shifts bf16 accumulation order, so bf16 was run twice to establish
+`d0` = 1.8% before any quantized number was believed. int4 costs 2.1 accuracy points
+overall -- and that aggregate hides everything:
+
+| what int4 breaks, of what bf16 got right | |
+|---|---|
+| 4-step arithmetic | 0% |
+| 8-step | 3% |
+| 16-step | 9% |
+| **32-step** | **37%** |
+| long-context retrieval, any depth | **0%** |
+
+The damage is specific to multi-step reasoning and does not touch retrieval.
+
+**And thinking protects against it.** On identical 32-step problems int4 breaks 1% of
+what bf16 solved when allowed to reason first, and 37% when not. The project's own spec
+predicted the opposite -- that long reasoning chains would compound small errors -- and
+the correction is annotated in place rather than deleted.
 
 ## What is here
 
@@ -46,9 +76,16 @@ left to win on single-stream speed. The entire remaining problem is capacity.
 tools/roofline.py     predicts memory budget, KV capacity, decode roofline,
                       batch scaling, and prefill/TTFT from hardware specs alone
 tools/bench.py        open-loop Poisson load generator; per-request TTFT/ITL/E2E
+tools/curve.py        collapses a sweep into latency-vs-throughput curve points
+tools/kvprobe.py      measures the KV cache off the GPU directly
+tools/mkitems.py      generates the quality-eval item set; --selftest re-derives
+                      every answer by parsing the problem text it emitted
+tools/qualeval.py     paired quality harness: run, offline regrade, exact McNemar
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock
+engine/               Phase 2: manual KV cache, static then continuous batching,
+                      scheduler with admission control, OpenAI-streaming server
 infra/                provisioning, cost guardrails, spot interruption handling
 NOTES/predictions.md  the prediction log
 ```
@@ -93,14 +130,17 @@ is true forever and would disable the guardrail entirely.
 |---|---|---|
 | 0 | Build the instruments before the thing they measure | done |
 | 1 | Deliberately naive baseline, and explain its numbers | done |
-| 2 | Write the engine: manual KV cache, continuous batching, paged allocator | next |
-| 3 | vLLM as an object of study; ablate every flag | |
-| 4 | Quantization: throughput, capacity, and quality | |
-| 5 | Speculative decoding | |
+| 2 | Write the engine: manual KV cache, continuous batching | done |
+| 3 | vLLM as an object of study; ablate every flag | done |
+| 4 | Quantization: throughput, capacity, and quality | done |
+| 5 | Speculative decoding | next |
 | 6 | The chat app and web search | |
 | 7 | Thinking budget as a scheduling policy | |
 
-Phase 2 target: **beat 0.33 req/s without pushing ITL past 55 ms.**
+Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth
+as much as the positive ones: a paged block allocator was **designed, costed, and not
+built**, because the 1.24x padding tax it was meant to recover was measured to live in
+SDPA's masked-attention kernel path, where an allocator cannot reach it.
 
 Phase 7 is the part that is not a reproduction of a blog post. Thinking tokens are
 ordinary decode tokens: 1,500 of them is 45 seconds of silence, and they occupy KV
