@@ -2454,3 +2454,159 @@ estimate errors cancel.
 - **Open:** does the retrieval result survive a task that requires *using* several
   retrieved facts rather than recalling one verbatim? 270/270 establishes that finding a
   span is robust, not that reasoning over it is.
+
+---
+
+# PHASE 5 — speculative decoding
+
+Protocol in `NOTES/phase5-spec-design.md`, written 2026-08-29 before the box came up.
+Every prediction below is recorded before any Phase 5 measurement exists.
+
+## The model used for every Phase 5 prediction
+
+Same constants as Phase 4, so the two phases compose.
+
+    N        = 8,190,735,360 params
+    BW       = 600e9 B/s        mem_eff = 0.803   (vLLM, measured Phase 3)
+    PEAK     = 125e12 FLOP/s    compute_eff: SEE BELOW, this is the weak number
+    KV/token = 147,456 B        (measured Phase 2, confirmed two ways)
+    ctx      = 4608             mean context on the 4096/1024 workload
+
+    W(bf16) = 16.39e9 B    W(fp8) = 8.19e9 B    W(int4) = 6.12e9 B   (P4-14 measured)
+
+Speculative decoding: draft proposes k, target verifies S = k+1 positions per step.
+
+    t_mem(B) = (W + B*ctx*147456) / (BW * mem_eff)
+    t_cmp(B) = 2*N*S*B / (PEAK * compute_eff)
+    E[tokens/step] = (1 - a^(k+1)) / (1 - a)
+
+**The weak number, named before it can be blamed afterwards: `compute_eff` for the verify
+GEMM.** `roofline.py` measured compute_eff on *prefill*: 0.297 at 113 tokens, 0.364 at
+412, 0.53 at 6407, because a short GEMM cannot fill the tensor cores. A verify pass at
+B=5, S=4 is **20 tokens**, far to the left of the shortest length ever measured on this
+box. This is the Marlin-dequant-penalty of Phase 5, and incident 18 says a constant
+measured in one regime is not a constant in another. Predictions below therefore bracket
+compute_eff over 0.10-0.30 and lean on RATIOS, per the P4-16 method correction.
+
+## P5-0  The premise: how much idle compute is there
+
+    batch-1 decode: 2 x 8.19e9 FLOP in 34.0 ms = 482 GFLOP/s
+    against 125,000 GFLOP/s peak              = 0.385% utilised
+
+**The compute units are 99.6% idle during decode.** This is not a prediction, it is the
+Phase 3 measurement re-read. It is recorded here because it is the entire reason the
+phase exists, and because if a later measurement contradicts it the phase is pointless.
+
+## P5-A  The VRAM ledger — draft weights are paid out of the KV cache
+
+Derived 2026-08-29 from HuggingFace configs, before download.
+
+EAGLE3 head `RedHatAI/Qwen3-8B-speculator.eagle3`, param count from its `config.json`:
+
+    embed_tokens   151936 x 4096                     =   622,329,856
+    eagle3 fc      (3 x 4096) x 4096                 =    50,331,648
+    1 llama layer  attn 41,943,040 + mlp 150,994,944 =   192,937,984
+    draft lm_head  32000 x 4096                      =   131,072,000
+                                                        -----------
+                                                        996,671,488  (0.997 B)
+    bf16                                             = 1,993,342,976 B
+    actual file                                      = 2,044,116,968 B  -> 1.904 GiB
+
+The 2.5% delta is norms plus the d2t/t2d vocab-mapping buffers. Reproducing the file size
+from the config to 2.5% is the check that the architecture is understood.
+
+**The head costs MORE VRAM than a real draft model** -- 1.904 GiB against Qwen3-0.6B's
+1.400 GiB -- because it carries the target's full 151936-row input embedding. "One layer"
+describes its FLOPs, not its footprint. I expected the opposite before doing the division.
+
+Against Phase 4's measured KV budgets:
+
+| config | KV now | minus 1.904 GiB | change | conc @5120 |
+|---|---|---|---|---|
+| bf16 | 3.595 GiB / 26,176 tok | 1.691 GiB / 12,313 tok | **-53.0%** | 5.11 -> 2.40 |
+| fp8 | 10.061 GiB / 73,264 tok | 8.158 GiB / 59,401 tok | -18.9% | 14.31 -> 11.60 |
+| int4 | 13.135 GiB / 95,648 tok | 11.232 GiB / 81,785 tok | **-14.5%** | 18.68 -> 15.97 |
+
+**Phase 4 said memory freed is capacity gained. Phase 5 says memory spent is capacity
+lost, and the same fixed 1.904 GiB costs 53% of bf16's concurrency and 15% of int4's.**
+Quantization is what makes speculative decoding affordable. Neither phase could make that
+claim alone.
+
+## P5-B  Crossover batch B*, where the technique inverts sign
+
+Solve t_cmp(B) > t_mem(B):
+
+| config | S=2 | S=4 | S=6 |
+|---|---|---|---|
+| bf16, ce 0.10 | 29 | 9 | 6 |
+| bf16, ce 0.20 | >200 | 29 | 14 |
+| bf16, ce 0.30 | >200 | 101 | 29 |
+| int4, ce 0.10 | 11 | 4 | 2 |
+| int4, ce 0.20 | >200 | 11 | 6 |
+| int4, ce 0.30 | >200 | 38 | 11 |
+
+Absolute B* spans an order of magnitude across the compute_eff bracket, so it is NOT
+predicted as a number. Two things survive, and they are what gets scored:
+
+- **int4's B\* is one third to one half of bf16's, at every compute_eff.** compute_eff
+  cancels in the ratio. This is P4-16's method correction applied deliberately.
+- **Larger k crosses over earlier**, so the throughput-optimal k FALLS as load rises. A
+  fixed k is the wrong policy -- a Phase 7 input generated by Phase 5.
+
+Where Phase 4's measured concurrencies land: bf16 at 4096/1024 runs B=5.11 (inside the
+win zone at every compute_eff); int4 runs B=18.68 (**past B\* for S=4 unless compute_eff
+exceeds ~0.25**). Predicted: the two configurations disagree about the SIGN of the effect
+on the same workload.
+
+## P5-1 .. P5-9  Scored predictions
+
+| # | quantity | prediction | basis |
+|---|---|---|---|
+| P5-1 | EAGLE3 acceptance `a`, non-thinking prose | 0.65 - 0.80 | EAGLE3 papers report 0.7-0.8 on chat; discount for an unfamiliar workload |
+| P5-2 | EAGLE3 ITL p50 speedup at B=1, bf16 | 1.8 - 2.4x | E[tokens] at a=0.7, k=3 is 2.53; verify step is memory-bound so ~free; minus draft and sampling overhead |
+| P5-3 | Qwen3-0.6B acceptance `a` | 0.45 - 0.60, clearly below EAGLE3 | a token-only draft has no access to the target's hidden state |
+| P5-4 | n-gram acceptance, `copy` slice | 0.7+ | the answer quotes the document verbatim; this is prompt-lookup's best case |
+| P5-4b | n-gram acceptance, `reason` and `open` | under 0.15 | no repeated n-grams to find in novel text |
+| P5-5 | **EAGLE3 acceptance, `reason` vs `open`** | **HIGHER on reason, 0.75 - 0.88** | see below |
+| P5-6 | crossover measurable on int4 4096/1024 | yes, B* in 8 - 20 | P5-B at compute_eff 0.15-0.30 |
+| P5-7 | bf16 + EAGLE3 capacity, 4096/1024 | **drops 35 - 50%** | P5-A: KV falls 53%, partly offset by faster effective decode |
+| P5-8 | int4 + EAGLE3 capacity, 4096/1024 | **drops 5 - 15%** | P5-A: KV falls only 14.5% |
+| P5-9 | quality drift, spec on vs off, vs `d0`=1.8% | at the floor, under 3% | spec decoding is distribution-preserving by construction; anything higher means broken rejection sampling |
+
+### P5-5 is the phase's real bet, and the one most likely to be wrong
+
+**Predicted: reasoning text is EASIER to draft than ordinary prose, not harder.**
+
+The reasoning: an EAGLE head conditions on the target's own hidden states, and a
+chain-of-thought is where the target is most confident about its next token -- restating
+the problem, walking a template, repeating intermediate values it just computed. Confident
+target, easy draft. P4-8 measured 1,060 thinking tokens spent on a 2-step problem, which
+is a lot of low-entropy scaffolding.
+
+The opposing case, which is why this is a bet: reasoning is where the model's genuinely
+novel work happens, and a 1-layer head may track the scaffolding while missing exactly the
+tokens that carry the computation.
+
+**Why it matters more than the other eight:** P4-8's 1,060 thinking tokens at 34 ms is
+**36 seconds of silence** before the user sees a word. Speculative decoding is the largest
+single lever against that, and Phase 7 is built on the assumption that thinking latency is
+reducible. If P5-5 misses low, Phase 7 inherits a hard constraint instead of a knob, and
+it is much better to learn that now than in Phase 7.
+
+Second-order risk on the same prediction: the EAGLE3 head drafts over a **reduced 32000-
+token vocabulary**. If digit and operator tokens are underrepresented in that reduction,
+acceptance on the maths slice collapses for a reason that has nothing to do with reasoning
+and everything to do with vocabulary selection. That would look identical to P5-5 being
+wrong. Distinguishing the two requires the per-position acceptance curve, which is why
+`specmon.py` reports it.
+
+## P5-C  What would falsify the design
+
+- S0 controls do not reproduce Phase 4's bf16/int4 numbers -> the comparison base moved,
+  stop and find out why before any spec number is taken seriously.
+- Self-speculation (target as its own draft) does not report acceptance near 1.0 -> the
+  instrument or the verify path is broken, and no acceptance number in the phase is real.
+- Quality drift exceeds 3% against `d0` -> spec decoding is not distribution-preserving in
+  this build, and every latency number describes a different model than the control.
+- Spec decoding does not compose with int4 w4a16 in vLLM 0.27.1 -> half the design dies
+  and the phase reduces to bf16 only. **Test this in build step 3, not step 7.**

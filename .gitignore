@@ -3,6 +3,8 @@
 # The public face of this repo is README.md and NOTES/predictions.md.
 CLAUDE.md
 NOTES/PROJECT.md
+NOTES/phase4-eval-design.md
+NOTES/phase5-spec-design.md
 
 # Python
 __pycache__/
@@ -18,5 +20,5 @@ venv/
 # Server-side request log, written on the GPU box
 baseline/serve.jsonl
 
-# Third-party datasets, refetchable in one line (see NOTES/phase4-eval-design.md)
+# Third-party datasets, refetchable in one line (GSM8K test split)
 data/
