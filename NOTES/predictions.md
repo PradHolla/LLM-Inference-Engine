@@ -2384,3 +2384,35 @@ P4-5 predicted int4 would think 10-25% LONGER. Measured **-3.8%**, slightly shor
 
 `math/think` at n=180 with the reference at ~100% has a floor near a 4% error rate. **fp8's
 null on that slice means "no damage detectable above 4%", not "no damage".**
+
+## P4-15  longctx: a clean negative result
+
+90 needle-in-document items per configuration, target fact at 10/50/90 percent depth with two
+same-shape distractors, `--max-num-seqs 6` pinned, KV pinned at 27,280 for all three.
+
+    bf16   90/90  100.0%    d10 30/30   d50 30/30   d90 30/30
+    fp8    90/90  100.0%    d10 30/30   d50 30/30   d90 30/30
+    int4   90/90  100.0%    d10 30/30   d50 30/30   d90 30/30
+
+**270 of 270. Weight quantization does not damage long-context retrieval at all**, at any
+depth, down to int4.
+
+This sharpens the phase's quality finding from "int4 hurts quality" to something far more
+specific and far more useful:
+
+> **int4 damages multi-step arithmetic reasoning and leaves retrieval untouched.**
+
+`PROJECT.md` section 5b names four axes where damage concentrates -- maths, code,
+long-context retrieval, non-English. Two are now measured on this model: **maths yes,
+retrieval no.** The blanket claim does not survive contact with the measurement.
+
+Caveat stated rather than buried: this task is retrieval of a verbatim 4-character string,
+which is the easy end of long context. A harder variant -- synthesising across several
+retrieved facts, or reasoning over them -- would likely behave like the maths slice, because
+that is reasoning wearing retrieval's clothes. What is established is that **finding** the
+right span is robust; what is not established is that **using** it is.
+
+**Direct consequence for Phase 6.** A web-search turn is mostly retrieval over long context,
+which is the part quantization does not break. The exposure is whatever reasoning happens
+after the retrieval. That argues for int4 on the retrieval-heavy path and caution about it on
+the reasoning-heavy one -- which is a scheduling decision, and therefore Phase 7's problem.
