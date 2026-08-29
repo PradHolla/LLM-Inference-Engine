@@ -1,39 +1,59 @@
-# llm-inference-engine
+# LLM Inference Engine
 
-Learning inference engineering by building an LLM serving stack from the ground up,
-and measuring every layer against predictions derived from first principles.
+An LLM serving stack built from scratch and measured against first-principles predictions
+at every layer. Qwen3-8B on a single NVIDIA A10G (AWS `g5.2xlarge`).
 
-The end goal is a chat application with web search and selectable thinking effort,
-served from a self-hosted Qwen3-8B. But the application is the demo. The engine is
-the point.
+**17.2x throughput and 75x tail latency over a naive baseline**, with every number
+predicted in writing before it was measured and every gap explained.
 
-## The method
-
-**Predict, measure, explain the gap.**
-
-Before anything runs, `tools/roofline.py` computes what the hardware *should* do from
-two numbers: memory bandwidth and parameter count. That prediction gets written down.
-Then `tools/bench.py` measures what it actually does. A prediction that matches
-confirms the model; a prediction that misses by 3x is the only real signal available,
-and it is worthless unless it was written down first.
-
-`NOTES/predictions.md` is the running log of every prediction, its derivation, the
-measured result, and the explanation for any gap.
-
-## Status: Phases 0-4 of 7 complete
-
-Qwen3-8B on a single A10G (AWS `g5.2xlarge`). Three engines, one benchmark harness, one
-GPU, nothing renormalised between them:
-
-| Serving stack | Capacity | vs previous |
+| Serving stack | Capacity | p95 TTFT at 0.5 req/s |
 |---|---|---|
-| Phase 1, HuggingFace `.generate()` behind a lock | 0.332 req/s | -- |
-| Phase 2, our own continuous-batching engine | 1.60 req/s | 4.8x |
-| Phase 3, vLLM | 5.70 req/s | 3.6x |
+| HuggingFace `.generate()` behind a lock | 0.332 req/s | 25,122 ms |
+| **Custom continuous-batching engine** (~2,600 lines) | **1.60 req/s** | **336 ms** |
+| vLLM | **5.70 req/s** | -- |
 
-**17.2x end to end.** The number that matters more is latency under load: at 0.5 req/s
-the naive server's p95 time-to-first-token was 25,122 ms and our engine's was 336 ms.
-**75x**, at a load the baseline could not survive at all.
+One benchmark harness, one GPU, one prompt, nothing renormalised between them. The 75x
+is the number users would feel: at a load the naive server could not survive, the engine
+answers in a third of a second.
+
+## What this project demonstrates
+
+- **Performance modelling** — weights-in-VRAM predicted to 0.0%, batch-1 decode to 4%,
+  server capacity to 2%, from memory bandwidth and parameter count alone
+- **Systems engineering** — manual KV cache management, continuous batching with
+  admission control and mid-flight batch mutation, an OpenAI-compatible streaming server
+- **Measurement design** — open-loop Poisson load generation, p50/p95/p99 rather than
+  means, paired significance testing against a measured noise floor, and instruments
+  validated against known ground truth before they are believed
+- **Engineering judgement** — a paged block allocator designed, costed, and deliberately
+  **not built**, because the cost it was meant to recover was measured to live somewhere
+  an allocator cannot reach
+
+Every claim above links to a number in `NOTES/predictions.md`, which records the
+prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
+third of the predictions were wrong; those are the entries worth reading.
+
+## Status: phases 0-4 of 7 complete
+
+### How each step moved the number
+
+**Phase 1** built a deliberately naive server and explained it rather than fixing it.
+Inter-token latency stayed **flat at 44 ms across a 5x range of offered load** while
+time-to-first-token went from 354 ms to 7,293 ms. That is the fingerprint of a serialized
+server: per-token speed cannot degrade when only one request is ever on the GPU, so all
+contention becomes queue wait. Batch-1 decode was already within 4% of the
+memory-bandwidth roofline, which said the remaining problem was capacity, not speed.
+
+**Phase 2** wrote the engine that fixes it: manual KV cache, static batching, then a
+continuous-batching scheduler that admits and evicts requests mid-flight. Decode-slot
+utilisation went from 30.1% to 82.6% on ragged workloads.
+
+**Phase 3** swapped in vLLM and then ablated every flag to attribute the 3.6x gap.
+Prefix caching was worth **0%** on unique traffic (2.9x on shared prompts, which is what
+a careless benchmark measures); chunked prefill 2% of capacity but **34% better p95
+ITL**; fp8 KV cache +11%. **3.5x remained attributable to kernels and core scheduling
+rather than to any single flag** — which is the honest answer, and the one a flag-tuning
+writeup never reaches.
 
 ### Phase 4: quantization is worth 2x more on one workload than another
 
@@ -141,6 +161,10 @@ Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative res
 as much as the positive ones: a paged block allocator was **designed, costed, and not
 built**, because the 1.24x padding tax it was meant to recover was measured to live in
 SDPA's masked-attention kernel path, where an allocator cannot reach it.
+
+This is a learning project, and deliberately structured as one: each phase ends with a
+runnable artefact and a measurement, and no phase is allowed to close because the code
+runs. It closes when a number is recorded and any gap from prediction is explained.
 
 Phase 7 is the part that is not a reproduction of a blog post. Thinking tokens are
 ordinary decode tokens: 1,500 of them is 45 seconds of silence, and they occupy KV

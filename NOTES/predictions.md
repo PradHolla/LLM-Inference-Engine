@@ -2416,3 +2416,41 @@ right span is robust; what is not established is that **using** it is.
 which is the part quantization does not break. The exposure is whatever reasoning happens
 after the retrieval. That argues for int4 on the retrieval-heavy path and caution about it on
 the reasoning-heavy one -- which is a scheduling decision, and therefore Phase 7's problem.
+
+## P4-16  Phase 4 closed. Carried into Phase 5.
+
+**Scorecard: 9 predictions correct, 6 wrong.** The six misses, and what each cost:
+
+| miss | predicted | actual | root cause |
+|---|---|---|---|
+| P4-2 capacity, both configs | 2.5-3.5x | 2.04x / 2.35x | KV traffic per step scales with batch, so concurrency self-limits |
+| P4-4 noise floor vs chain length | rises with k | 0% at every k on the thinking slice | the floor tracks proximity to the model's competence limit, not chain length |
+| P4-5 int4 thinks longer | +10-25% | -3.8% | wrong config entirely; fp8 was the one at +13.5% |
+| P4-6/P4-8 base accuracy | 70% at k=16 | ~100% at k=32 | the model does not make arithmetic errors when allowed to think |
+| P4-8 thinking tokens | 250 at k=2 | 1,060 | large fixed thinking overhead; 8x the steps costs 1.5x the tokens |
+| section 5b amplification | thinking amplifies damage | thinking absorbs it | the central quality hypothesis of the project, inverted |
+
+**The most valuable thing the phase produced is the method correction, not the numbers:**
+predict RATIOS anchored on a measured configuration. fp8/int4 was predicted 0.907 and
+measured 0.869, correct to 4%, while both absolute predictions were 25% off. The shared
+estimate errors cancel.
+
+### Carried into Phase 5 (speculative decoding)
+
+- **Measure on both workloads, always.** The single most transferable result here is that
+  512/64 and 4096/1024 disagree by 2x about the same technique. Speculative decoding is
+  known to *hurt* at high batch; that claim is meaningless without naming the workload.
+- **The noise floor is cheap and mandatory.** `d0` cost one extra 33-minute run and made
+  every later number interpretable. Any Phase 5 quality claim needs the same control.
+- **Instruments lie quietly.** Three grading bugs this phase (`\boxed{}`, the `Final
+  Answer:` newline, the 22% ReadError), none of which raised an exception and all of
+  which produced plausible numbers. Budget time to validate the instrument against known
+  ground truth before trusting a single measurement from it.
+- **Run the client on the box.** Recorded in `CLAUDE.md` section 3 as incident 25.
+- **Quantization and thinking budget are coupled.** int4 is nearly free with thinking on
+  and destroys 37% of 32-step arithmetic with it off. A scheduler cannot treat "which
+  quantization" and "how many thinking tokens" as independent knobs, which is a Phase 7
+  constraint that Phase 4 discovered by accident.
+- **Open:** does the retrieval result survive a task that requires *using* several
+  retrieved facts rather than recalling one verbatim? 270/270 establishes that finding a
+  span is robust, not that reasoning over it is.
