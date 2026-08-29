@@ -214,6 +214,79 @@ harness is not measuring what it claims and every other result is suspect.
 
 ---
 
+## 5b. Speculative decoding (Phase 5)
+
+Flags read off the installed build 2026-08-29, not from documentation. vLLM 0.27.1
+accepts either a JSON blob (`--speculative-config`) or three convenience flags:
+
+```bash
+--spec-method {ngram, ngram_gpu, eagle, eagle3, draft_model, suffix, medusa,
+               mlp_speculator, mtp, ...plus ~25 model-specific MTP variants}
+--spec-model  MODEL      # the draft model or head; omit for ngram
+--spec-tokens N          # tokens drafted per step (k)
+```
+
+Three rungs, all against the same target:
+
+```bash
+# rung 1 -- n-gram / prompt lookup. No draft model, no VRAM.
+--spec-method ngram --spec-tokens 3
+
+# rung 2 -- a real draft model, same family and tokenizer
+--spec-method draft_model --spec-model Qwen/Qwen3-0.6B --spec-tokens 3
+
+# rung 3 -- EAGLE3 head. Its config names Qwen/Qwen3-8B as verifier.
+--spec-method eagle3 --spec-model RedHatAI/Qwen3-8B-speculator.eagle3 --spec-tokens 3
+```
+
+### Draft weights are paid for out of the KV cache
+
+Both rungs 2 and 3 are resident in the same `--gpu-memory-utilization` budget, so they
+come straight off the KV cache:
+
+| | VRAM | cost to bf16 KV | cost to int4 KV |
+|---|---|---|---|
+| EAGLE3 head | 1.904 GiB | -53% | -14.5% |
+| Qwen3-0.6B | 1.400 GiB | -39% | -11% |
+
+The EAGLE3 head costs MORE than the small draft model despite being one layer, because it
+carries the target's full 151,936-row input embedding. Record `GPU KV cache size` from
+each run's own log; a spec configuration is not comparable to its control until both KV
+budgets are known.
+
+### TRAP: `rejection_sample_method=synthetic` fabricates acceptance
+
+`SpeculativeConfig` accepts `rejection_sample_method: synthetic` plus either
+`synthetic_acceptance_rates` (per-position list) or `synthetic_acceptance_length` (scalar
+mean). It makes up acceptance instead of measuring it.
+
+That is exactly what validates `tools/specmon.py` -- set a known curve, confirm the tool
+reads it back -- and exactly what will silently ruin a real run left on it by accident.
+**Assert `rejection_sample_method` is `standard` from the run's own startup log before
+believing any acceptance number.**
+
+```bash
+# instrument validation only, never a measurement run
+--speculative-config '{"method":"eagle3","model":"RedHatAI/Qwen3-8B-speculator.eagle3",
+  "num_speculative_tokens":3,"rejection_sample_method":"synthetic",
+  "synthetic_acceptance_rates":[0.8,0.5,0.2]}'
+```
+
+### Reading acceptance
+
+```bash
+uv run tools/specmon.py discover --url http://localhost:8000     # bind the counters
+uv run tools/specmon.py wrap --url http://localhost:8000 --label s3-int4 \
+  --out results/phase5-spec.jsonl -- uv run tools/bench.py ...
+```
+
+`specmon` discovers counter names by pattern rather than hardcoding them, and reports
+acceptance **by draft position**. The scalar hides the shape: a=0.6 is consistent with
+"every position accepts 60%" and with "position 1 accepts 95%, position 3 accepts 5%",
+and those imply opposite choices of `--spec-tokens`.
+
+---
+
 ## 6. Shut down
 
 ```bash
