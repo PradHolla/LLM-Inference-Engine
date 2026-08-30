@@ -3169,3 +3169,64 @@ more KV read per step, which enlarges the memory term and should make the verify
 Measured directly by re-running the identical passes with speculation off and comparing
 wall clock. Spec-on elapsed, for the record: math/think 193.1 s, math/nothink 89.0 s,
 gsm8k/think 132.9 s, longctx(30) 33.9 s.
+
+## P5-I  THE PHASE'S HEADLINE: measured speedup on real content, 2026-08-30
+
+Identical items, identical order, concurrency 1, fp8. Only speculative decoding differs.
+Normalised by tokens, not wall clock: `math/think` produced 8.4% fewer tokens with
+speculation on than off, because thinking-chain length varies run to run (incident 22 --
+shape changes reorder bf16 accumulation). Comparing raw elapsed there would have credited
+speculation with generating less text.
+
+| slice | spec tok/s | control tok/s | **speedup** | predicted | | L | realised |
+|---|---|---|---|---|---|---|---|
+| `math/think` | 106.4 | 52.0 | **2.045x** | 2.12-2.37x | miss low | 2.788 | 0.734 |
+| `math/nothink` | 118.2 | 52.5 | **2.252x** | 2.29-2.56x | miss low | 3.012 | 0.748 |
+| `gsm8k/think` | 96.6 | 52.2 | **1.849x** | 1.88-2.10x | miss low | 2.471 | 0.748 |
+| `longctx` | 28.3 | 23.8 | **1.189x** | 1.96-2.19x | **MISS BADLY** | 2.581 | 0.461 |
+| `open` filler (earlier) | 77.6 | 53.4 | 1.453x | -- | -- | 1.910 | 0.761 |
+
+**The phase's honest headline: roughly 2x on workloads that resemble real work, against
+1.45x on the synthetic benchmark.** Measuring only on `bench.py`'s filler prompt would have
+understated the technique by 40% -- the same class of error as Phase 4's workload lesson,
+arrived at from a different direction.
+
+### Four narrow misses in one direction, and one real one
+
+The three reasoning slices all landed 3-4% below their predicted ranges. The cause is a
+single wrong assumption: I predicted realised efficiency would **rise** from 0.761 to
+0.76-0.85 because longer contexts mean more KV traffic per step, enlarging the memory term
+that hides the verify overhead. **It did not rise. It fell slightly, to 0.73-0.75.**
+
+Why the reasoning was wrong: longer context makes the *draft's* work more expensive too.
+The EAGLE head runs its own attention over the same growing context, three times per step.
+I modelled the context growth as helping only the target's side of the ledger when it loads
+both. The overhead does not shrink relative to the memory term because it grows with it.
+
+### `longctx` is the interesting miss: speculative decoding cannot touch prefill
+
+Predicted 1.96-2.19x from an acceptance of 0.5270, measured **1.189x**. Realised efficiency
+0.461 against 0.73-0.75 everywhere else.
+
+**Nothing is wrong with the acceptance number -- the workload shape is the answer.** longctx
+sends ~4,096 prompt tokens and generates ~32. Almost all of the request is prefill, and
+**speculative decoding accelerates decode only.** Its 0.527 acceptance is real and buys a
+genuine decode speedup that is then diluted to near-nothing by the prefill it cannot help.
+
+This is `PROJECT.md` section 5b's point about quantization and TTFT, in a different costume:
+*the metric a technique improves and the metric a workload is dominated by need not be the
+same one.* A retrieval-heavy product -- which is exactly what Phase 6 builds -- would get
+almost nothing from speculative decoding end to end, no matter how well the draft performs.
+
+### What this fixes about the earlier conclusion
+
+Reported earlier today: "speculative decoding is worth 1.45x on fp8." That number is
+correct and unrepresentative. Corrected statement, with the condition attached:
+
+- **long-output reasoning: ~1.85 - 2.25x** -- the case worth deploying for
+- short synthetic completions: 1.45x
+- **long-prompt short-answer retrieval: 1.19x** -- barely worth the 16,368 tokens of KV it costs
+
+**A single "speedup of speculative decoding" number does not exist for this system.** It
+ranges 1.19x to 2.25x on one GPU, one model and one draft, decided entirely by the shape of
+the request.
