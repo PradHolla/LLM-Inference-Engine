@@ -3435,3 +3435,118 @@ against EAGLE3's 2.581. The recommendation for retrieval workloads does **not** 
 Why the reasoning failed: the answer quotes only a handful of tokens from a 4,096-token
 document. The rest of the output is the model's own phrasing, which has no match to find. A
 copy-heavy *task* is not the same as copy-heavy *output*.
+
+## P5-L  The quality gate: predictions before running, 2026-08-30
+
+Speculative decoding is distribution-preserving **by construction** -- a rejected draft is
+replaced by the target's own token -- so in theory the output is exactly what the
+unaccelerated model would have produced. This phase has reported speedups all day without
+testing that on this build. If the rejection sampling is subtly wrong, every number
+describes a different model than its control.
+
+Protocol reuses Phase 4 exactly so `d0` is comparable: same items, same `order_seed`,
+concurrency 12, `--max-tokens-think 5120 --max-tokens-nothink 1024`, slices math + gsm8k +
+longctx. Only `--spec-method eagle3` differs between the two runs.
+
+| # | quantity | prediction |
+|---|---|---|
+| P5-L1 | `ansdiff` on ALL, spec vs no-spec | **1.5 - 4.0%** |
+| P5-L2 | McNemar p on ALL | **> 0.05**, no significant accuracy change |
+| P5-L3 | accuracy delta on ALL | within **±1.5 points** |
+| P5-L4 | worst slice for `ansdiff` | **math/nothink at high k** |
+
+### Why P5-L1 is NOT simply "at or below d0 = 1.8%"
+
+`d0` was measured bf16-vs-bf16 with the KV budget **pinned identical** across the pair.
+Here the two servers cannot have identical KV: EAGLE3 costs 16,368 tokens, so the spec run
+holds 52,080 against the control's 68,448. Different cache means different batch
+composition, and incident 22 established that batch composition alone reorders bf16
+accumulation and changes outputs.
+
+**So some excess over `d0` is expected and is NOT evidence of broken rejection sampling.**
+The gate is therefore asymmetric and fixed now:
+
+- `ansdiff` **under 4%** with McNemar **p > 0.05** -> PASS. Consistent with nondeterminism
+  from batch composition, no accuracy cost.
+- `ansdiff` **above 4%** or McNemar **p < 0.05 with the spec run less accurate** -> FAIL,
+  and every speedup in this phase is quoted against a caveat.
+
+P5-L4 follows Phase 4's finding that the noise floor tracks **proximity to the model's
+competence limit**, not chain length: bf16 disagreed with itself 0% on the thinking slice
+and up to 4.8% on no-thinking at k=32, because that is where it sits at the edge of what it
+can do. The same slice should be the most sensitive here.
+
+## P5-L ACTUALS  THE QUALITY GATE PASSES, 2026-08-30
+
+fp8, concurrency 12, Phase 4 protocol exactly. 1,210 items paired, **zero dropped from
+either side** -- no silent denominator shrink.
+
+| group | n | acc no-spec | acc EAGLE3 | b | c | ansdiff | McNemar p |
+|---|---|---|---|---|---|---|---|
+| gsm8k/think | 200 | 94.0% | 94.0% | 0 | 0 | **0.0%** | 1.0000 |
+| gsm8k/nothink | 200 | 93.5% | 93.0% | 3 | 2 | 2.5% | 1.0000 |
+| longctx/nothink | 90 | 100.0% | 100.0% | 0 | 0 | **0.0%** | 1.0000 |
+| math/think/k4 | 45 | 97.8% | 100.0% | 0 | 1 | 2.2% | 1.0000 |
+| math/think/k8 | 75 | 100.0% | 100.0% | 0 | 0 | **0.0%** | 1.0000 |
+| math/think/k16 | 105 | 99.0% | 100.0% | 0 | 1 | 1.0% | 1.0000 |
+| math/think/k32 | 135 | 97.8% | 98.5% | 1 | 2 | 2.2% | 1.0000 |
+| math/nothink/k4 | 45 | 97.8% | 95.6% | 1 | 0 | 2.2% | 1.0000 |
+| math/nothink/k8 | 75 | 92.0% | 94.7% | 0 | 2 | 2.7% | 0.5000 |
+| math/nothink/k16 | 105 | 83.8% | 84.8% | 2 | 3 | 6.7% | 1.0000 |
+| math/nothink/k32 | 135 | 44.4% | 46.7% | 3 | 6 | **10.4%** | 0.5078 |
+| **ALL** | **1210** | **89.3%** | **89.9%** | 10 | 17 | **2.8%** | **0.2478** |
+
+### VERDICT: PASS on both pre-registered conditions
+
+    ansdiff  2.8%   threshold < 4.0%    PASS
+    McNemar  0.2478 threshold > 0.05    PASS
+    accuracy 89.3% -> 89.9%, +0.6 points, spec nominally BETTER
+
+b=10, c=17: speculation fixed 17 items the control got wrong and broke 10 it got right.
+The net favours speculation and is not significant. **There is no accuracy cost.**
+
+**Every speedup reported in this phase is therefore quoted against outputs that are
+statistically the control's.** "1.85x faster" means the same model, faster.
+
+### All four predictions correct -- and P5-9 from the original design too
+
+| # | predicted | measured | |
+|---|---|---|---|
+| P5-L1 | ansdiff 1.5-4.0% | 2.8% | correct |
+| P5-L2 | McNemar p > 0.05 | 0.2478 | correct |
+| P5-L3 | accuracy within +/-1.5 pts | +0.6 | correct |
+| P5-L4 | worst slice = math/nothink high k | k32 at 10.4%, the maximum | correct |
+| P5-9 | drift under 3% vs d0 | 2.8% | correct |
+
+The first clean sweep of the phase, and it is the phase's least surprising experiment --
+which is the point. **A well-understood mechanism should be predictable; the misses earlier
+were all in places where the model of the system was incomplete.**
+
+### The shape of the disagreement is the real evidence, not its size
+
+**Disagreement is zero exactly where the model is confident, and concentrated exactly where
+it is guessing:**
+
+    gsm8k/think     94.0% accurate   ansdiff 0.0%
+    math/think/k8  100.0% accurate   ansdiff 0.0%
+    longctx        100.0% accurate   ansdiff 0.0%
+    math/nothink/k32 44.4% accurate  ansdiff 10.4%
+
+Three slices reproduce **bit-identical answers on every single item**. If rejection
+sampling were subtly wrong, error would be spread across all slices in proportion to token
+count, not concentrated in the one slice where accuracy is 44% and the model is at the edge
+of what it can do.
+
+**This independently reconfirms Phase 4's correction**: the noise floor tracks *proximity to
+the competence limit*, not chain length. At k32-nothink the model is barely above chance, so
+any perturbation -- batch composition, accumulation order, a different KV budget -- flips
+answers. 10.4% disagreement there with accuracy going UP 2.3 points is nondeterminism, not
+damage.
+
+### One caveat kept attached
+
+The two servers could not hold identical KV (52,080 vs 68,448 tokens), so batch composition
+differed and some of the 2.8% is that rather than speculation itself. This is why the gate
+was set at 4% rather than at `d0` = 1.8%, decided before the data existed. A stricter test
+would pin KV identically across the pair, at the cost of not measuring the configuration
+anyone would actually deploy.
