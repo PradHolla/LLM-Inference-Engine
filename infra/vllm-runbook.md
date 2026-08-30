@@ -280,7 +280,20 @@ uv run tools/specmon.py wrap --url http://localhost:8000 --label s3-int4 \
   --out results/phase5-spec.jsonl -- uv run tools/bench.py ...
 ```
 
-`specmon` discovers counter names by pattern rather than hardcoding them, and reports
+The counter names on vLLM 0.27.1, confirmed from a running server:
+
+```
+vllm:spec_decode_num_drafts_total{engine="0",model_name="..."}
+vllm:spec_decode_num_draft_tokens_total{...}
+vllm:spec_decode_num_accepted_tokens_total{...}
+vllm:spec_decode_num_accepted_tokens_per_pos_total{...,position="0|1|2"}
+```
+
+Each also has a `_created` twin holding a unix timestamp, not a count. Summing those into
+an acceptance total would produce a number around 1.8e9 rather than an error, so
+`specmon` excludes any series ending `_created`, `_sum` or `_bucket`.
+
+`specmon` discovers these by pattern rather than hardcoding them, and reports
 acceptance **by draft position**. The scalar hides the shape: a=0.6 is consistent with
 "every position accepts 60%" and with "position 1 accepts 95%, position 3 accepts 5%",
 and those imply opposite choices of `--spec-tokens`.

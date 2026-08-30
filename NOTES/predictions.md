@@ -2610,3 +2610,115 @@ wrong. Distinguishing the two requires the per-position acceptance curve, which 
   this build, and every latency number describes a different model than the control.
 - Spec decoding does not compose with int4 w4a16 in vLLM 0.27.1 -> half the design dies
   and the phase reduces to bf16 only. **Test this in build step 3, not step 7.**
+
+## P5-A1  Matched-pair KV measurement, 2026-08-29 (prediction written before the result)
+
+The Phase 3 trap fired again: the S0-int4 control, launched with Phase 4's exact flags,
+reported **102,944 tokens** of KV against Phase 4's **95,648** -- a 7.6% drift from
+vLLM's startup memory profiling, with nothing changed but the day. **P5-A's ledger must
+therefore be scored against this run's control, not against Phase 4's number.** This is
+precisely why the control was run rather than assumed, and it would have shown up as a
+spurious 7.6% "EAGLE is cheaper than predicted" had it been skipped.
+
+    control (S0-int4, no spec)   102,944 tokens
+    EAGLE3 head                2,044,116,968 B / 147,456 B per token = 13,863 tokens
+    PREDICTED S3-int4          102,944 - 13,863 = 89,081 tokens  (-13.5%)
+    concurrency @6144          16.76x -> predicted 14.50x
+
+This is close to pure arithmetic -- draft weights displace KV byte for byte -- so a miss
+means something else moved: extra activation memory for the draft's forward pass, a
+separate CUDA graph capture for the draft, or the head loading at a dtype other than bf16.
+Recording the three candidate causes now so the explanation is not invented afterwards.
+
+### ACTUALS -- P5-A1, 2026-08-29. Predicted 89,081 tokens, measured 78,224. MISS by 12%.
+
+| | control S0-int4 | +EAGLE3 S3-int4 | delta |
+|---|---|---|---|
+| GPU KV cache size | 102,944 tok | **78,224 tok** | **-24.0%** |
+| max concurrency @6144 | 16.76x | 12.73x | -24.0% |
+| weights + non-torch | 5.98 GiB | 7.92 GiB | **+1.94** |
+| peak activation | 0.18 GiB | 1.34 GiB | **+1.16** |
+| CUDAGraph memory | 0.62 GiB | 0.96 GiB | **+0.34** |
+| total non-KV | 6.78 GiB | 10.22 GiB | +3.44 |
+
+Predicted KV loss 13,863 tokens; measured 24,720. **The head costs 1.78x its own weights.**
+
+**The weight term was right to 2%** -- predicted 1.904 GiB, measured +1.94. The param
+count derived from `config.json` was correct and so was the byte-for-byte displacement
+argument. **What P5-A missed is that draft weights are not the only new term**, and I had
+named activations as a candidate cause before seeing the number, which is the only reason
+this is attribution rather than a story:
+
+- **Peak activation +1.16 GiB, a 7.4x increase over the control's 0.18 GiB.** This is 77%
+  of the unpredicted cost. Cause: a verify step processes k+1 = 4 positions per sequence
+  instead of 1, so the activation buffer covers ~4x the tokens in flight, and the draft
+  model runs its own forward pass on top.
+- **CUDAGraph +0.34 GiB**, the remaining 23%. vLLM captures graphs for the draft model and
+  for the multi-token verify shapes as well as the ordinary decode shape.
+
+**The correction to the model, which changes the phase's economics:**
+
+    draft cost  =  draft weights  +  (k+1) x activation growth  +  extra CUDA graphs
+    NOT         =  draft weights
+
+**The activation term scales with k, so the draft's memory cost is a function of k.**
+P5-A and section 0b of the design both treated it as a fixed charge independent of k.
+It is not, and that couples two knobs the design assumed were separate: raising k to
+chase acceptance also raises the memory it costs, which lowers concurrency, which moves
+the crossover of P5-B. **k=5 is more expensive in memory than k=3, not just in wasted
+compute.** This is Phase 4's coupling lesson again -- P4-16 warned that quantization and
+thinking budget could not be treated as independent knobs, and here k and memory cannot
+either.
+
+### Consequence to test immediately: bf16 + EAGLE3 may not be viable at all
+
+Phase 4 measured bf16 KV at 3.595 GiB. If EAGLE3's true cost is ~3.4 GiB rather than the
+1.9 GiB of its weights, **bf16 + EAGLE3 has essentially no KV cache left.** P5-7 predicted
+a 35-50% capacity drop on bf16; the honest revision before measuring is that it either
+refuses to start or is left with single-digit concurrency. Recording the revision here
+rather than quietly repairing P5-7 after the fact.
+
+## P5-1 ACTUAL, first acceptance measurement, S3-int4, 2026-08-29
+
+512-token synthetic prompt, 128 max out, thinking off, batch 1, k=3.
+
+| quantity | predicted | measured | |
+|---|---|---|---|
+| acceptance rate `a` | 0.65 - 0.80 | **0.3722** | **MISS, badly low** |
+| mean emitted / step `L` | -- | 2.117 | |
+| ITL p50 | -- | 17.7 ms | |
+| decode | -- | 56.5 tok/s | |
+
+Per-position acceptance, which is the number the scalar hides:
+
+    pos 0   0.6333
+    pos 1   0.3500
+    pos 2   0.1333
+
+**Acceptance decays steeply with position.** Position 3 contributes 0.133 -- it is drafted
+every step and accepted one time in eight. That is the per-position curve doing exactly the
+job section 9 said it would: a scalar `a` of 0.37 is consistent with a flat 37% at every
+position, which would justify a larger k, and with this steep decay, which says **k=3 is
+already past the useful point and k=2 may dominate it.** Same drafted-token budget, very
+different conclusion.
+
+The i.i.d. cross-check (section 9c) reports measured/i.i.d. = **1.355**. Acceptance is
+positively correlated across positions rather than independent, so the textbook
+`(1-a^(k+1))/(1-a)` formula understates real throughput by 35% here. Worth knowing before
+using that formula anywhere else in the phase.
+
+### Three candidate causes for the miss, written before testing any of them
+
+1. **The head was trained against bf16 Qwen3-8B and is here drafting for int4 w4a16.**
+   EAGLE conditions on the target's hidden states; quantizing the target shifts those
+   hidden states away from what the head was trained on. If this is the cause it is the
+   most interesting result available in the phase, because it means **quantization and
+   speculative decoding interfere with each other through a channel that has nothing to
+   do with memory** -- and P5-A already showed they interfere through memory.
+2. **The workload is synthetic filler text.** `bench.py`'s prompt is generated tokens, not
+   natural language. Drafting out-of-distribution text is hard, and this is the `open`
+   slice, the least favourable of the three in design section 5b.
+3. **The 32000-token draft vocabulary.** Flagged in P5-5's second-order risk.
+
+Cause 1 is separable from 2 and 3 by a single run: **the same measurement on bf16 + EAGLE3.**
+Same head, same prompt, same k -- only the target's precision changes. Running it next.
