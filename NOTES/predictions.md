@@ -3230,3 +3230,208 @@ correct and unrepresentative. Corrected statement, with the condition attached:
 **A single "speedup of speculative decoding" number does not exist for this system.** It
 ranges 1.19x to 2.25x on one GPU, one model and one draft, decided entirely by the shape of
 the request.
+
+## P5-J  Crossover sweeps and the two unclimbed rungs -- predictions, 2026-08-30
+
+### Protocol decision: `--max-num-seqs 32` on all four servers
+
+P5-F showed a cap of 20 would bind on the sweeps and turn them into a measurement of my
+own cap. 32 costs 74.2 MiB of fp32 logits buffer -- comfortably clear of the 594 MiB that
+OOMed at the default 256 -- and sits above the concurrency the KV budget can actually
+deliver on the capacity workload:
+
+    fp8 no-spec   4096/1024  ->  15.7 concurrent      512/64  ->  139.9
+    fp8 +EAGLE3   4096/1024  ->  10.2 concurrent      512/64  ->   90.7
+
+So on 4096/1024 the cap does not bind at all and the sweep walks batch from ~1 to ~16 by
+raising the arrival rate. On 512/64 the cap DOES bind at 32, and that is stated rather than
+hidden: both halves of the pair carry the identical cap, so the comparison is honest even
+though neither side reaches its own KV ceiling. **The predicted crossover of 8-20 lies
+inside 32, which is why 32 is sufficient to answer the question.**
+
+### The crossover, P5-B revisited with measured numbers
+
+P5-B predicted B* from a compute_eff bracket spanning an order of magnitude. Now anchored
+on measurement: realised efficiency is **0.73-0.76** at batch 1 across fp8 content slices,
+so verify overhead consumes roughly a quarter of the theoretical gain when the GPU is
+otherwise idle. That overhead is fixed per step while the memory term it hides behind is
+amortised across the batch, so the margin erodes as batch grows.
+
+| # | quantity | prediction |
+|---|---|---|
+| P5-J1 | fp8 crossover B*, 4096/1024 | **B* is NOT reached below 16.** Spec still ahead at the KV ceiling, margin shrunk from 1.45x to 1.05-1.20x |
+| P5-J2 | fp8 crossover B*, 512/64 | **B* between 12 and 28**, inside the cap of 32 |
+| P5-J3 | capacity (req/s at the knee), spec vs control, 4096/1024 | spec **LOWER by 15-30%** -- it buys latency and pays in concurrency, having given up 16,368 KV tokens |
+| P5-J4 | ITL p50 at the lowest rate | spec better by 1.3-1.5x, consistent with the serial runs |
+
+**P5-J3 is the one that decides deployability.** Every speedup measured so far is
+single-stream. If capacity falls 30%, speculative decoding is a latency feature bought with
+throughput, and the fp8+EAGLE3 recommendation needs the caveat attached.
+
+### Rung 1: n-gram, and why it might beat a trained head
+
+Costs **zero VRAM**, so it gives up none of the 16,368 tokens EAGLE3 takes. It proposes
+continuations found by matching the recent suffix against text already in the context.
+
+| # | quantity | prediction |
+|---|---|---|
+| P5-J5 | n-gram acceptance, synthetic filler | **0.02 - 0.12** -- `bench.py` prompts are random tokens with nothing to match |
+| P5-J6 | n-gram acceptance, `gsm8k/think` | **0.10 - 0.25** -- reasoning restates the problem, some hits |
+| P5-J7 | n-gram acceptance, `longctx` | **0.45 - 0.75** -- the answer QUOTES the document. This is prompt-lookup's designed best case |
+| P5-J8 | n-gram KV cost | **exactly 0 tokens** vs EAGLE3's 16,368 |
+
+**P5-J7 is the interesting bet.** longctx is where EAGLE3 did worst end-to-end (1.19x,
+diluted by prefill) while still charging full price in memory. If n-gram matches its
+acceptance there at zero memory cost, **the recommendation for retrieval workloads flips
+from EAGLE3 to n-gram** -- and Phase 6's chat app is exactly a retrieval workload.
+
+### Rung 2: Qwen3-0.6B as draft
+
+1.400 GiB of weights against EAGLE3's 1.904, but it sees only the text, not the target's
+hidden states, which is the whole advantage EAGLE3 has.
+
+| # | quantity | prediction |
+|---|---|---|
+| P5-J9 | Qwen3-0.6B acceptance, `gsm8k/think` | **0.30 - 0.45**, clearly below EAGLE3's 0.4905 |
+| P5-J10 | Qwen3-0.6B KV cost | **12,000 - 16,000 tokens** -- lower than EAGLE3's 16,368 on weights, but it runs 28 layers of KV against EAGLE3's 1, so its own cache is far larger per token |
+| P5-J11 | Qwen3-0.6B speedup, `gsm8k/think` | **1.3 - 1.6x**, below EAGLE3's 1.849x |
+
+P5-J10 is the one I am least sure of and it has a term I got wrong once already: EAGLE3's
+own KV is 4,096 B/token because it has one layer. **Qwen3-0.6B has 28 layers with 8 KV
+heads at head_dim 128, so 2 x 28 x 8 x 128 x 2 = 114,688 B/token -- 28x EAGLE3's per-token
+cache and 78% of the TARGET's own 147,456.** If vLLM allocates draft KV proportionally,
+rung 2 may cost far more cache than its smaller weights suggest, and could land worse than
+EAGLE3 despite being the lighter model. Recorded before measuring.
+
+## P5-K  Crossover sweeps and the full ladder, 2026-08-30. All fp8, `--max-num-seqs 32`.
+
+### THE CROSSOVER EXISTS, and only on one of the two workloads
+
+`512/64`, open-loop, per-chunk ITL p50 (spec chunks carry L=2.579 tokens, so per-token is
+the chunk figure divided by that):
+
+| rate | no-spec ITL | EAGLE3 ITL/chunk | EAGLE3 per token | verdict |
+|---|---|---|---|---|
+| 2 | 19 ms | 26 ms | **10.1 ms** | spec 1.88x ahead |
+| 4 | 21 ms | 29 ms | **11.2 ms** | spec 1.87x ahead |
+| 6 | 24 ms | 176 ms | **68 ms** | **spec 2.8x BEHIND** |
+| 8 | 24 ms | 178 ms | 69 ms | spec behind |
+| 10 | 24 ms | 178 ms | 69 ms | spec behind |
+
+**The sign flips between 4 and 6 req/s.** `PROJECT.md` section 5 named "reproduce the
+hurts-at-high-batch result" as a phase goal; this is that result, measured on our own box.
+
+`4096/1024`, same treatment (L=2.150):
+
+| rate | no-spec ITL | EAGLE3 per token |
+|---|---|---|
+| 0.20 | 21 ms | 14 ms |
+| 0.35 | 25 ms | 17 ms |
+| 0.50 | 27 ms | 24 ms |
+| 0.70 | 38 ms | 31 ms |
+| 0.90 | 39 ms | 31 ms |
+
+**No crossover. Speculation stays ahead at every rate up to the KV ceiling.** P5-J1
+predicted exactly this and is CORRECT.
+
+The two workloads disagree about the sign of the effect, which is Phase 4's lesson landing
+for the third time in two phases.
+
+**CAVEAT, and it is incident 12 again: the sweep was 2,4,6,8,10 and the crossover is
+between 4 and 6.** The resolution of the sweep is the resolution of the answer, and I
+cannot say whether it flips at 4.5 or 5.9. I criticised `roofline.py` for exactly this in
+Phase 2 and then wrote a coarse sweep anyway. A dense sweep across 4-6 would localise it.
+
+**Second caveat: acceptance was measured once per sweep, not per rate.** L almost certainly
+falls as batch grows, so the per-token column overstates spec at high rates -- meaning the
+true crossover is at a LOWER rate than shown, not higher. The direction of the error is
+known even though its size is not.
+
+### P5-J3 was badly wrong: capacity barely moves
+
+| | no-spec | EAGLE3 | |
+|---|---|---|---|
+| 512/64 peak | 6.24 req/s | 6.09 req/s | **-2.4%** |
+| 4096/1024 peak | 0.54 req/s | 0.53 req/s | **-1.9%** |
+
+Predicted a **15-30% capacity loss**. Measured 2%. The reasoning was that EAGLE3 gives up
+16,368 KV tokens, so concurrency must fall. It does fall -- but **neither workload is
+KV-bound at its knee**, so the lost cache costs nothing. Capacity is limited by compute and
+scheduling here, not by cache. Losing a quarter of a resource you were not using is free.
+
+This is the Phase 3 prefix-caching lesson yet again: **check whether anything is pressing
+against the ceiling before predicting the effect of lowering it.**
+
+### The full ladder, and my ordering was wrong
+
+Drafting quality, expressed as tokens emitted per decode step across ALL steps:
+
+| method | KV cost | % of capacity | filler | gsm8k | longctx |
+|---|---|---|---|---|---|
+| n-gram | **2,304** | **3.4%** | 1.123 | 1.176 | 1.160 |
+| EAGLE3 | 16,368 | 23.9% | 1.910 | 2.471 | 2.581 |
+| **Qwen3-0.6B** | **36,448** | **53.2%** | **2.133** | **3.166** | **2.743** |
+
+**Qwen3-0.6B is the best drafter on every slice** -- 3.166 tokens/step on gsm8k against
+EAGLE3's 2.471, a 28% edge. P5-J9 predicted it CLEARLY BELOW EAGLE3 at 0.30-0.45 acceptance;
+measured **0.7226**. Wrong, and wrong in the direction I was most confident about.
+
+**P5-J10 was numerically wrong and mechanically right.** Predicted 12,000-16,000 tokens of
+KV cost; measured **36,448**, more than double EAGLE3's. The flagged reason was correct:
+Qwen3-0.6B carries 28 layers of KV at 114,688 B/token against EAGLE3's single layer at
+4,096. The lighter model has the heavier cache. Writing the mechanism down before measuring
+turned a bad number into an explained one.
+
+### Speedup does NOT follow drafting quality
+
+gsm8k/think, against the no-spec control at 52.2 tok/s:
+
+| method | tok/s | speedup | L | realised |
+|---|---|---|---|---|
+| n-gram | 55.9 | 1.07x | 1.176 | **0.910** |
+| **EAGLE3** | **96.6** | **1.85x** | 2.471 | 0.749 |
+| Qwen3-0.6B | 91.3 | 1.75x | **3.166** | **0.553** |
+
+**The best drafter is not the fastest configuration.** Qwen3-0.6B guesses 28% better and
+ends up 5% slower, because drafting three times per step through a 28-layer model costs
+far more than EAGLE3's single layer. Its realised efficiency is 0.553 against EAGLE3's
+0.749. n-gram is the opposite extreme: it barely drafts, but what it does costs nothing on
+the GPU, so it realises 91% of its small gain.
+
+**EAGLE3 is confirmed as the right choice -- by measurement, not by assumption.** It sits at
+the optimum of a genuine three-way trade between draft quality, draft cost and memory.
+
+### The n-gram number that would have been a false headline
+
+`specmon` reported n-gram acceptance of **0.9333** on the filler workload, against EAGLE3's
+0.3035. Read naively that says n-gram is three times better for free.
+
+It is an artifact of what acceptance means. **`a` is conditional on a draft having been
+proposed**, and n-gram only proposes when it finds a matching suffix:
+
+| slice | acceptance when it fires | **how often it fires** | overall tokens/step |
+|---|---|---|---|
+| filler | 0.9333 | **4.4%** | **1.123** |
+| gsm8k | 0.5042 | 11.6% | 1.176 |
+| longctx | 0.4490 | 11.9% | 1.160 |
+
+On `bench.py`'s synthetic filler it is right 93% of the time on the 4% of steps where the
+prompt repeats itself -- which also says the filler prompt is trivially self-similar, and is
+a further reason that workload should never have been the phase's yardstick.
+
+**Instrument limitation now recorded:** `specmon`'s acceptance is the correct metric for
+drafters that fire every step (EAGLE3, draft models, both measured at ~100% hit rate) and is
+MISLEADING for opportunistic drafters (n-gram, suffix). For those, the unconditional figure
+must be derived: `tokens / (drafts + (tokens - drafts - accepted))`. Comparing a conditional
+rate against an unconditional one is the same class of error as incident 32.
+
+### P5-J7 correct in number, wrong in reasoning
+
+Predicted n-gram acceptance on `longctx` at 0.45-0.75; measured 0.4490, just at the edge.
+But the bet behind it was that n-gram would **beat** EAGLE3 there, because the answer quotes
+the document and prompt-lookup is built for exactly that. It does not: 1.160 tokens/step
+against EAGLE3's 2.581. The recommendation for retrieval workloads does **not** flip.
+
+Why the reasoning failed: the answer quotes only a handful of tokens from a 4,096-token
+document. The rest of the output is the model's own phrasing, which has no match to find. A
+copy-heavy *task* is not the same as copy-heavy *output*.
