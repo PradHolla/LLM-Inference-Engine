@@ -1,5 +1,8 @@
 # LLM Inference Engine
 
+> **AI usage:** built with Claude Code (Opus for design, analysis and debugging; Sonnet
+> for mechanical implementation work), as a learning project in inference engineering.
+
 An LLM serving stack built from scratch and measured against first-principles predictions
 at every layer. Qwen3-8B on a single NVIDIA A10G (AWS `g5.2xlarge`).
 
