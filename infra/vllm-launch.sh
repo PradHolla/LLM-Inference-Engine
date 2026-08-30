@@ -21,6 +21,7 @@ done
 
 sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 --setenv=PYTHONUNBUFFERED=1 \
+  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --setenv=PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin \
   $VENV/bin/python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 --port 8000 "$@" >/dev/null 2>&1

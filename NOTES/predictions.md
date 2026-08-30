@@ -2865,3 +2865,56 @@ weight format, which nothing so far suggests. **P5-D3 is the interesting one**: 
 whether acceptance varies monotonically with how aggressively the target is quantized. If
 fp8 lands outside the bf16-int4 bracket, then the bf16-vs-int4 difference measured today is
 not about quantization at all and should not be reported as if it were.
+
+## P5-E  A latent OOM in vLLM spec decoding that startup profiling does not see (2026-08-29)
+
+The identical S3-bf16 and S3-int4 configurations that launched and measured cleanly an
+hour earlier both **failed to start** on the re-run. Not a flake, and the cause is worth
+recording as a property of the system rather than an accident.
+
+    torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 594.00 MiB.
+      GPU 0 has a total capacity of 22.06 GiB of which 373.44 MiB is free.
+      .../v1/worker/gpu/spec_decode/rejection_sampler.py in _verify
+        processed_logits = self.sampler.apply_sampling_params(
+      .../v1/worker/gpu/sample/sampler.py line 159
+        logits = torch.empty_like(logits, dtype=torch.float32).copy_(logits)
+
+**The rejection sampler upcasts the verify logits to fp32**, and the buffer is sized by
+`max_num_seqs x (k+1) x vocab`:
+
+    594 MiB / (151,936 vocab x 4 bytes) = 1,025 positions
+    max_num_seqs 256 x (k+1) 4          = 1,024      exact
+
+| max_num_seqs | fp32 logits buffer at k=3 |
+|---|---|
+| 256 (default) | **593.5 MiB** |
+| 64 | 148.4 MiB |
+| 32 | 74.2 MiB |
+| 20 | 46.4 MiB |
+
+**The finding: vLLM's startup memory profile does not reserve for this allocation.** The
+server profiles free memory, sizes the KV cache to fill the GPU, reports a healthy
+`GPU KV cache size`, and then OOMs the first time the rejection sampler runs. Whether a
+given launch survives depends on how much slack the profile happened to leave -- the same
+startup-profile variance that produced 102,944 tokens today against 95,648 in Phase 4.
+**A spec-decoding server can therefore start successfully and die on its first request,
+and the same command can do either on different days.**
+
+**The second half of the finding is that `max_num_seqs=256` is meaningless on this box.**
+Measured concurrency ceilings from the KV budget are 1.73x (bf16 + EAGLE3), 13.11x (fp8)
+and 16.76x (int4). The sampler is sizing a buffer for 256 concurrent sequences that the
+KV cache could never hold, and paying 594 MiB of VRAM for the privilege -- VRAM that is
+taken from the KV cache, which lowers concurrency further. The default is not merely
+wasteful here, it is self-defeating.
+
+### Correction to the run protocol, applied to every remaining Phase 5 run
+
+- **`--max-num-seqs 20`** on every configuration, control and spec alike. Above every
+  measured concurrency ceiling so it constrains nothing, while cutting the logits buffer
+  from 594 to 46 MiB.
+- **`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`**, which the error message itself
+  recommends and which the decision log adopted for Phase 2 engine runs on 2026-08-21
+  (+29% concurrency there). It was never applied to the vLLM runs. It should have been.
+
+Both halves of every matched pair are re-measured under the new setting; the controls
+already collected at the default are discarded rather than compared across settings.
