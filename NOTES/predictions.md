@@ -3051,3 +3051,121 @@ from its bit width. Not reported as a quantization effect.
 - int4 acceptance measured **0.3722 under both protocols**, identical to four decimals
   across a `max_num_seqs` change that altered the KV budget by 7%. Acceptance is a stable
   property of the draft/target/workload triple and is not sensitive to the memory settings.
+
+## P5-H  Content slices: the phase's central bet, predictions written before running
+
+Everything measured so far used `bench.py`'s synthetic filler prompt -- the `open` slice,
+the least favourable content there is. **fp8 + EAGLE3 measured a = 0.3035 there.** The
+question this phase exists to answer is whether real reasoning text drafts better.
+
+Held fixed: fp8 + EAGLE3, k=3, `--max-num-seqs 20`, concurrency 1 so nothing is confounded
+with batch. Only the CONTENT of the workload changes.
+
+### A confound the item set forced me to control
+
+`mkitems.py` generates the math slice from templates -- "N more are added", "the count
+doubles", "N are taken away". That is highly repetitive text, and it would draft well for
+reasons that have nothing to do with reasoning. **A high acceptance on synthetic maths
+would be uninterpretable on its own.**
+
+GSM8K is human-written word problems. Running both separates "reasoning is draftable" from
+"my templates are draftable". Without gsm8k this experiment could not distinguish the
+phase's hypothesis from an artifact of my own generator.
+
+| slice | what it is | prediction |
+|---|---|---|
+| `open` (measured) | synthetic filler, no thinking | **0.3035** |
+| `math/think` | templated arithmetic, thinking ON | **0.55 - 0.75** |
+| `math/nothink` | templated arithmetic, answer only | **0.40 - 0.55** |
+| `gsm8k/think` | natural-language reasoning, thinking ON | **0.50 - 0.65** |
+| `longctx` | recall a 4-char code from a document | **0.55 - 0.75** |
+
+**P5-5, registered before the phase began, predicted 0.75 - 0.88 for reasoning.** It is
+scored against `math/think` and `gsm8k/think` and is currently on track to miss high, since
+every acceptance measured so far has come in far below expectation.
+
+### What each outcome would mean, decided before the data
+
+- **math/think high AND gsm8k/think high** -> reasoning genuinely drafts better. The Phase 7
+  thinking-latency lever is real, and the 36-second thinking wait is halvable.
+- **math/think high BUT gsm8k/think near `open`** -> my templates are draftable, reasoning
+  is not. P5-5 is wrong and the headline finding would have been an artifact of my own
+  item generator. This is the outcome the gsm8k control exists to catch.
+- **both near `open` (~0.30)** -> acceptance is a property of this draft/target pair and
+  barely moves with content. Speculative decoding gives a flat ~1.45x here and the phase's
+  bet is simply lost.
+- **longctx high** -> expected regardless; the output is short and formulaic. It is the
+  sanity check that the measurement responds to content at all. **If longctx does NOT come
+  in above `open`, suspect the experiment before believing the result.**
+
+## P5-H ACTUALS  Content slices, fp8 + EAGLE3, concurrency 1, 2026-08-30
+
+| slice | acceptance | L | vs filler | verify steps | predicted | |
+|---|---|---|---|---|---|---|
+| `open` synthetic filler | 0.3035 | 1.910 | 1.00x | -- | (measured) | |
+| `gsm8k/think` natural reasoning | **0.4905** | 2.471 | **1.29x** | 5,194 | 0.50-0.65 | narrow miss, low |
+| `longctx` verbatim recall | **0.5270** | 2.581 | **1.35x** | 1,143 | 0.55-0.75 | miss, low |
+| `math/think` templated + thinking | **0.5960** | 2.788 | **1.46x** | 7,369 | 0.55-0.75 | **correct** |
+| `math/nothink` templated, answer only | **0.6708** | 3.012 | **1.58x** | 3,494 | 0.40-0.55 | **miss, and INVERTED** |
+
+**Every prior acceptance number in this phase was measured on the worst content there is.**
+Real workloads draft roughly twice as well as `bench.py`'s synthetic filler. The 0.30 that
+looked like a disappointing property of EAGLE3 was mostly a property of the prompt.
+
+### The gsm8k control earned its place
+
+Templated maths scores **21% above** natural-language reasoning (0.5960 vs 0.4905). Part of
+the synthetic slice's advantage is that `mkitems.py` writes repetitive text, exactly as
+feared. **Reporting `math/think` alone would have overstated reasoning acceptance by a
+fifth.**
+
+The underlying claim survives the control: gsm8k is still **62% above filler**. Real
+reasoning genuinely drafts better. The control separated an inflated effect from a false
+one rather than destroying it -- which is the outcome that justifies having run it.
+
+### P5-5 was directionally right and quantitatively wrong, for a reason worth keeping
+
+P5-5 predicted 0.75-0.88 for reasoning and argued that chain-of-thought is repetitive
+scaffolding. Measured 0.4905 (natural) to 0.5960 (templated). **Direction right, magnitude
+badly wrong.**
+
+But the rationale was worse than the number, and `math/nothink` proves it. **Same problems,
+same model: 0.6708 without thinking against 0.5960 with it.** I predicted nothink LOWER and
+it is the highest slice measured.
+
+**Thinking text is HARDER to draft than non-thinking text.** Not easier. A thinking block is
+where the model explores, backtracks and reconsiders -- high-entropy by construction. Denied
+that block it emits a tidy formulaic walkthrough, and formulaic drafts well.
+
+**Consequence for Phase 7, which is the reason this phase exists:** the 36 seconds of
+thinking latency that Phase 7 wants to cut is the *hardest* part of the output to
+accelerate. Speculative decoding still helps there far more than the filler benchmark
+suggested, but the cheapest wins are in the visible answer, not in the reasoning. Phase 7
+inherits a real lever, weaker than hoped, and pointed at the wrong end of the response.
+
+### An instrument rule caught its own violation
+
+`longctx` first ran at 30 items and returned **384 verify steps against the 400 minimum**
+fixed in design section 6. `specmon` flagged it and the number was withheld rather than
+reported. Re-run at 90 items: **1,143 steps, a = 0.5270** against the small sample's 0.5200.
+
+The small sample was accurate. That is not the point -- it was not *knowably* accurate at
+the time, and the threshold was written before any data existed. One cheap re-run converted
+a guess into a measurement.
+
+### Registered before the control runs: speedup implied by these acceptance rates
+
+Realised efficiency on fp8/filler was 1.453 / 1.910 = **0.761**. Longer contexts here mean
+more KV read per step, which enlarges the memory term and should make the verify overhead
+*relatively* smaller, so realised should rise. Predicting 0.76 - 0.85:
+
+| slice | L | predicted speedup |
+|---|---|---|
+| gsm8k/think | 2.471 | **1.88 - 2.10x** |
+| longctx | 2.581 | 1.96 - 2.19x |
+| math/think | 2.788 | **2.12 - 2.37x** |
+| math/nothink | 3.012 | 2.29 - 2.56x |
+
+Measured directly by re-running the identical passes with speculation off and comparing
+wall clock. Spec-on elapsed, for the record: math/think 193.1 s, math/nothink 89.0 s,
+gsm8k/think 132.9 s, longctx(30) 33.9 s.
