@@ -2722,3 +2722,146 @@ using that formula anywhere else in the phase.
 
 Cause 1 is separable from 2 and 3 by a single run: **the same measurement on bf16 + EAGLE3.**
 Same head, same prompt, same k -- only the target's precision changes. Running it next.
+
+## P5-2 THE INSTRUMENT WAS WRONG, AND IT INVERTED THE RESULT (2026-08-29)
+
+The first matched batch-1 runs said speculative decoding made everything **slower**:
+
+| config | ITL p50 | "decode tok/s" | reading |
+|---|---|---|---|
+| S0-int4 control | 11.9 ms | 84.6 | -- |
+| S3-int4 EAGLE3 | 17.7 ms | 56.5 | 1.49x SLOWER |
+| S0-bf16 control | 34.2 ms | 29.3 | -- |
+| S3-bf16 EAGLE3 | 41.5 ms | 24.1 | 1.21x SLOWER |
+
+That is a clean, plausible, fully self-consistent set of numbers, and it is wrong.
+
+**What gave it away was not the latency. It was the token count.** The controls emitted
+exactly 2,816 tokens -- 22 requests x the 128 cap, every request truncated. The spec runs
+emitted 1,342 and 1,433. At temperature 0, a distribution-preserving technique had
+apparently changed how much text the model produced, which is not a performance artifact
+but a correctness alarm.
+
+**Cause: `bench.py` counts one token per SSE chunk.** For four phases that was exactly
+right -- vLLM emits one chunk per engine step and a step produced one token. Speculative
+decoding emits **the whole accepted run in a single chunk**, so `out_tokens` undercounts
+by precisely the acceptance factor, and `itls` measures per-STEP, not per-token latency.
+
+The undercount ratios are the acceptance factor itself:
+
+    S3-int4  2816 real / 1342 chunks = 2.098    specmon measured L = 2.117
+    S3-bf16  2817 real / 1433 chunks = 1.966    specmon measured L = 1.981
+
+**`specmon`'s counters reconstruct the true count independently and it closes exactly:**
+
+    drafts + accepted + one prefill token per request
+    S3-int4:  1320 + 1474 + 22 = 2,816  =  22 x 128   EXACT
+    S3-bf16:  1411 + 1384 + 22 = 2,817  =  22 x 128   EXACT to rounding
+
+This is design section 9c working as designed -- two paths to the same quantity, one from
+counters and one from the wall clock -- and it is the only reason the error was caught in
+twenty minutes rather than surviving into the phase's conclusion.
+
+### The corrected result
+
+| config | KV tokens | decode s | true tok/s | ms/token | vs control |
+|---|---|---|---|---|---|
+| S0-int4 | 102,944 | 33.28 | 84.6 | 11.82 | 1.00x |
+| **S3-int4** | 78,224 | 23.35 | **120.6** | 8.29 | **1.425x** |
+| S0-bf16 | 33,424 | 95.47 | 29.5 | 33.90 | 1.00x |
+| **S3-bf16** | 10,640 | 58.58 | **48.1** | 20.80 | **1.630x** |
+
+**P5-2 predicted 1.8 - 2.4x for bf16 at batch 1. Measured 1.630x -- just under, and the
+first Phase 5 prediction that is close.**
+
+### The fix
+
+`bench.py` now sends `stream_options: {"include_usage": true}` and records the server's
+own `completion_tokens` in `usage_tokens`, keeping the chunk count in `out_tokens`. Both
+are reported, because **tokens-per-chunk IS the speedup** and is worth seeing directly.
+`--no-usage` is the escape hatch for a server that rejects the field; the fallback path
+was verified against `mock_server.py`, which does not implement it, so wire compatibility
+with the Phase 1 and Phase 2 servers is preserved.
+
+Recorded as incident 32. The general form: **a metric's definition is an assumption about
+the server, and a new technique can invalidate it without raising anything.**
+
+## P5-A ACTUAL for bf16: the revised prediction was right, and the config is unusable
+
+| | S0-bf16 | S3-bf16 | |
+|---|---|---|---|
+| GPU KV cache | 33,424 tok | **10,640 tok** | **-68.2%** |
+| available KV | 4.59 GiB | 1.50 GiB | -3.09 GiB |
+| max concurrency @6144 | 5.44x | **1.73x** | |
+
+The revision written after P5-A1 said bf16 + EAGLE3 would be "left with single-digit
+concurrency" rather than P5-7's original 35-50% capacity drop. **Measured 1.73x
+concurrency**, so the revision was right and the original was badly wrong.
+
+At 1.73 concurrent requests this configuration cannot serve. It gets 1.63x on single-stream
+latency and gives up essentially all capacity to do it -- a trade that is defensible for a
+single-user desktop and indefensible for a server, which is what section 6's adoption rule
+already said before the data arrived.
+
+Note also the control drifted again: **33,424 tokens** here against Phase 4's 26,176 and
+Phase 3's 33,424. The bf16 KV budget has now been observed at both Phase 3 values on
+different days. Same flags. This is why every comparison in this phase is a same-session
+matched pair.
+
+## P5-1 ACTUAL: the acceptance miss is NOT caused by quantization
+
+| target | acceptance `a` | pos 0 | pos 1 | pos 2 |
+|---|---|---|---|---|
+| int4 w4a16 | **0.3722** | 0.633 | 0.350 | 0.133 |
+| bf16 | **0.3270** | 0.546 | 0.310 | 0.125 |
+
+Candidate cause 1 was that the head, trained against bf16 Qwen3-8B, would draft poorly for
+an int4 target whose hidden states have shifted. **That predicts bf16 acceptance ABOVE
+int4's. Measured the opposite, and not marginally**: 0.327 against 0.372, roughly six
+standard errors apart at n > 1,300 drafts each.
+
+**Cause 1 is refuted.** Quantizing the target did not degrade EAGLE3 acceptance through
+the hidden-state channel. The interference P5-A found between quantization and speculative
+decoding is real but is confined to memory.
+
+Why int4 accepts *better* than bf16 is now an open question rather than an answer. The
+honest reading is that it is a small effect on an unfavourable workload and should not be
+interpreted until the content slices run.
+
+That leaves causes 2 and 3 for the low absolute number, and cause 2 is much the likelier:
+**this is `bench.py`'s synthetic filler prompt**, the `open` slice, the least favourable
+of the three in design section 5b. Drafting text that is not natural language is exactly
+where a trained head should do worst. The `reason` and `copy` slices test it directly.
+
+## P5-D  fp8 added to the matrix, 2026-08-29, predictions written before running
+
+**Decision reversed.** Design section 5a excluded fp8 to keep the run count down, on the
+argument that it interpolates between bf16 and int4. Today's measurements make that
+argument weak: bf16 + EAGLE3 lands at 1.73x concurrency (unusable) and int4 at 12.73x
+(fine). **The two configurations in the matrix are the two whose answers are now obvious,
+and the one left out is the only one still in doubt.**
+
+It is also the configuration a real deployment would pick for this workload. Phase 4
+measured int4 destroying **37% of 32-step arithmetic without thinking** while fp8 cost no
+accuracy at all. Phase 5 is about thinking latency, so omitting the quantization that is
+safe for reasoning was the wrong call. Cost to add: one launch, no download, `--quantization
+fp8` is applied to the bf16 weights at load time.
+
+Predictions, anchored on the two measured EAGLE3 costs rather than on absolutes (P4-16):
+
+    measured EAGLE3 KV cost   int4  24,720 tok = 3.395 GiB
+                              bf16  22,784 tok = 3.128 GiB
+                              mean               3.26 GiB = 23,750 tok
+
+| # | quantity | prediction |
+|---|---|---|
+| P5-D1 | fp8 + EAGLE3 KV loss vs its own same-session control | **22,000 - 25,500 tokens** |
+| P5-D2 | fp8 + EAGLE3 concurrency @6144 | **7 - 9x** -- usable, unlike bf16 |
+| P5-D3 | fp8 acceptance `a` on the `open` slice | **0.33 - 0.37**, between bf16's 0.327 and int4's 0.372 |
+| P5-D4 | fp8 + EAGLE3 single-stream speedup | **1.45 - 1.65x** |
+
+P5-D1 is close to arithmetic and a miss would mean the draft's cost depends on the target's
+weight format, which nothing so far suggests. **P5-D3 is the interesting one**: it tests
+whether acceptance varies monotonically with how aggressively the target is quantized. If
+fp8 lands outside the bf16-int4 bracket, then the bf16-vs-int4 difference measured today is
+not about quantization at all and should not be reported as if it were.

@@ -49,7 +49,8 @@ class Record:
     ttft: float | None = None
     e2e: float | None = None
     itls: list[float] = field(default_factory=list)
-    out_tokens: int = 0
+    out_tokens: int = 0       # SSE chunks received. ONE PER ENGINE STEP, not per token.
+    usage_tokens: int = 0     # server-reported completion_tokens. The real count.
     prompt_chars: int = 0
     status: str = "ok"
     error: str = ""
@@ -114,6 +115,11 @@ async def one_request(client: httpx.AsyncClient, args, rate: float,
     }
     if args.no_think:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
+    if not args.no_usage:
+        # Ask the server for the authoritative completion_tokens in a final chunk.
+        # WITHOUT THIS, out_tokens counts SSE chunks, and speculative decoding puts
+        # several tokens in one chunk -- see the note on out_tokens above.
+        payload["stream_options"] = {"include_usage": True}
 
     last = rec.t_sent
     try:
@@ -133,6 +139,9 @@ async def one_request(client: httpx.AsyncClient, args, rate: float,
                     chunk = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                usage = chunk.get("usage")
+                if usage and usage.get("completion_tokens"):
+                    rec.usage_tokens = int(usage["completion_tokens"])
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
@@ -242,13 +251,20 @@ def summarize(rate: float, recs: list[Record], duration: float) -> dict:
     ttfts = [r.ttft * 1000 for r in ok if r.ttft is not None]
     itls = [x * 1000 for r in ok for x in r.itls]
     e2es = [r.e2e * 1000 for r in ok if r.e2e is not None]
-    toks = sum(r.out_tokens for r in ok)
+    deltas = sum(r.out_tokens for r in ok)
+    usage = sum(r.usage_tokens for r in ok)
+    # Prefer the server's own count. Falls back to the chunk count for servers that
+    # do not implement stream_options, where one chunk really is one token.
+    toks = usage or deltas
     lag = max((r.client_lag for r in recs), default=0) * 1000
     return {
         "rate": rate, "sent": len(recs), "ok": len(ok),
         "fail": sum(1 for r in recs if r.status != "ok"),
         "achieved_rps": len(ok) / duration,
         "out_tok_s": toks / duration,
+        "out_deltas": deltas,
+        "out_tokens_usage": usage,
+        "tokens_per_step": (usage / deltas) if (usage and deltas) else None,
         "ttft_p50": pct(ttfts, 50), "ttft_p95": pct(ttfts, 95), "ttft_p99": pct(ttfts, 99),
         "itl_p50": pct(itls, 50), "itl_p95": pct(itls, 95),
         "e2e_p50": pct(e2es, 50), "e2e_p95": pct(e2es, 95),
@@ -294,6 +310,9 @@ async def main() -> None:
     ap.add_argument("--unique-prefix", action="store_true",
                     help="random head per request, to defeat prefix caching")
     ap.add_argument("--no-think", action="store_true", help="Qwen3: enable_thinking=false")
+    ap.add_argument("--no-usage", action="store_true",
+                    help="do not send stream_options.include_usage. Escape hatch for a "
+                         "server that rejects the field; out_tokens then counts chunks")
     ap.add_argument("--max-inflight", type=int, default=512)
     ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--out", default="results/bench.jsonl")
@@ -326,9 +345,22 @@ async def main() -> None:
         itls = [x * 1000 for r in ok for x in r.itls]
         ttfts = [r.ttft * 1000 for r in ok if r.ttft is not None]
         print(f"\n\033[1mSINGLE STREAM\033[0m  ({len(ok)} measured, {args.warmup} warmup discarded)")
+        deltas = sum(r.out_tokens for r in ok)
+        usage = sum(r.usage_tokens for r in ok)
+        tps = (usage / deltas) if (usage and deltas) else None
+        dec_s = sum((r.e2e or 0) - (r.ttft or 0) for r in ok)
         print(f"  TTFT          {pct(ttfts,50):>8.0f} ms  (p50)")
-        print(f"  ITL           {pct(itls,50):>8.1f} ms  (p50)")
-        print(f"  decode        {1000/pct(itls,50):>8.1f} tok/s")
+        print(f"  ITL           {pct(itls,50):>8.1f} ms  (p50)   per STREAMED CHUNK")
+        if tps and tps > 1.01:
+            # Speculative decoding emits several tokens per engine step, so a chunk
+            # is not a token and ITL is not per-token latency.
+            print(f"  tokens/chunk  {tps:>8.2f}        {usage} tokens in {deltas} chunks")
+            print(f"  per token     {pct(itls,50)/tps:>8.1f} ms  (derived)")
+        if dec_s > 0:
+            print(f"  decode        {(usage or deltas)/dec_s:>8.1f} tok/s"
+                  f"   ({usage or deltas} tokens / {dec_s:.2f}s decode)")
+        else:
+            print(f"  decode        {1000/pct(itls,50):>8.1f} tok/s")
         print()
         return
 
