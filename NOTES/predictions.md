@@ -2918,3 +2918,136 @@ wasteful here, it is self-defeating.
 
 Both halves of every matched pair are re-measured under the new setting; the controls
 already collected at the default are discarded rather than compared across settings.
+
+## P5-F  Two things the xhigh audit caught, 2026-08-29
+
+### 1. The draft model has its own KV cache, and it explains a gap I had glossed
+
+P5-A1 reported KV loss in tokens and separately in GiB, and the two did not reconcile:
+78,224 tokens x 147,456 B is 10.74 GiB, but the server reported 11.04 GiB. I noted the
+0.3 GiB discrepancy and moved past it. That was the wrong call -- it was signal.
+
+The EAGLE3 head is a 1-layer transformer with 8 KV heads at head_dim 128, so it needs its
+own cache:
+
+    target Qwen3-8B   2 x 36 layers x 8 x 128 x 2 B = 147,456 B/token
+    EAGLE3 head       2 x  1 layer  x 8 x 128 x 2 B =   4,096 B/token
+    combined                                          151,552 B/token   (+2.8%)
+
+Every configuration now reconciles exactly:
+
+| run | tokens | reported GiB | target-only | target + draft KV |
+|---|---|---|---|---|
+| S0-int4 | 102,944 | 14.14 | **14.14** | 14.53 |
+| S3-int4 | 78,224 | 11.04 | 10.74 | **11.04** |
+| S0-bf16 | 33,424 | 4.59 | **4.59** | 4.72 |
+| S3-bf16 | 10,640 | 1.50 | 1.46 | **1.50** |
+
+Controls match target-only; spec runs match target-plus-draft. **So `GPU KV cache size` is
+the number of tokens servable including the draft's own cache**, which means the
+token-level comparison used throughout (102,944 -> 78,224) is the correct apples-to-apples
+metric and stands. The draft's KV is a fourth cost term, small at 2.8% but real, and it
+was missing from the P5-A ledger alongside activations and CUDA graphs.
+
+### 2. `--max-num-seqs 20` would have corrupted the throughput sweeps
+
+The P5-E fix caps concurrency at 20 to shrink the rejection sampler's fp32 buffer. That is
+harmless for the batch-1 serial runs now executing -- one request at a time cannot reach
+the cap. **It is not harmless for the sweeps, which have not run yet:**
+
+| config | workload | concurrency the KV allows | cap 20 |
+|---|---|---|---|
+| bf16 | 512/64 | 58.0 | **binds** |
+| fp8 | 512/64 | 139.9 | **binds** |
+| int4 | 512/64 | 178.7 | **binds** |
+| int4 | 4096/1024 | 20.1 | **binds, just** |
+| bf16, fp8 | 4096/1024 | 6.5, 15.7 | does not bind |
+
+P5-B's entire purpose is locating the batch size at which speculative decoding inverts
+sign, predicted at B* between 8 and 20 for int4. **Capping the batch at 20 would have made
+the crossover unobservable, and on 512/64 the sweep would have measured my own cap rather
+than the technique.** Caught before the sweeps ran; the serial data already collected is
+unaffected.
+
+**This is a genuine constraint of the hardware, not just a protocol bug, and it should be
+reported as a result.** The sampler buffer is `max_num_seqs x (k+1) x vocab x 4 B`, so on
+a 24 GB card speculative decoding forces a direct trade between concurrency and not
+running out of memory:
+
+    max_num_seqs  64 -> 148 MiB      128 -> 297 MiB      192 -> 445 MiB
+
+Resolution for the sweeps: set `max_num_seqs` per workload, above what the KV budget can
+actually deliver, and record the resulting buffer size. 4096/1024 needs ~24; 512/64 needs
+~192 for int4, which is 445 MiB and uncomfortably close to the 594 MiB that already OOMed.
+**If int4 at 512/64 cannot be run without OOM, that is itself the finding** -- and it must
+be stated as a measured limit rather than quietly worked around by lowering the cap.
+
+## P5-G  THE MATCHED TRIPLE, corrected protocol, 2026-08-30
+
+All six runs same session, same settings (`--max-model-len 6144 --max-num-seqs 20`,
+`expandable_segments:True`), batch 1, 512-token synthetic prompt, 128 max out, k=3.
+
+| config | KV control | KV +EAGLE3 | loss | concurrency | tok/s | speedup | acceptance |
+|---|---|---|---|---|---|---|---|
+| bf16 | 27,104 | 11,712 | 15,392 | **1.91x** | 29.5 -> 45.9 | **1.556x** | 0.3063 |
+| fp8 | 68,592 | 52,224 | 16,368 | **8.50x** | 53.4 -> 77.6 | **1.453x** | 0.3035 |
+| int4 | 95,792 | 78,272 | 17,520 | **12.74x** | 84.5 -> 120.6 | **1.427x** | 0.3722 |
+
+**The KV cost is a near-constant charge** -- 15,392 / 16,368 / 17,520 tokens against a
+budget that varies 3.5x. The fixed-charge model from P5-A survives; only the magnitude was
+wrong, and P5-F explained why.
+
+### The result I did not predict: acceptance and speedup move in OPPOSITE directions
+
+int4 accepts **22% more** draft tokens than bf16 and delivers the **smallest** speedup.
+
+    realised = measured speedup / theoretical tokens-per-step L,  L = 1 + 3a
+
+| config | L | speedup | realised |
+|---|---|---|---|
+| bf16 | 1.919 | 1.556x | **0.811** |
+| fp8 | 1.910 | 1.453x | **0.761** |
+| int4 | 2.117 | 1.427x | **0.674** |
+
+**The fraction of the theoretical gain actually delivered falls monotonically as the
+weights get cheaper: 0.81 -> 0.76 -> 0.67.**
+
+This is P5-B's mechanism showing up at batch 1, which I had only predicted for large batch.
+The verify pass costs a fixed amount of extra compute -- three draft forward passes plus a
+4-position verify -- while the thing it is hiding behind, the target's weight read, shrinks
+with quantization. bf16 reads 16.39 GB per step and the overhead disappears into it; int4
+reads 6.12 GB and the same overhead is proportionally 2.7x more visible.
+
+**So quantization and speculative decoding compete twice, not once.** P5-A found them
+competing for memory. This is a second, independent channel: quantization removes the very
+bandwidth stall that speculative decoding exists to exploit. **The better your decode
+already is, the less speculation can add** -- and the two techniques are closest to
+redundant exactly where each is individually strongest.
+
+### Acceptance does not vary with numeric precision
+
+| config | weights | acceptance |
+|---|---|---|
+| bf16 | `Qwen/Qwen3-8B` | 0.3063 |
+| fp8 | **same weights**, quantized at load | 0.3035 |
+| int4 | `RedHatAI/Qwen3-8B-quantized.w4a16`, a **different checkpoint** | 0.3722 |
+
+P5-D3 pre-registered the falsification condition: if fp8 landed outside the bf16-int4
+bracket, the bf16-vs-int4 difference is not about quantization. **It landed at bf16's
+value** (0.3035 vs 0.3063, a 0.9% relative difference).
+
+bf16 and fp8 are the *same weights* at different precision, and they accept identically.
+**Numeric precision does not affect how draftable the model's output is.** int4 differs by
+22%, but int4 is a separately calibrated checkpoint, so precision and checkpoint identity
+are confounded there. The honest statement is: precision does not matter, and the int4
+difference is a property of that specific checkpoint that this experiment cannot separate
+from its bit width. Not reported as a quantization effect.
+
+### Two instrument cross-checks passed
+
+- `bench.py` now reports **2.10 tokens/chunk** directly, against L = 1 + 3(0.3722) = 2.117
+  derived from specmon's independent counters. Agreement to 0.8% confirms the incident-32
+  fix from both directions.
+- int4 acceptance measured **0.3722 under both protocols**, identical to four decimals
+  across a `max_num_seqs` change that altered the KV budget by 7%. Acceptance is a stable
+  property of the draft/target/workload triple and is not sensitive to the memory settings.
