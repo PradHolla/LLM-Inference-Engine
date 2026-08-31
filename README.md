@@ -149,6 +149,29 @@ The small model guesses 28% better and finishes 5% slower, because running 28 la
 times per step costs more than running one layer three times -- and the *lighter* model
 carries the *heavier* cache, since 28 layers of its own history dwarf the head's single one.
 
+**And the setting nobody had tested was one too high.** Every measurement in this phase
+used k=3 -- three tokens guessed per step -- because that is what the helper's checkpoint
+ships with. Sweeping it:
+
+| tokens guessed ahead | speed-up | tokens per step |
+|---|---|---|
+| 1 | 1.355x | 1.54 |
+| **2** | **1.488x** | 1.83 |
+| 3 (the default) | 1.450x | 1.91 |
+| 5 | 1.338x | 2.00 |
+| 7 | 1.215x | 2.03 |
+
+Guessing further ahead keeps working -- k=7 really does emit 32% more tokens per step than
+k=2. It just costs more than it returns, because acceptance decays geometrically with
+position while the drafting cost grows linearly. **k=2 is 2.6% faster than the shipped
+default and k=7 is 18% worse**, so every number above is a slight understatement.
+
+The cost model predicted this shape from first principles and matched the measured
+efficiency to within 4% at every k -- the most accurate prediction of the phase, and the
+one built from measured quantities rather than expectations. The memory prediction attached
+to it was flatly wrong: KV cache came back byte-identical at every k, because run-to-run
+variance in vLLM's startup profile (14%) is far larger than the effect being resolved (~1%).
+
 Quality was verified rather than assumed: 1,210 paired items, **89.3% -> 89.9% accuracy**,
 answers differing on 2.8% against a 1.8% floor measured by running the model against itself.
 Three whole categories reproduced identical answers on every item; all disagreement landed

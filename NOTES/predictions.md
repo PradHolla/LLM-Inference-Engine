@@ -3610,3 +3610,81 @@ If k=5 beats k=3 by more than 5%, every speedup in this phase understates the te
 because the default was inherited rather than chosen. If k=3 wins, the checkpoint's default
 was right and that is worth knowing too -- **a default that happens to be optimal is only
 knowable by testing it.**
+
+## P5-M ACTUALS  The k sweep, 2026-08-31. fp8 + EAGLE3, single stream, filler workload.
+
+Baseline with speculation off: 53.5 tok/s.
+
+| k | tok/s | speedup | L filler | L gsm8k | realised | predicted realised | error |
+|---|---|---|---|---|---|---|---|
+| 1 | 72.5 | 1.355x | 1.542 | 1.754 | 0.879 | 0.916 | -4.1% |
+| **2** | **79.6** | **1.488x** | 1.829 | 2.233 | 0.814 | 0.846 | -3.8% |
+| 3 | 77.6 | 1.450x | 1.912 | 2.501 | 0.759 | 0.785 | -3.3% |
+| 5 | 71.6 | 1.338x | 2.001 | 2.762 | 0.669 | 0.687 | -2.7% |
+| 7 | 65.0 | 1.215x | 2.033 | 2.843 | 0.598 | 0.610 | -2.0% |
+
+### The optimum is k=2. The checkpoint's default of 3 is one too high.
+
+**Every measurement in this phase used k=3 because that is what the EAGLE3 checkpoint
+ships with, and nobody tested it.** k=2 is 2.6% faster. Modest, but free -- one flag.
+
+More important is the shape, which is exactly what the cost model said and nothing like
+"more guessing is better":
+
+    tokens per step        rises monotonically   1.54 -> 2.03 (filler), 1.75 -> 2.84 (gsm8k)
+    speedup                peaks at k=2 and falls
+    k=7 is 18.3% WORSE than k=2 despite emitting 32% more tokens per step
+
+Guessing further ahead does keep working -- the model really does accept more tokens per
+step at k=7 than at k=2. It just costs more than it returns, because **acceptance decays
+geometrically with position while draft cost grows linearly with k.**
+
+### The draft-cost model was right to within 4%
+
+P5-M predicted realised efficiency from first principles: the EAGLE3 head reads ~374M
+parameters per draft pass against the fp8 target's 17.0 ms step, so k passes cost
+`(17.0 + 1.55k)/17.0`. Measured against predicted at every k: **-4.1%, -3.8%, -3.3%,
+-2.7%, -2.0%.**
+
+A uniform 2-4% overestimate across the whole range is a model that is right in structure
+and slightly optimistic in one constant -- most likely the draft step is a little more
+expensive than its parameter read suggests, which is what a per-call launch overhead would
+look like. **This is the most accurate prediction of the phase**, and it is the one built
+from measured quantities rather than from expectations about how the technique behaves.
+
+### P5-M1 partially correct
+
+Predicted "optimum at k=3 or 4, flat between k=2 and k=5, anything in 2-5 within 6% of
+best". Measured optimum **k=2**, one lower. The flat band is real but narrower: k=2 and
+k=3 are within 2.6%, while k=5 is 10.1% down and k=1 is 8.9% down. **Flat between 2 and 3,
+not 2 and 5.**
+
+### P5-M3 WRONG: KV cache does not move with k at all
+
+Predicted 15,100 tokens at k=1 rising to ~18,900 at k=7, because the verify buffer scales
+with (k+1). **Measured 59,680 tokens at k=1, 2, 3, 5 AND 7 -- byte-identical.**
+
+The prediction came from differencing two runs and attributing ~625 tokens per position.
+That attribution was wrong, and the reason is worth keeping: **run-to-run variance in
+vLLM's startup memory profile is far larger than the effect.** The same fp8+EAGLE3 config
+measured 52,080 and 52,224 tokens earlier today and 59,680 now -- a 14% spread on a
+quantity I was trying to resolve a 1% effect inside.
+
+The likely mechanism, stated as a hypothesis rather than a finding: peak activation is set
+by the **prefill** chunk (`max_num_batched_tokens` 2048) rather than by the verify batch,
+which at k=7 is only `max_num_seqs 32 x 8 = 256` tokens. If so, k genuinely does not move
+activation and the earlier 1.16 GiB jump was the cost of enabling speculation at all, not a
+per-position cost. **That would mean the "memory cost scales with k" correction written in
+P5-A1 is itself wrong** -- and it is recorded here rather than quietly dropped, because it
+was stated confidently and repeated.
+
+Resolving it needs a direct measurement of activation against `max_num_batched_tokens`,
+which is a Phase 6 question, not worth another box start now.
+
+### What this changes
+
+- **Use k=2, not the checkpoint's k=3.** Worth 2.6%.
+- Every speedup reported in this phase was measured at k=3 and is therefore a slight
+  UNDERSTATEMENT of what the technique can do.
+- k is not a memory dial. It is purely a compute-vs-acceptance trade, which simplifies the
+  Phase 7 scheduling question: k can be varied per request without touching the cache.
