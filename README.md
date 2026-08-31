@@ -36,7 +36,7 @@ Every claim above links to a number in `NOTES/predictions.md`, which records the
 prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
 third of the predictions were wrong; those are the entries worth reading.
 
-## Status: phases 0-4 of 7 complete
+## Status: phases 0-5 of 7 complete
 
 ### How each step moved the number
 
@@ -93,6 +93,68 @@ what bf16 solved when allowed to reason first, and 37% when not. The project's o
 predicted the opposite -- that long reasoning chains would compound small errors -- and
 the correction is annotated in place rather than deleted.
 
+### Phase 5: the same technique is worth 1.19x or 2.25x, and the benchmark hid it
+
+Speculative decoding has a small helper model guess the next few tokens; the big model
+checks them all in one pass and keeps the ones it agrees with. It works because decode is
+memory-bound: producing one token reads all 16.39 GB of weights, and during that read
+**the compute units sit 99.6% idle**. Guessing spends the idle half.
+
+The measured speed-up is not one number. It is a range set entirely by request shape:
+
+| workload | speed-up |
+|---|---|
+| arithmetic, no thinking block | **2.25x** |
+| arithmetic with thinking | **2.05x** |
+| natural-language reasoning (GSM8K) | **1.85x** |
+| the synthetic benchmark prompt | 1.45x |
+| long document in, short answer out | **1.19x** |
+
+**The benchmark understated the technique by 40%.** Every acceptance figure was first
+measured on `bench.py`'s synthetic filler, which is generated tokens rather than language
+and is the least guessable input there is. Real work is roughly twice as guessable. The
+last row is the opposite failure: that request is almost entirely prompt-reading, and
+speculation only accelerates writing, so a genuinely good guess rate is diluted to nothing.
+A retrieval-heavy product -- which is what Phase 6 builds -- would gain almost nothing from
+it end to end while still paying the full memory bill.
+
+**Thinking text is harder to guess than ordinary text**, 0.596 against 0.671 acceptance on
+identical problems. The prediction written beforehand said the opposite, reasoning that
+chain-of-thought is repetitive scaffolding. It is the reverse: thinking is where the model
+explores and backtracks. That matters because ~1,000 thinking tokens is ~36 seconds of
+blank screen, and it is the hardest part of the response to accelerate.
+
+**The helper costs 1.78x its own weight**, and the excess was not weights at all. Predicted
+from its config file to within 2% (1.904 GiB), it removed 24,720 tokens of KV cache rather
+than the predicted 13,863: checking four positions at once needs ~4x the working memory, and
+the GPU pre-compiles routines for the new shapes. Consequence: at full precision the helper
+eats over half the cache and leaves **1.9 concurrent requests -- unusable**, while on fp8 it
+costs 24% and leaves 8.5. **Quantization is what makes speculative decoding affordable**,
+which is Phase 4's result arriving from the opposite direction.
+
+**And it stops working under load.** Sweeping arrival rate on the small workload,
+speculation is 1.88x ahead at 2 req/s and **2.8x behind at 6** -- the sign flips between 4
+and 6. On the long-context workload it never flips. Two workloads, opposite answers about
+whether to enable the feature.
+
+Three ways to guess were compared, and the best guesser is not the fastest configuration:
+
+| guesser | KV cost | tokens/step | speed-up |
+|---|---|---|---|
+| text repetition (no model) | **2,304** (3%) | 1.18 | 1.07x |
+| EAGLE3 head | 16,368 (24%) | 2.47 | **1.85x** |
+| Qwen3-0.6B | **36,448** (53%) | **3.17** | 1.75x |
+
+The small model guesses 28% better and finishes 5% slower, because running 28 layers three
+times per step costs more than running one layer three times -- and the *lighter* model
+carries the *heavier* cache, since 28 layers of its own history dwarf the head's single one.
+
+Quality was verified rather than assumed: 1,210 paired items, **89.3% -> 89.9% accuracy**,
+answers differing on 2.8% against a 1.8% floor measured by running the model against itself.
+Three whole categories reproduced identical answers on every item; all disagreement landed
+in the one slice where the model scores 44% and is barely above guessing. That is the
+signature of ordinary nondeterminism, not of a technique changing the answer.
+
 ## What is here
 
 ```
@@ -104,6 +166,8 @@ tools/kvprobe.py      measures the KV cache off the GPU directly
 tools/mkitems.py      generates the quality-eval item set; --selftest re-derives
                       every answer by parsing the problem text it emitted
 tools/qualeval.py     paired quality harness: run, offline regrade, exact McNemar
+tools/specmon.py      reads speculative-decoding acceptance off vLLM's metrics;
+                      reports acceptance BY DRAFT POSITION, not just the scalar
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock
@@ -156,8 +220,8 @@ is true forever and would disable the guardrail entirely.
 | 2 | Write the engine: manual KV cache, continuous batching | done |
 | 3 | vLLM as an object of study; ablate every flag | done |
 | 4 | Quantization: throughput, capacity, and quality | done |
-| 5 | Speculative decoding | next |
-| 6 | The chat app and web search | |
+| 5 | Speculative decoding | done |
+| 6 | The chat app and web search | next |
 | 7 | Thinking budget as a scheduling policy | |
 
 Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth

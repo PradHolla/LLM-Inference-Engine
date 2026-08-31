@@ -3550,3 +3550,63 @@ differed and some of the 2.8% is that rather than speculation itself. This is wh
 was set at 4% rather than at `d0` = 1.8%, decided before the data existed. A stricter test
 would pin KV identically across the pair, at the cost of not measuring the configuration
 anyone would actually deploy.
+
+## P5-M  The k sweep: predictions, and a correction to something I said out loud
+
+k is the number of tokens the draft proposes per step. **Everything in this phase used
+k=3, and not by choice** -- it is the `RedHatAI` EAGLE3 checkpoint's own default, carried
+untested through every measurement.
+
+### Correcting myself first
+
+I said twice today that the per-position curves showed "k=3 is wasteful" and that k=2 might
+dominate. **That was read off the synthetic filler measurements**, where position 2 is
+accepted 0.119 of the time. On real content it is 0.29 to 0.50:
+
+| slice | pos 0 | pos 1 | pos 2 |
+|---|---|---|---|
+| synthetic filler | 0.522 | 0.269 | **0.119** |
+| gsm8k/think | 0.705 | 0.475 | **0.291** |
+| math/nothink | 0.842 | 0.674 | **0.496** |
+
+Having noticed that, I then said the opposite -- that k should probably go HIGHER than 3.
+**That was also wrong, and wrong for a worse reason: it looked only at acceptance and
+ignored what drafting costs.** Each extra k is another sequential draft forward pass, so
+the overhead grows linearly while acceptance decays geometrically. The two must be modelled
+together, and neither of my off-the-cuff remarks did.
+
+### The model, built from measured numbers
+
+Positional acceptance decays with ratio **0.614** between adjacent positions on
+`gsm8k/think` (0.291/0.475). Extrapolating, and costing each draft pass at the EAGLE3
+head's ~374M read parameters against the fp8 target's 17.0 ms step:
+
+| k | L | draft overhead | realised | predicted speedup |
+|---|---|---|---|---|
+| 1 | 1.705 | 1.09x | 0.916 | **1.56x** |
+| 2 | 2.180 | 1.18x | 0.846 | **1.84x** |
+| **3** | 2.472 | 1.27x | 0.785 | **1.94x** |
+| 5 | 2.761 | 1.46x | 0.687 | **1.90x** |
+| 7 | 2.870 | 1.64x | 0.610 | **1.75x** |
+
+**P5-M1: the optimum is k=3 or k=4, and the curve is FLAT between k=2 and k=5.**
+Anything in 2-5 lands within 6% of the best. k=1 and k=7 are clearly worse.
+
+**P5-M2: k=3 measures 1.85 - 2.00x**, consistent with the 1.849x already measured.
+
+**P5-M3: KV cost rises with k**, because activation memory scales with (k+1). Weights are a
+fixed 13,863 tokens; at k=3 the total was ~16,368, so roughly 625 tokens per position.
+Predicting **15,100 at k=1 rising to ~18,900 at k=7** -- a real effect but small enough that
+run-to-run KV variance (measured 15,392 to 17,520 for the same config) may swamp it.
+
+**P5-M4: the best k for a loaded server is LOWER than for a single user.** Larger k crosses
+over earlier (P5-B), so if this is measurable it is a Phase 7 input: thinking requests and
+ordinary requests would want different k, which makes k a scheduling parameter rather than
+a constant.
+
+### What would make this phase's default wrong
+
+If k=5 beats k=3 by more than 5%, every speedup in this phase understates the technique,
+because the default was inherited rather than chosen. If k=3 wins, the checkpoint's default
+was right and that is worth knowing too -- **a default that happens to be optimal is only
+knowable by testing it.**
