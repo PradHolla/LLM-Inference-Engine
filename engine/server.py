@@ -1,73 +1,15 @@
 """
-server.py -- Phase 2 step 3b: put the continuous batching engine behind an
-OpenAI-compatible streaming HTTP API, so tools/bench.py can measure it open-loop
-against Phase 1's 0.332 req/s the same way it measured the baseline.
+server.py -- Phase 2 step 3b: continuous batching engine behind an OpenAI-compatible
+streaming HTTP API for tools/bench.py; wire-compatible with baseline/server.py's SSE
+framing. ONE engine thread owns the GPU; see docs for the full threading model.
 
-Wire-compatible with tools/bench.py -- see baseline/server.py's _chunk() and
-_stream_response() for the contract this file copies exactly: the `data:
-{...}\\n\\n` SSE framing, the response envelope shape, the final `data:
-[DONE]\\n\\n`, and the `vllm:`-prefixed /metrics counters infra/idle-shutdown.sh
-reads. bench.py must work against this server with NO changes.
-
-THE THREADING MODEL -- read this before touching anything below:
-
-  ONE thread (the "engine thread", started in `lifespan`) owns the GPU. It is the
-  ONLY thread that ever calls `engine.step()`, and therefore the only thread that
-  ever touches `engine.pending`, `engine.rows`, `engine.cache`, `engine.mask`,
-  `engine.nxt`, `engine.next_pos` -- any of Engine's state. Nothing outside
-  `_engine_loop` and the functions it calls (`_drain_intake`, `_sweep_
-  cancellations`, `_publish_metrics`) may read or write those attributes. The
-  asyncio event loop thread (running every FastAPI handler) never touches the GPU,
-  never touches `engine.*` state, and never blocks the engine thread.
-
-  Two one-way channels cross the thread boundary, and it is only ever these two:
-
-    intake (queue.Queue, asyncio thread -> engine thread): an HTTP handler builds
-    a Request and calls `STATE.intake.put_nowait(r)`. `queue.Queue` is thread-safe
-    by design, so this is the one operation on a Request that's allowed to happen
-    from the asyncio thread before the engine thread has taken ownership of it.
-    The engine thread drains it at the top of every loop iteration (`_drain_
-    intake`) and is the one that calls `engine.submit()` -- never the handler.
-
-    per-request token queue (asyncio.Queue, engine thread -> asyncio thread): the
-    engine thread's on_token/on_complete callbacks (themselves called synchronously
-    from inside `engine.step()`, i.e. running ON the engine thread) deliver text
-    via `loop.call_soon_threadsafe(q.put_nowait, item)`, where `loop` is the
-    specific request's asyncio event loop, captured with `asyncio.get_running_
-    loop()` in the handler BEFORE the request is submitted. call_soon_threadsafe is
-    the only sanctioned way to reach into the event loop from another thread --
-    direct `q.put_nowait()` from off-loop is not thread-safe for asyncio.Queue,
-    even though the name doesn't warn you.
-
-  Everything else that looks like it crosses threads is a plain, GIL-atomic
-  attribute read/write with a single writer, same reasoning as baseline/server.py's
-  METRICS: `Request.cancelled` is written only by the asyncio thread (in a
-  generator's `finally`) and read only by the engine thread; `METRICS`/`SNAPSHOT`
-  fields are written only by the engine thread and read only by the asyncio thread
-  (inverted from baseline, because generation happens on the engine thread here,
-  not inside the request handler). Neither direction needs a lock: a plain
-  attribute store/load is atomic under the GIL, so a reader sees either the old
-  value or the new one, never a torn one -- there is nothing to race as long as
-  only one thread ever writes.
-
-  /metrics NEVER reads `engine.rows` / `engine.pending` / `engine.mask` directly --
-  even though that would return the right numbers most of the time, it would be a
-  second, unsanctioned way to touch engine-thread-owned state from the asyncio
-  thread. Instead the engine thread copies the plain ints it needs into METRICS
-  once per loop iteration (`_publish_metrics`), and /metrics only ever reads those
-  copies.
-
-  /v1/chat/completions --model ... --max-tokens ...
-    python -m engine.server --model Qwen/Qwen3-8B --max-batch 8 --port 8000
+  python -m engine.server --model Qwen/Qwen3-8B --max-batch 8 --port 8000
 """
 from __future__ import annotations
 
 import os
-# MUST precede `import torch` (transitively, via engine.continuous / engine.manual
-# below) -- read once at CUDA allocator init, silently ignored after. Same
-# requirement as every other engine/ module; set again here (redundantly safe,
-# os.environ.setdefault is idempotent) in case a future refactor reorders imports
-# and this file is no longer guaranteed to import engine.continuous first.
+# MUST precede `import torch` (transitively) -- read once at CUDA init, ignored after.
+# Set again here (setdefault is idempotent) in case a refactor reorders imports. See docs.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import argparse
@@ -99,12 +41,8 @@ logger = logging.getLogger("engine.server")
 
 GIB = 1 << 30
 
-# How many tokens the one-time warmup pass (item H) prefills at, per admission
-# shape 1..max_batch. Matches engine/continuous.py main()'s own --prompt-tokens
-# default (512) -- not exposed as a CLI flag here, since item G's flag list is
-# fixed and does not include one; the warmup shape only needs to be IN THE
-# NEIGHBOURHOOD of real traffic for cuBLAS's kernel selection to transfer, not
-# exact.
+# How many tokens the one-time warmup pass (item H) prefills at, per admission shape
+# 1..max_batch. Matches engine/continuous.py main()'s --prompt-tokens default. See docs.
 WARMUP_PROMPT_TOKENS = 512
 
 _rid_counter = itertools.count(1)
@@ -112,10 +50,9 @@ _rid_counter = itertools.count(1)
 
 @dataclass
 class Config:
-    """Populated by main() from argv BEFORE uvicorn.run() is called (item G).
-    lifespan() reads it when the ASGI app actually starts -- by then argv has
-    already been parsed, so there is no ordering hazard despite this looking like
-    a global mutated after import."""
+    """Populated by main() from argv before uvicorn.run(). lifespan() reads it once
+    the ASGI app starts, by which point argv is already parsed -- no ordering hazard
+    despite looking like a global mutated after import."""
     model: str = "Qwen/Qwen3-8B"
     max_batch: int = 8
     compact_threshold: int = 128
@@ -127,10 +64,9 @@ CONFIG = Config()
 
 @dataclass
 class ModelState:
-    """Populated once in lifespan, before yield. tokenizer/model/fwd_kw/eos_ids are
-    read-only after that point (every reader, on either thread, only ever reads
-    them once startup has finished) so no lock is needed for those. `intake` is the
-    thread-safe queue.Queue bridge described in the module docstring."""
+    """Populated once in lifespan, before yield; tokenizer/model/fwd_kw/eos_ids are
+    read-only after that (no lock needed). `intake` is the thread-safe queue.Queue
+    bridge -- see the module-level threading-model doc."""
     tokenizer: Any = None
     model: Any = None
     fwd_kw: str | None = None
@@ -147,20 +83,9 @@ STATE = ModelState()
 
 @dataclass
 class Metrics:
-    """Written ONLY by the engine thread -- either once per loop iteration
-    (running/waiting/buffer_len/compactions, via _publish_metrics) or synchronously
-    from inside engine.step()'s on_token/on_complete callbacks (prompt_tokens_total/
-    generation_tokens_total). Read only by the asyncio thread, from the /metrics
-    handler. Plain ints, single writer: safe without a lock for the same reason
-    baseline/server.py's Metrics is, just with the writer/reader roles swapped
-    (there, the event-loop thread writes because generation happens inline in the
-    handler; here the engine thread writes because generation happens off-loop).
-
-    running/waiting are also republished under engine:active_rows / engine:
-    pending_depth for item F2 -- same numbers, non-vllm:-prefixed names so
-    infra/idle-shutdown.sh's awk patterns (which only match `vllm:...`) can't
-    mistake them for something they're not.
-    """
+    """Written ONLY by the engine thread (per-loop-iteration or from on_token/
+    on_complete), read only by the asyncio /metrics handler -- single writer, no
+    lock needed. running/waiting are republished under engine:-prefixed names too."""
     running: int = 0                 # len(engine.rows) -- vllm:num_requests_running
     waiting: int = 0                 # intake.qsize() + len(engine.pending) -- vllm:num_requests_waiting
     prompt_tokens_total: int = 0
@@ -185,31 +110,9 @@ WEDGED = threading.Event()
 
 # --------------------------------------------------------------------- engine thread
 def _is_recoverable_admit_error(exc: BaseException) -> bool:
-    """True for the two specific RuntimeErrors engine.continuous.Engine._admit()
-    raises for a ragged-length admission batch (see its own comments: "this design
-    assumes uniform --prompt-tokens prompts" / "buffer/admission invariant
-    violated"). Matched by message text, not type, because continuous.py raises a
-    bare RuntimeError for both -- there is no dedicated exception class to catch,
-    and this file may not add one there (the only sanctioned edit to that file is
-    the on_token parameter).
-
-    KNOWN, ACCEPTED LIMITATION (see the file's own uncertainty list): a real HTTP
-    server sees genuinely ragged prompt lengths -- unlike continuous.py's own
-    offline harness, which deliberately keeps every prompt in a run identical
-    (module docstring: "PROMPTS ARE UNIFORM ... ragged-prompt-length [is] a
-    separate, unmeasured problem"). Two concurrently-pending requests whose
-    prompts tokenize to different lengths WILL hit this if they land in the same
-    admission batch. Both of _admit()'s RuntimeErrors are raised BEFORE any
-    cache/mask mutation for that batch (verified by reading _admit() top to
-    bottom: the uniformity check and the padn<0 check both precede every torch op
-    that touches self.cache/self.mask), so recovering by dropping that batch's
-    newcomers and continuing is safe -- engine state is provably untouched. The
-    newcomers themselves are unrecoverably lost (they were already popped off
-    engine.pending before the check that fails); their HTTP requests hang until
-    the CLIENT's own timeout fires. That is a real, deliberately-not-fixed gap,
-    not an oversight -- fixing it means teaching _admit() to pad a ragged batch,
-    which is out of this step's scope and out of continuous.py's stated one.
-    """
+    """True for the two specific RuntimeErrors engine.continuous.Engine._admit() raises
+    for a ragged-length admission batch, matched by message text (continuous.py has no
+    dedicated exception class). See docs for why dropping that batch is safe."""
     return isinstance(exc, RuntimeError) and (
         "ragged prompt lengths" in str(exc) or "buffer/admission invariant" in str(exc)
     )
@@ -229,20 +132,9 @@ def _drain_intake(engine: Engine, intake: "queue.Queue[Request]") -> None:
 
 
 def _sweep_cancellations(engine: Engine) -> None:
-    """Item E. engine.pending and engine.rows are engine-thread-owned (module
-    docstring) -- safe to mutate directly here because this function only ever
-    runs ON the engine thread, same as _drain_intake.
-
-    A request cancelled while still queued is dropped outright -- it never cost
-    the engine anything. A request cancelled mid-decode cannot be ripped out of
-    the shared batch mid-step (its K/V rows are interleaved with every other
-    active row's, and evicting is a batched index_select over ALL rows, not a
-    per-row op) -- so instead its max_new_tokens is capped at its current decode
-    count. Engine._finished() (continuous.py) already treats decode_count >=
-    max_new_tokens as done, so the row is picked up by the very next _evict() --
-    i.e. evicted within one engine step of the disconnect being noticed, freeing
-    its slot without producing another token nobody will read.
-    """
+    """Item E. Runs only on the engine thread, like _drain_intake. A queued-and-
+    cancelled request is dropped outright; a mid-decode cancellation caps its
+    max_new_tokens so _finished()/_evict() reclaim its slot within one step. See docs."""
     if engine.pending:
         engine.pending = [r for r in engine.pending if not getattr(r, "cancelled", False)]
     for r in engine.rows:
@@ -261,14 +153,9 @@ def _publish_metrics(engine: Engine, intake: "queue.Queue[Request]") -> None:
 
 
 def _on_token(r: Request, tok_id: int) -> None:
-    """Engine.on_token -- called synchronously from inside engine.step() (_admit()
-    for the free admission token, _decode() for every decode-loop token), i.e. on
-    the engine thread. Wrapped in its own try/except so that a failure HERE (a bad
-    token id, a closed loop) can never cascade into wedging the whole engine: by
-    the time this runs, r.tokens/r.itls bookkeeping for this row is already
-    complete (continuous.py appends before calling the hook), so swallowing an
-    error here costs the client one missing delta chunk, not engine correctness.
-    """
+    """Engine.on_token -- called synchronously from inside engine.step(), on the
+    engine thread. Wrapped in try/except so a failure here (bad token id, closed
+    loop) costs one missing delta chunk, never engine correctness. See docs."""
     try:
         if getattr(r, "cancelled", False):
             return  # no one is reading r.out_q -- don't bother decoding or scheduling
@@ -281,14 +168,9 @@ def _on_token(r: Request, tok_id: int) -> None:
 
 
 def _on_complete(r: Request) -> None:
-    """Engine.on_complete -- called from _evict(), on the engine thread, for every
-    row that finishes OR is force-finished by _sweep_cancellations. Mirrors
-    baseline/server.py's implicit behaviour: prompt_tokens_total is only counted
-    for requests that actually got delivered (baseline's own METRICS update sits
-    downstream of a try/finally that a cancelled generator never reaches -- a
-    disconnected client's tokens aren't counted there either). generation_tokens_
-    total is symmetric with that in _on_token above.
-    """
+    """Engine.on_complete -- called from _evict() for every finished or force-
+    finished row. Mirrors baseline/server.py: prompt_tokens_total only counts
+    delivered requests, symmetric with generation_tokens_total in _on_token."""
     try:
         if not getattr(r, "cancelled", False):
             METRICS.prompt_tokens_total += int(r.prompt_ids.shape[0])
@@ -299,9 +181,8 @@ def _on_complete(r: Request) -> None:
 
 def _engine_loop(engine: Engine, intake: "queue.Queue[Request]", stop_event: threading.Event) -> None:
     """Item A. The ONE thread that ever calls engine.step(). Runs until server
-    shutdown (stop_event) or an unrecoverable exception (WEDGED) -- see module
-    docstring and _is_recoverable_admit_error for what "unrecoverable" means here.
-    """
+    shutdown (stop_event) or an unrecoverable exception (WEDGED) -- see
+    _is_recoverable_admit_error for what "unrecoverable" means here."""
     logger.info("engine thread starting")
     while not stop_event.is_set():
         try:
@@ -319,7 +200,7 @@ def _engine_loop(engine: Engine, intake: "queue.Queue[Request]", stop_event: thr
                     "newcomers are dropped; their HTTP requests will hang until "
                     "the client's own timeout fires. KNOWN LIMITATION: continuous.py's "
                     "_admit() assumes uniform prompt lengths within one admission "
-                    "batch (see its module docstring). Engine state is NOT corrupted "
+                    "batch (see NOTES/code-notes.md). Engine state is NOT corrupted "
                     "by this specific error -- it raises before any cache/mask "
                     "mutation -- so the loop continues.", e,
                 )
@@ -327,7 +208,7 @@ def _engine_loop(engine: Engine, intake: "queue.Queue[Request]", stop_event: thr
             logger.exception(
                 "engine step failed -- WEDGING the engine thread. A mid-step "
                 "exception (e.g. CUDA OOM) can leave engine.cache and engine.mask "
-                "out of sync with each other (see this file's module docstring); "
+                "out of sync with each other (see NOTES/code-notes.md); "
                 "continuing to call step() risks producing silently-wrong tokens "
                 "rather than a loud failure, so this thread stops making progress "
                 "instead. The process needs a restart to recover."
@@ -367,13 +248,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     device = torch.device("cuda:0")
 
-    # Item H: warm up EVERY admission batch shape (1..max_batch) before binding
-    # traffic, not just max_batch -- reusing continuous.py's own run_warmup rather
-    # than re-deriving it. Measured 2026-08-21 in this project: a warmup at the
-    # wrong (batch, seq) shape warms nothing, since cuBLAS selects kernels per
-    # problem shape; the first REAL request would otherwise eat a 36%+ latency
-    # outlier on top of the 60-105s model load this is also here to avoid exposing
-    # to a live request.
+    # Item H: warm up EVERY admission shape (1..max_batch) before binding traffic --
+    # a wrong-shape warmup warms nothing (cuBLAS picks kernels per shape). See docs.
     warm_body = make_prompt(WARMUP_PROMPT_TOKENS)
     warm_ids = STATE.tokenizer.apply_chat_template(
         [{"role": "user", "content": warm_body}],
@@ -456,10 +332,8 @@ async def _stream_response(req: ChatCompletionRequest, r: Request,
 
     try:
         while True:
-            # Bounded wait, not a bare await -- a wedged engine thread (WEDGED,
-            # see module docstring) will never deliver the sentinel for a row
-            # already in flight when it wedged, and without this the stream (and
-            # the client waiting on it) would hang forever instead of ending.
+            # Bounded wait, not a bare await: a wedged engine thread never delivers
+            # the sentinel, so without this timeout the stream would hang forever.
             try:
                 item = await asyncio.wait_for(r.out_q.get(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -471,16 +345,8 @@ async def _stream_response(req: ChatCompletionRequest, r: Request,
                 break
             yield _chunk(request_id, created, req.model, {"content": item}, None)
     finally:
-        # Item E, unconditional -- mirrors baseline/server.py's own cleanup
-        # discipline. Runs whether this generator finished normally (sentinel
-        # received) or Starlette cancelled it because the client disconnected. If
-        # the exception path is why we're here, this is the last line of the
-        # function that executes: the cancellation continues propagating past a
-        # bare `finally` with no `except`, so everything below (the final chunk,
-        # [DONE]) is correctly skipped in that case, same control-flow shape as
-        # baseline/server.py's _generate_under_lock. If the row already finished
-        # normally, the row is already gone from engine.rows/engine.pending, so
-        # this flag has nothing left to affect -- a harmless no-op.
+        # Item E, unconditional cleanup mirroring baseline/server.py: runs whether
+        # this generator finished normally or was cancelled by a disconnect. See docs.
         r.cancelled = True
 
     generated_len = len(r.tokens)
@@ -498,23 +364,16 @@ async def _stream_response(req: ChatCompletionRequest, r: Request,
 async def chat_completions(req: ChatCompletionRequest) -> StreamingResponse:
     t0 = time.perf_counter()
     if not req.stream:
-        # Streaming only, same restriction as baseline/server.py and for the same
-        # reason: a non-streaming caller should get a clear 400, not a silent
-        # multi-second hang waiting for a buffered response this server never
-        # implements.
+        # Streaming only, same restriction as baseline/server.py: a non-streaming
+        # caller gets a clear 400 instead of a silent hang. See docs.
         raise HTTPException(
             status_code=400,
             detail="This server only supports stream=true. Non-streaming responses "
                    "are not implemented.",
         )
     if req.temperature > 0:
-        # engine.continuous.Engine is greedy-argmax only -- there is no sampling
-        # path to route temperature/top_p/top_k into (see Engine._admit/_decode:
-        # both call .argmax(-1), unconditionally). Silently ignoring a non-zero
-        # temperature would look like it worked and return the wrong distribution
-        # of output -- exactly the "plausible but wrong" failure this project's
-        # standards single out as the expensive kind. bench.py always sends 0.0,
-        # so this never fires in the benchmark path.
+        # Engine is greedy-argmax only (Engine._admit/_decode both call .argmax()
+        # unconditionally) -- silently ignoring temperature would be plausible-but-wrong.
         raise HTTPException(
             status_code=400,
             detail="This server only supports greedy decoding (temperature=0); "
@@ -538,16 +397,12 @@ async def chat_completions(req: ChatCompletionRequest) -> StreamingResponse:
         input_ids = input_ids["input_ids"]
 
     prompt_tokens = int(input_ids.shape[-1])
-    # Engine.Request.prompt_ids is 1-D [prompt_len] (see continuous.py's Request
-    # docstring and its main()'s identical `template_row = input_ids.to(device)[0]`)
-    # -- drop the batch dim baseline/server.py keeps for model.generate()'s sake.
+    # Engine.Request.prompt_ids is 1-D [prompt_len] (continuous.py) -- drop the batch
+    # dim baseline/server.py keeps for model.generate()'s sake.
     input_ids = input_ids.to(STATE.model.device)[0]
 
-    # continuous.py's Request.max_new_tokens counts DECODE-LOOP tokens only -- the
-    # admission forward produces one token for free and that free token is not
-    # part of the decode budget (see continuous.py's module docstring, "TOKEN-COUNT
-    # CONVENTION"). req.max_tokens is the OpenAI-style TOTAL output budget, so the
-    # decode budget is one less.
+    # continuous.py's max_new_tokens counts DECODE-LOOP tokens only (admission's free
+    # token isn't part of the budget); req.max_tokens is the OpenAI TOTAL, so -1.
     decode_budget = max(0, req.max_tokens - 1)
 
     r = Request(rid=next(_rid_counter), prompt_ids=input_ids, max_new_tokens=decode_budget)
@@ -577,11 +432,8 @@ async def health() -> dict[str, Any]:
 
 @app.get("/metrics")
 async def metrics() -> PlainTextResponse:
-    # Item F: the vllm:-prefixed lines are the ones infra/idle-shutdown.sh reads
-    # and MUST keep these exact names -- do not rename without updating that
-    # script's awk patterns too. Item F2: the engine:-prefixed lines are pure
-    # diagnostics, deliberately NOT vllm:-prefixed so idle-shutdown.sh's
-    # `/^vllm:.../` patterns can't accidentally match them.
+    # Item F: vllm:-prefixed lines are read by infra/idle-shutdown.sh -- keep these
+    # exact names. engine:-prefixed lines are diagnostics-only, deliberately not vllm:.
     body = (
         "# HELP vllm:num_requests_running Requests currently admitted and decoding.\n"
         "# TYPE vllm:num_requests_running gauge\n"
@@ -632,12 +484,8 @@ def main() -> None:
         print("no CUDA device", file=sys.stderr)
         raise SystemExit(1)
 
-    # This server is single-process, single-worker by design: the engine thread /
-    # queue.Queue / asyncio.Queue plumbing above assumes exactly one Python
-    # process owns the GPU and the intake queue. Do not run this under
-    # `uvicorn ... --workers N>1` or a process manager that forks multiple
-    # workers -- each worker would load its own copy of the model and compete for
-    # the same GPU with no coordination between them.
+    # Single-process, single-worker by design: the engine thread / queue plumbing
+    # assumes exactly one process owns the GPU. Never run with --workers N>1.
     CONFIG.model = args.model
     CONFIG.max_batch = args.max_batch
     CONFIG.compact_threshold = args.compact_threshold

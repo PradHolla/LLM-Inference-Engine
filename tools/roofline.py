@@ -5,28 +5,12 @@
 # ///
 """
 roofline.py -- predict what a model SHOULD do on a given GPU, from first principles.
-
-This is not a benchmark. Every number here comes from dividing one hardware spec by
-another. That is the point: run this BEFORE you measure, write the prediction down,
-then explain any gap. A wrong prediction is a specific mystery. No prediction is
-just a vague feeling that something is slow.
+Every number here comes from dividing one hardware spec by another; measure after,
+never before. See NOTES/code-notes.md for units and model limitations (MoE, attention FLOPs).
 
   python tools/roofline.py --model qwen3-8b --gpu a10g
   python tools/roofline.py --model qwen3-8b --gpu a10g --dtype fp8 --context 8192
   python tools/roofline.py --hf ~/models/Qwen3-8B/config.json --params 8.2e9 --gpu a10g
-
-UNITS: memory is GiB (2^30) throughout, because that is what nvidia-smi reports.
-Bandwidth is GB/s (10^9) because that is how vendors spec it. Mixing these silently
-is a classic source of ~7% errors, so they are converted explicitly, never assumed.
-
-MODEL LIMITATIONS:
-  - decode assumes a DENSE model; MoE reads only active experts per token, so every
-    number here is wrong for Qwen3-30B-A3B or gpt-oss-20b
-  - attention FLOPs are ignored; only the weight matmuls are counted, so prefill is
-    understated at long context
-  - the dequant and kernel-efficiency constants above are ESTIMATES, not measurements.
-    Replace them with measured values once Phase 3/4 has real numbers
-  - no modeling of chunked prefill, prefix-cache hits, or scheduler overhead
 """
 from __future__ import annotations
 import argparse, json, sys
@@ -61,28 +45,8 @@ class GPU:
     bf16_tflops: float   # dense, no sparsity
 
 
-# VRAM values are what CUDA can actually ADDRESS, which is none of the three numbers
-# you are likely to reach for. On the A10G, MEASURED 2026-08-21:
-#
-#   24 GB        marketing, not a real quantity
-#   23028 MiB    nvidia-smi memory.total          (22.488 GiB)
-#   22888 MiB    AWS DescribeInstanceTypes        (wrong, under-reports by 140 MiB)
-#   22589 MiB    torch.cuda.mem_get_info() total  (22.060 GiB)  <-- what you can allocate
-#
-# The 439 MiB between nvidia-smi and CUDA is driver/ECC reserve that torch can never
-# touch. A further 258 MiB goes to the CUDA context at init. Budgeting from the
-# nvidia-smi number overstates KV room by 0.43 GiB, or about 3,000 tokens.
-# vLLM computes --gpu-memory-utilization against mem_get_info too, so this is also the
-# right basis for modelling vLLM.
-#
-# NOT MODELLED HERE, and both are large -- see NOTES/predictions.md 2026-08-21:
-#   activations   ~0.086 GiB per concurrent sequence at chunk 512
-#   fragmentation  0.077 + 0.265 GiB per sequence with the default caching allocator,
-#                  ~1.0 GiB flat with PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-# The 0.9 utilisation factor below absorbs these by coincidence, not by design.
-#
-#   MEASURED on i-07d8b10bdcf39a099 (g5.2xlarge), driver 595.91.07, 2026-08-21: a10g
-#   The rest are still spec-sheet values -- verify before trusting them.
+# CUDA-addressable VRAM, not nvidia-smi's number -- see NOTES/code-notes.md for the full
+# measurement table. Only a10g is MEASURED (2026-08-21); the rest are spec-sheet.
 GPUS = {
     "a10g":  GPU("A10G (g5.*)",   22589 / 1024, 600, 125),
     "l4":    GPU("L4 (g6.*)",     22888 / 1024, 300, 121),
@@ -101,49 +65,19 @@ MODELS = {
 
 DTYPES = {"bf16": 2, "fp16": 2, "fp8": 1, "int8": 1, "awq4": 0.5, "int4": 0.5}
 
-# Ops per parameter to unpack a quantized weight back to fp16 before the
-# matmul. Ampere (sm86) has no int4 or fp8 tensor cores, so this is real
-# work that bf16 never pays. Cost scales with PARAMETER COUNT, not batch --
-# a weight tile is dequantized once and reused down the batch dimension --
-# so as a fraction of total compute it shrinks as batch grows.
+# Ops per parameter to unpack a quantized weight before the matmul (real work bf16
+# never pays). Scales with PARAM COUNT not batch, so it shrinks as batch grows.
 DEQUANT_OPS_PER_PARAM = {"bf16": 0, "fp16": 0, "fp8": 2, "int8": 2, "awq4": 4, "int4": 4}
 
-# Quantized kernels (Marlin, AWQ) do not reach cuBLAS fp16 GEMM efficiency at
-# large batch. THIS is what actually makes 4-bit lose to fp16 in the compute-
-# bound regime -- not the dequant flops above, which become negligible.
+# Quantized kernels (Marlin, AWQ) do not reach cuBLAS fp16 GEMM efficiency at large
+# batch -- THIS, not the dequant flops above, is what makes 4-bit lose to fp16.
 QUANT_KERNEL_EFF = {"bf16": 1.0, "fp16": 1.0, "fp8": 0.85, "int8": 0.85, "awq4": 0.85, "int4": 0.85}
 
-# Nobody hits peak. These are the fudge factors, isolated here so they are
-# arguments rather than hidden assumptions -- and so you can tune them once you
-# have measured reality and know what your stack actually achieves.
-# MEASURED 2026-08-21: naive HF transformers on an A10G achieved 0.623 (22.8 tok/s
-# against a 36.6 tok/s ceiling). Left at 0.65 on purpose -- that 0.623 includes Python
-# overhead on every decode step, so it describes the STACK, not the card. vLLM should
-# do better. Re-derive per stack rather than hard-coding one stack's number here.
+# Fudge factor, isolated as an argument rather than a hidden assumption. MEASURED
+# 2026-08-21 stack achieved 0.623; left at 0.65 since 0.623 describes the STACK not the card.
 MEM_EFF = 0.65      # fraction of peak bandwidth a real kernel sustains
-# MEASURED 2026-08-21 on A10G + Qwen3-8B bf16, batch 1, via engine/manual.py.
-# compute_eff is NOT a constant -- it rises with prompt length, because a short prefill
-# is a [L x 4096] GEMM whose M dimension cannot fill the tensor cores. The old 0.50
-# default overstated prefill speed by 37% at the project's standard 412-token prompt.
-#
-#      L      TTFT     eff (weight matmuls only)   eff (incl. attention)
-#    113    49.8 ms            0.297                      0.299
-#    213    87.0 ms            0.321                      0.323
-#    412   148.4 ms            0.364                      0.369
-#    812   283.2 ms            0.376                      0.387
-#   1611   484.3 ms            0.436                      0.461
-#   3209   952.3 ms            0.442                      0.493
-#   6407  1968.0 ms            0.427 <- dips              0.525 <- monotonic
-#
-# Read the RIGHT column. This model counts only weight matmuls, and attention FLOPs
-# scale as L^2 against the matmuls' L, reaching 23% of total work at L=6407. The
-# left column dipping at the last row is that omission, not the GPU losing efficiency.
-# Also fitted: t = 16.7 ms + 0.3018 ms/token, so there is ~17 ms of fixed per-call
-# overhead that matters at short prompts and vanishes at long ones.
-#
-# Default is calibrated for prompts of a few hundred tokens, which is what this
-# project benchmarks. Override with --compute-eff for long-context work: use ~0.46 at
-# 1.6k, ~0.49 at 3.2k, ~0.53 at 6.4k.
+# compute_eff is NOT a constant -- it rises with prompt length (measured table + fit in
+# NOTES/code-notes.md). Default calibrated for a few-hundred-token prompt; override for long context.
 COMPUTE_EFF = 0.36  # fraction of peak FLOPs during prefill, at ~400-token prompts
 
 
@@ -181,10 +115,8 @@ def main() -> None:
     m = load_hf_config(a.hf, a.params) if a.hf else MODELS[a.model]
     g = GPUS[a.gpu]
     wb = DTYPES[a.dtype]
-    # Quantizing WEIGHTS does not quantize the CACHE -- they are independent knobs.
-    # vLLM's default `--kv-cache-dtype auto` keeps the cache at the model's compute
-    # dtype (fp16/bf16) even when the weights are AWQ-4bit, so that is the default
-    # here too. Assuming otherwise would overstate capacity by 2x.
+    # Quantizing WEIGHTS does not quantize the CACHE -- independent knobs. vLLM's default
+    # keeps cache at fp16/bf16 even under AWQ weights; assuming otherwise overstates capacity 2x.
     kvb = DTYPES[a.kv_dtype] if a.kv_dtype else 2
 
     W = m.weight_bytes(wb)
@@ -234,25 +166,14 @@ def main() -> None:
         if B * a.context > max_tokens:
             print(f"  {B:>6} {'—':>11} {'—':>8} {'—':>8} {'—':>8} {'—':>9}  \033[33mout of KV cache\033[0m")
             continue
-        # Per decode step the GPU reads the weights once, plus every live KV entry.
-        # That second term is why the knee arrives far earlier than the raw
-        # FLOPs:bytes ratio of the card suggests.
+        # Per decode step the GPU reads the weights once plus every live KV entry --
+        # that second term is why the knee arrives earlier than the raw FLOPs:bytes ratio.
         mem = W + B * a.context * kv_tok
         t_mem = mem / (g.bandwidth_gb_s * GB * a.mem_eff)
         dq = dequant_ops * m.params
         t_cmp = (2 * m.params * B + dq) / (g.bf16_tflops * 1e12 * a.compute_eff * kernel_eff)
-        # MEASURED 2026-08-21 (engine/static_batch.py, B=1..48 at 476 ctx): memory and
-        # compute do NOT overlap. max(t_mem, t_cmp) -- the textbook roofline -- fits at
-        # small B but is 30% optimistic by B=48. Additive fits within 6% across the
-        # whole range:
-        #       B      measured ITL     max()      t_mem+t_cmp
-        #       8         43.8 ms     41.8 (-5%)   44.7 (+2%)
-        #      16         49.0 ms     43.1 (-12%)  48.9 (-0%)
-        #      32         61.0 ms     45.7 (-25%)  57.3 (-6%)
-        #      48         68.7 ms     48.3 (-30%)  65.8 (-4%)
-        # A decode step cannot hide its weight read under its own matmul: the matmul is
-        # what consumes the weights. "bound by" below therefore names the DOMINANT term,
-        # not a term that makes the other free.
+        # MEASURED: memory and compute do NOT overlap (see NOTES/code-notes.md for the table).
+        # "bound by" below names the DOMINANT term, not one that makes the other free.
         t = t_mem + t_cmp
         bound = "memory" if t_mem >= t_cmp else "\033[36mcompute\033[0m"
         print(f"  {B:>6} {mem/GIB:>10.1f}G {t_mem*1000:>7.1f}m {t_cmp*1000:>7.1f}m "

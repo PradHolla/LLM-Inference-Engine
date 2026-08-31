@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
-# Provision the inference box for this project.
-#
+# Provision the inference box for this project. Idempotent-ish: refuses to run
+# if an instance already exists for this project (use up.sh instead).
 #   ./infra/launch.sh              # on-demand g5.xlarge  (default; use this)
 #   USE_SPOT=1 ./infra/launch.sh   # spot -- capacity escape hatch, see NOTES/PROJECT.md
-#   INSTANCE_TYPE=g5.2xlarge ./infra/launch.sh
-#
-# Idempotent-ish: reuses the SG and key pair if they already exist. Refuses to
-# run if an instance for this project is already alive -- use up.sh for that.
 set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
 PROJECT="llm-inference"
 INSTANCE_TYPE="${INSTANCE_TYPE:-g5.2xlarge}"
-# THE CHEAP AZ IS PER-INSTANCE-TYPE, NOT PER-REGION. Measured 2026-08-19:
-#   g5.xlarge  spot: 1f cheapest (-50%), 1c worst (-3%)
-#   g5.2xlarge spot: 1c cheapest (-26%), 1f worst (-5%)   <-- exactly inverted
-# So this is resolved from live data on spot rather than hardcoded. On-demand
-# pricing is AZ-independent, so the default there is just the spot-friendly one.
+# The cheapest AZ is per-instance-type, not per-region, and can invert between
+# types (see NOTES/code-notes.md). Resolved from live spot data below, not hardcoded.
 AZ="${AZ:-}"
 ROOT_GB="${ROOT_GB:-200}"
 USE_SPOT="${USE_SPOT:-0}"
@@ -37,9 +30,7 @@ if [ -n "$EXISTING" ]; then
 fi
 
 # --- quota sanity check ------------------------------------------------------
-# The G quota is account-wide vCPUs and is SHARED with the unrelated sql-llm
-# project. Fail loudly here rather than getting an opaque InsufficientInstance
-# error from run-instances.
+# Shared account-wide G quota with the unrelated sql-llm project (NOTES/code-notes.md).
 NEED=$(aws ec2 describe-instance-types --region "$REGION" --instance-types "$INSTANCE_TYPE" \
         --query 'InstanceTypes[0].VCpuInfo.DefaultVCpus' --output text)
 QCODE="L-DB2E81BA"; [ "$USE_SPOT" = "1" ] && QCODE="L-3819A6DF"
@@ -110,12 +101,7 @@ SUBNET=$(aws ec2 describe-subnets --region "$REGION" \
 [ "$SUBNET" = "None" ] && die "no default subnet in $AZ"
 
 # --- the stop-vs-terminate split --------------------------------------------
-# `shutdown -h now` from idle-shutdown.sh must STOP an on-demand box (root
-# volume and all work survive; restart with up.sh). Spot cannot stop -- it is
-# disposable, so it terminates and anything not in S3 is gone.
-#
-# The EBS delete flag follows the same split: keep the volume on on-demand,
-# delete it on spot so terminated spot boxes don't leak orphaned 200 GB volumes.
+# on-demand STOPS (root volume survives); spot TERMINATES. See NOTES/code-notes.md.
 SHUTDOWN_BEHAVIOR="stop"; DELETE_ROOT="false"; MARKET_ARGS=()
 if [ "$USE_SPOT" = "1" ]; then
     SHUTDOWN_BEHAVIOR="terminate"; DELETE_ROOT="true"

@@ -4,17 +4,9 @@
 # dependencies = []
 # ///
 """
-mock_server.py -- a fake vLLM, so bench.py can be validated with no GPU.
-
-Zero dependencies (stdlib asyncio only). Speaks just enough of the OpenAI
-streaming chat API for bench.py, and — the point — simulates a server with real
-CAPACITY, so a sweep against it produces a genuine knee:
-
-  · prefill costs time proportional to prompt length     → TTFT grows with input
-  · only --batch requests decode at once, the rest QUEUE → TTFT explodes past capacity
-  · inter-token latency degrades as the batch fills      → ITL grows with load
-
-If bench.py cannot find the knee here, it will not find it against vLLM either.
+mock_server.py -- a fake vLLM, so bench.py can be validated with no GPU. Zero
+dependencies; simulates a server with real capacity so a sweep against it produces
+a genuine knee -- see NOTES/code-notes.md for what that simulation models.
 
   python tools/mock_server.py --port 8000
 """

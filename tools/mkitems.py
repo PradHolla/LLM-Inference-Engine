@@ -5,38 +5,8 @@
 # ///
 """
 mkitems.py -- generate the Phase 4 quality-eval item set. No GPU, no network, no dataset.
-
-Two item families, both graded by exact match so no LLM judge is involved:
-
-  maths    a chain of k dependent integer operations on a running quantity, phrased as a
-           scenario. Step i consumes step i-1's output, so no step can be skipped and k is
-           genuinely the number of sequential reasoning steps. k is the DOSE VARIABLE --
-           NOTES/phase4-eval-design.md section 3b explains why the whole design hangs on it.
-
-  gsm8k    real grade-school word problems, converted from the published test set. NOT the
-           primary quality measurement -- it is the INSTRUMENT CHECK. Synthetic items are
-           graded by a tool written here, against answers generated here, in a format
-           invented here, so they structurally cannot detect a broken harness. GSM8K has
-           published baselines for this model, so if bf16 lands near the known number the
-           whole pipeline -- chat template, thinking toggle, extraction, grading, server
-           flags -- is validated end to end. That is incidents 2, 3, 10 and 11.
-
-  longctx  a unique fact buried at a controlled depth in a long filler document, with two
-           distractor facts of identical shape so the model must retrieve the right one
-           rather than pattern-match the format.
-
-Answers are correct by construction: the generator applies the operations to produce them.
-
-THE HAZARD, and it is the expensive kind. A generator bug here does not raise; it emits a
-well-formed problem whose stated answer does not follow from its stated text, and the model
-is then marked wrong for being right. Every downstream number would be quietly poisoned.
-The specific way it happens is a phrasing/arithmetic mismatch -- the code does v*2 while the
-sentence says "triples".
-
-So --selftest re-derives every answer by PARSING THE EMITTED TEXT back into operations and
-replaying them. The parser is written from what each sentence means to a reader, not from
-the generator's internals, so it is a genuinely independent path. Run it before trusting an
-item file. It is incident 16 all over again: compare parsed values, never assume.
+Three item families (math, gsm8k, longctx), each independently re-verified by --selftest.
+See NOTES/code-notes.md for the design and the specific hazard it guards against.
 
   uv run tools/mkitems.py --out results/phase4-items.jsonl
   uv run tools/mkitems.py --out results/phase4-items.jsonl --selftest
@@ -185,14 +155,8 @@ def make_longctx(rng, depth, idx, target_tokens=4000):
 
 
 def make_gsm8k(rows, n, rng):
-    """Convert the published GSM8K test set into our item schema.
-
-    Contamination is certain -- GSM8K predates Qwen3 and is surely in its training data --
-    and does not matter for either use here. The comparison is PAIRED, so bf16 and the
-    quantized model carry identical contamination; damage to recalled answers is still
-    damage. And for the instrument check we WANT the same contamination as the published
-    baselines being compared against.
-    """
+    """Convert the published GSM8K test set into our item schema. Contamination is
+    certain but does not matter here -- see NOTES/code-notes.md."""
     picked = rng.sample(rows, min(n, len(rows)))
     items = []
     for i, r in enumerate(picked):
@@ -215,11 +179,7 @@ def selftest_gsm8k(item):
         return f"{item['id']}: no #### in source"
     if m.group(1).replace(",", "") != item["answer"]:
         return f"{item['id']}: source says {m.group(1)!r}, file says {item['answer']!r}"
-    # No "answer leaks into the question" check. It was tried and removed: it fired on 16
-    # of 200 items because small integers like 2 and 4 naturally occur in a word problem's
-    # text. A check that flags a curated benchmark 8% of the time is a broken check, not a
-    # broken dataset. What matters here is that the CONVERSION is faithful, which is the
-    # comparison above.
+    # No "answer leaks into the question" check -- tried and removed, see NOTES/code-notes.md.
     return None
 
 

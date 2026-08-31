@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # Stop the project box. Stop, never terminate: the root volume holds the HF
-# cache and everything else.
-#
-# A stopped instance still bills EBS -- ~$16/month for 200 GB gp3. That is the
-# price of not re-bootstrapping. Terminate only when the project is over.
+# cache and everything else. Terminate only when the project is over.
 set -euo pipefail
 REGION="${AWS_REGION:-us-east-1}"; PROJECT="llm-inference"
 IID=$(aws ec2 describe-instances --region "$REGION" \

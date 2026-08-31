@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Run one vLLM ablation: restart with a flag changed, wait for health, RECORD THE KV
 # SIZE, then sweep. See infra/vllm-runbook.md for why each piece is there.
-#
 #   ./infra/vllm-ablate.sh <name> "<vllm-flags>" "<bench-flags>" "<rates>"
 #   ./infra/vllm-ablate.sh A-nocache "--no-enable-prefix-caching" "--unique-prefix" "3,4,5,6,7"
 set -uo pipefail
@@ -39,9 +38,8 @@ for i in $(seq 1 70); do
 done
 [ "${READY:-0}" = "1" ] || { echo "  TIMED OUT waiting for health"; exit 1; }
 
-# vLLM sizes KV from a startup memory profile that VARIES BETWEEN IDENTICAL RUNS
-# (26,176 vs 33,424 tokens observed). A capacity difference is not attributable to the
-# flag until these are confirmed comparable, so it is recorded with every result.
+# vLLM's KV size varies between identical runs (see NOTES/code-notes.md) -- record it
+# with every result so a capacity difference isn't wrongly attributed to the flag.
 echo "  $($SSH 'journalctl -u vllm --no-pager -o cat | grep "GPU KV cache size" | tail -1' 2>/dev/null)"
 
 # --model is REQUIRED: bench.py defaults to "test", which our own servers ignore and

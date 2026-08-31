@@ -1,40 +1,15 @@
 """
 static_batch.py -- Phase 2 step 2: batch engine/manual.py's decode loop, statically.
-
-"Static" means fixed membership: once a batch of B sequences starts, no sequence may
-join or leave until the LAST one finishes. A sequence that hits its own target early
-(or emits eos) does not free its slot -- it keeps occupying a row in every forward call,
-still consuming real compute, until the longest sequence in the batch is done. That
-restriction is the entire point of this step, and the ragged-length mode exists solely
-to put a number on what it costs. Continuous batching (step 3) is the fix.
-
-Everything here reuses engine/manual.py's GPU-VERIFIED patterns rather than re-deriving
-them -- see its docstring for the citations (logits_to_keep detection, explicit
-cache_position, BatchEncoding unwrap, dtype=bfloat16). Batching only adds a leading B
-dimension to those same tensors; the forward-call shape is the only thing that changes.
-
-PROMPTS ARE UNIFORM (item B): every row in a batch is the same --prompt-tokens prompt,
-built with make_prompt exactly as engine/manual.py does. That means there is no padding
-and no attention mask to construct -- deliberately, so that ragged OUTPUT length is the
-only variable this file measures. Ragged prompt length is a separate problem (padding
-waste) that would otherwise be conflated with the finding here.
-
-per_seq_max_tokens[i] counts DECODE-LOOP tokens only, not the token prefill already
-produced. That is a deliberate departure from engine/manual.py's max_new_tokens (which
-DOES count the prefill token) -- see run_batch's docstring and the note in main() for
-why: it is what makes total_steps land exactly on the longest requested length, which
-is what NOTES/predictions.md's 2026-08-21 arithmetic assumes throughout.
+Fixed membership: no sequence leaves until the LAST one finishes, wasting compute on
+already-done rows -- continuous batching (step 3) fixes this. See docs for conventions.
 
   /opt/llm/.venv/bin/python -m engine.static_batch --mode uniform
-  /opt/llm/.venv/bin/python -m engine.static_batch --mode ragged \
-      --lengths 512,32,32,32,32,32,32,32
 """
 from __future__ import annotations
 
 import os
-# MUST precede `import torch` (transitively, via engine.manual below) -- read once at
-# CUDA allocator init and silently ignored after. See engine/manual.py's identical
-# comment and NOTES/predictions.md for the measured +29% concurrency this buys.
+# MUST precede `import torch` (transitively) -- read once at CUDA init, ignored after.
+# See engine/manual.py's identical comment; NOTES/predictions.md measured +29% from this.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # Import the verified helpers rather than duplicating them. Importing engine.manual
@@ -128,28 +103,9 @@ def _f(v: float, w: int, suffix: str = "") -> str:
 # --------------------------------------------------------------------- the batch loop
 def run_batch(model, B: int, per_seq_max_tokens: list[int], input_ids: torch.Tensor,
               eos_ids: set[int], fwd_kw: str | None, ignore_eos: bool = True) -> dict:
-    """Static batch prefill + decode. All B rows share one prompt length (uniform
-    prompts, item B), so cache_position is a single shared arange for the whole batch,
-    exactly as in engine.manual.generate_manual -- batching only adds a leading B
-    dimension to every tensor already there, not a new code path.
-
-    per_seq_max_tokens[i] counts tokens produced by the DECODE LOOP only. The token
-    prefill produces seeds the first decode step's input but is not itself counted:
-    that is what makes total_steps land exactly on max(per_seq_max_tokens) with no
-    off-by-one, which is what every arithmetic worked example in NOTES/predictions.md
-    (2026-08-21, "all 8 slots stay occupied for all 512 steps") assumes.
-
-    STATIC BATCHING: a sequence that reaches its target (or emits an id in eos_ids)
-    stops updating its OWN bookkeeping (finished[i], tokens_produced[i]) but its row is
-    NOT removed, masked, or skipped -- every subsequent forward call still computes it,
-    using whatever token the model itself continues to emit for that row. That wasted
-    compute, until the LAST sequence finishes, is the cost this file exists to measure.
-
-    Returns {"prefill_s": float, "decode_s": [float, ...], "finish_step": [int]*B,
-    "tokens_produced": [int]*B, "kv_bytes": int}. decode_s has one entry per decode
-    step actually executed -- one entry per step, not per token, since a single forward
-    call advances all B rows at once.
-    """
+    """Static batch prefill + decode; batching just adds a leading B dimension to
+    engine.manual.generate_manual's tensors. A finished row is NOT removed or masked --
+    every forward still computes it until the LAST row finishes. See docs for return shape."""
     assert len(per_seq_max_tokens) == B, "per_seq_max_tokens must have exactly B entries"
     device = input_ids.device
     prompt_len = input_ids.shape[1]
@@ -181,10 +137,8 @@ def run_batch(model, B: int, per_seq_max_tokens: list[int], input_ids: torch.Ten
             if per_seq_max_tokens[i] <= 0:
                 finished[i] = True
 
-        # DECODE -- lockstep, one shared cache_position (uniform prompt length means
-        # every row is at the same position). Finished rows are NOT skipped: their
-        # slot keeps being computed every step until ALL are finished. That is static
-        # batching -- the loop condition below never shrinks B.
+        # DECODE -- lockstep; finished rows are NOT skipped, their slot is still
+        # computed every step until ALL are finished. See docs.
         step = 0
         while not all(finished):
             step += 1
@@ -219,16 +173,12 @@ def run_batch(model, B: int, per_seq_max_tokens: list[int], input_ids: torch.Ten
 
 def compute_metrics(B: int, per_seq_max_tokens: list[int], decode_s: list[float],
                     tokens_produced: list[int] | None = None) -> dict:
-    """Defined EXACTLY as specified -- this arithmetic is the deliverable, not the loop
-    above it. naive_tok_s and useful_tok_s are equal under uniform lengths; the gap
-    between them under ragged lengths, with utilization collapsing while naive_tok_s
-    stays high and healthy-looking, IS the finding of this step."""
+    """Defined EXACTLY as specified -- this arithmetic is the deliverable. naive_tok_s
+    and useful_tok_s are equal under uniform lengths; their gap under ragged lengths
+    (utilization collapsing while naive_tok_s stays healthy-looking) IS the finding."""
     total_steps = len(decode_s)                        # driven by the longest sequence
-    # ACTUAL tokens produced, not the requested targets. With identical prompts and
-    # greedy decoding every row emits the same tokens, so an eos would fire on all B
-    # rows at the same step and truncate total_steps while the requested targets stayed
-    # high -- yielding utilization above 1.0, which is nonsense. --ignore-eos (default)
-    # makes these equal; this formula stays correct even when it is disabled.
+    # ACTUAL tokens produced, not requested targets -- identical prompts + greedy means
+    # eos could fire on all B rows at once, otherwise yielding utilization above 1.0.
     useful_tokens = sum(tokens_produced if tokens_produced is not None else per_seq_max_tokens)
     slot_steps = B * total_steps                        # tokens the GPU actually computed
     decode_time = sum(decode_s)
@@ -249,10 +199,8 @@ def compute_metrics(B: int, per_seq_max_tokens: list[int], decode_s: list[float]
 def run_warmup(model, B: int, input_ids: torch.Tensor, eos_ids: set[int],
                fwd_kw: str | None) -> None:
     """One short (8-token) generation at the batch size about to be measured, discarded
-    before any measured trial. MEASURED 2026-08-21 in engine/manual.py: cuBLAS picks
-    kernels per problem SHAPE, so warming at the wrong (batch, prompt_len) warms
-    nothing. In sweep mode that means one warmup per batch size, not one for the whole
-    sweep -- called fresh inside run_trial for every B."""
+    before measuring. cuBLAS picks kernels per problem SHAPE (measured 2026-08-21), so
+    sweep mode warms fresh per batch size, called inside run_trial for every B."""
     t0 = time.perf_counter()
     run_batch(model, B, [8] * B, input_ids, eos_ids, fwd_kw)
     torch.cuda.synchronize()
@@ -289,13 +237,11 @@ class Trial:
 def run_trial(model, mode: str, B: int, per_seq_max_tokens: list[int],
               template_row: torch.Tensor, eos_ids: set[int], fwd_kw: str | None,
               prompt_tokens: int, warmup: bool, ignore_eos: bool = True) -> Trial:
-    """Build the batch, warm it up at its own shape, run it, and turn OOM into a
-    recorded (not raised) result -- item G's sweep-survival contract. Between every
-    trial: empty_cache + reset_peak_memory_stats, so peak_alloc below is this trial's
-    peak, not a running high-water mark across the whole sweep."""
-    # repeat, not expand: expand's stride-0 view is a read aliased across B, not a
-    # tensor the model is guaranteed to accept as a normal batch dimension; repeat
-    # costs one small contiguous copy, entirely outside every timed region below.
+    """Build the batch, warm it, run it, and turn OOM into a recorded (not raised)
+    result -- the sweep-survival contract. empty_cache + reset_peak_memory_stats runs
+    between every trial so peak_alloc is this trial's peak, not a sweep-wide high-water mark."""
+    # repeat, not expand: expand's stride-0 view isn't guaranteed accepted as a normal
+    # batch dim; repeat costs one small copy, outside every timed region below.
     input_ids = template_row.repeat(B, 1)
 
     gc.collect(); torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
@@ -326,8 +272,7 @@ def run_trial(model, mode: str, B: int, per_seq_max_tokens: list[int],
 
 def write_jsonl(out, t: Trial) -> None:
     # Flushed per trial, not buffered to the end -- a sweep that only writes at the end
-    # loses everything to a crash, a Ctrl-C, or a spot reclaim, and sweeps are exactly
-    # long enough for that.
+    # loses everything to a crash, a Ctrl-C, or a spot reclaim.
     out.write(json.dumps(asdict(t), default=str) + "\n")
     out.flush()
 
@@ -389,10 +334,8 @@ def main() -> int:
     fwd_kw = pick_logits_kwarg(model)
     print(f"logits kwarg: {fwd_kw or 'NOT FOUND -- logits explosion risk, see kvprobe.py'}")
 
-    # Uniform prompts, no padding -- deliberate, see item B / the module docstring.
-    # Always no-think: whether Qwen3 "thinks" or answers does not change what this file
-    # measures (raw per-step forward latency and slot occupancy), so there is no CLI
-    # flag for it here, unlike engine/manual.py's --think/--no-think.
+    # Uniform prompts, no padding, deliberate (item B). Always no-think -- what this
+    # file measures doesn't depend on it, so there's no CLI flag, unlike engine/manual.py.
     body = make_prompt(args.prompt_tokens)
     input_ids = tok.apply_chat_template(
         [{"role": "user", "content": body}],
@@ -412,9 +355,7 @@ def main() -> int:
     print(f"eos ids: {sorted(eos_ids) or 'none found'}")
 
     # ITL percentiles need 1/(1-p) samples before pct() stops returning NaN -- with
-    # short trials (small --max-new-tokens, or a ragged sequence that finishes early)
-    # p99 in particular may simply not have enough decode steps yet. That is pct()
-    # working correctly, not a bug in this file -- see engine/manual.py's docstring.
+    # short trials, p99 may simply lack enough decode steps yet. Working as intended.
     print(f"ITL percentile sample floors: p50>={min_samples(50)}  p95>={min_samples(95)}  "
           f"p99>={min_samples(99)} decode steps (fewer -> reported as n/a, correctly)")
 

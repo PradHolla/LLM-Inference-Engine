@@ -15,8 +15,7 @@ aws ec2 wait instance-running --region "$REGION" --instance-ids "$IID"
 IP=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" \
      --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
 
-# The public IP changes on every stop/start (no Elastic IP attached, because an
-# unattached EIP bills by the hour and a project box is stopped most of the time).
+# Public IP changes on every stop/start (no Elastic IP -- see NOTES/code-notes.md).
 # Re-authorize the SG for wherever you are now.
 MYIP=$(curl -s https://checkip.amazonaws.com | tr -d '[:space:]')
 SG=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" \

@@ -1,21 +1,9 @@
 """
-server.py -- Phase 1: the deliberately bad baseline.
+server.py -- Phase 1: the deliberately bad baseline. Plain `transformers.generate()`,
+one request at a time behind a single global lock -- every limitation is a choice.
+Exists to produce a bad number later phases beat. Wire-compatible with tools/bench.py.
 
-Plain HuggingFace `transformers`, `.generate()`, ONE request at a time. No batching,
-no scheduler, no paged KV cache -- every limitation below is a choice, called out
-where it happens, not an oversight. This exists to produce a bad number that later
-phases beat. Do not optimize it; the naivety is the spec.
-
-THE GLOBAL LOCK (see below) is the defining property: a single `asyncio.Lock` held
-for the whole generation. Exactly one request touches the GPU at a time; everything
-else queues behind it. Phase 2 replaces this with a real scheduler.
-
-Wire-compatible with `tools/bench.py` -- see the SSE chunk shapes in `_chunk()` and
-`_stream_response()`. That file is the spec for what a client is allowed to assume;
-do not change the response shape without re-checking its parsing loop.
-
-  MODEL_ID=Qwen/Qwen3-8B PORT=8000 SERVE_LOG=baseline/serve.jsonl \
-    uvicorn baseline.server:app --host 0.0.0.0 --port 8000
+  MODEL_ID=Qwen/Qwen3-8B PORT=8000 uvicorn baseline.server:app --port 8000
 """
 from __future__ import annotations
 
@@ -45,12 +33,8 @@ MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen3-8B")
 PORT = int(os.environ.get("PORT", "8000"))
 SERVE_LOG = os.environ.get("SERVE_LOG", "baseline/serve.jsonl")
 
-# THE GLOBAL LOCK. Held for the ENTIRE generation (prefill + every decode step),
-# not just the enqueue. Exactly one request is ever inside `model.generate()` at a
-# time; every other request `await`s here, which is what turns concurrency into a
-# queue. This single line is the whole architectural difference between this file
-# and vLLM. Removing it -- and replacing it with a real batching scheduler -- is
-# Phase 2, not a tweak to this one.
+# THE GLOBAL LOCK. Held for the ENTIRE generation, not just the enqueue -- exactly
+# one request is ever inside model.generate() at a time. See docs for the rationale.
 LOCK = asyncio.Lock()
 
 
@@ -87,18 +71,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("loading %s ...", MODEL_ID)
     t0 = time.perf_counter()
     STATE.tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    # dtype=, not the deprecated torch_dtype=. device_map="cuda" pins the whole
-    # model onto the single GPU -- there is only one GPU on this box, and no
-    # sharding logic exists in this baseline anyway.
+    # dtype=, not the deprecated torch_dtype=. device_map="cuda" pins the whole model
+    # onto the single GPU -- no sharding logic exists in this baseline.
     STATE.model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID, dtype=torch.bfloat16, device_map="cuda"
     )
     STATE.model.eval()
     load_s = time.perf_counter() - t0
 
-    # The measured weight footprint -- compare this against roofline.py's
-    # `weights = params * dtype_bytes` prediction. Any gap is activation buffers,
-    # CUDA context, or a prediction that was wrong.
+    # The measured weight footprint -- compare against roofline.py's prediction.
+    # Any gap is activation buffers, CUDA context, or a wrong prediction. See docs.
     STATE.weights_gib = torch.cuda.memory_allocated() / GIB
     STATE.gpu_name = torch.cuda.get_device_name(0)
     logger.info(
@@ -128,18 +110,16 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int = 128
     temperature: float = 0.0
     stream: bool = True
-    # Passed straight through to apply_chat_template -- e.g. bench.py sends
-    # {"enable_thinking": false} for Qwen3. We do not interpret it; the tokenizer
-    # does.
+    # Passed straight through to apply_chat_template (e.g. bench.py sends
+    # {"enable_thinking": false} for Qwen3) -- we do not interpret it, the tokenizer does.
     chat_template_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 def _chunk(request_id: str, created: int, model_name: str,
            delta: dict[str, Any], finish_reason: str | None) -> str:
-    """One SSE frame in vLLM/OpenAI's streaming chat-completion shape. bench.py
-    only reads choices[0].delta.content and the [DONE] sentinel, but the rest of
-    the envelope is included so this baseline is a drop-in replacement for the
-    real thing once later phases swap the server underneath it."""
+    """One SSE frame in vLLM/OpenAI's streaming chat-completion shape. bench.py only
+    reads choices[0].delta.content and [DONE], but the full envelope is included so
+    this baseline is a drop-in replacement once later phases swap the server underneath."""
     payload = {
         "id": request_id,
         "object": "chat.completion.chunk",
@@ -151,12 +131,9 @@ def _chunk(request_id: str, created: int, model_name: str,
 
 
 def _run_generate(gen_kwargs: dict[str, Any], result: dict[str, Any]) -> None:
-    """Runs on its own thread, invoked from `_stream_response`'s worker thread.
-    `model.generate(streamer=...)` calls `streamer.put()` synchronously as each
-    token is produced, from THIS thread -- that is what TextIteratorStreamer is
-    for. Any exception (OOM, a bad generation kwarg) is captured here rather than
-    raised across the thread boundary, since Python threads can't propagate
-    exceptions to their caller."""
+    """Runs on its own thread. model.generate(streamer=...) calls streamer.put()
+    synchronously from THIS thread as each token is produced. Exceptions are captured
+    here (not raised) since Python threads can't propagate exceptions to their caller."""
     try:
         result["output_ids"] = STATE.model.generate(**gen_kwargs)
     except Exception as e:  # surfaced to the request handler below, not swallowed
@@ -223,13 +200,8 @@ async def _generate_under_lock(req: ChatCompletionRequest, input_ids: torch.Tens
     gen_thread_holder: list[threading.Thread] = []
 
     def worker() -> None:
-        # `model.generate` runs on ITS OWN thread (started here) so that this
-        # thread is free to drain the streamer concurrently -- `for text in
-        # streamer` blocks on an internal queue.Queue.get() until generate()
-        # produces the next token, and generate() can't do that while also
-        # being the thread that's blocked reading its own output. Bridging to
-        # asyncio happens via call_soon_threadsafe: this thread must never
-        # touch the event loop directly, since it is not the loop's thread.
+        # model.generate runs on ITS OWN thread so this thread stays free to drain
+        # the streamer; bridges to asyncio only via call_soon_threadsafe. See docs.
         gen_thread = threading.Thread(
             target=_run_generate, args=(gen_kwargs, result), daemon=True
         )
@@ -256,23 +228,15 @@ async def _generate_under_lock(req: ChatCompletionRequest, input_ids: torch.Tens
             t_last_token = now
             yield _chunk(request_id, created, req.model, {"content": item}, None)
     finally:
-        # If the client disconnects, Starlette cancels this generator -- but the
-        # background thread above is still inside model.generate() on the GPU
-        # and cannot be interrupted. Joining here (unconditionally; it's a
-        # no-op if generation already finished normally) blocks the event loop
-        # on purpose: releasing LOCK before the GPU is actually free would let a
-        # second request start generate() on the same model instance while this
-        # one is still running, which is exactly the invariant this whole file
-        # exists to prevent. This is the one place a synchronous block is
-        # correct rather than a bug.
+        # Join unconditionally, even on disconnect: releasing LOCK before the GPU is
+        # actually free would let a second generate() run concurrently. See docs.
         for t in gen_thread_holder:
             t.join()
 
     if "error" in result:
         logger.error("generation failed for %s: %s", request_id, result["error"])
-        # Naive baseline: no retry, no structured error event -- just stop the
-        # stream short. A scheduler that could requeue or degrade gracefully is
-        # Phase 2's job, not this file's.
+        # Naive baseline: no retry, no structured error event -- just stop the stream
+        # short. A scheduler that could requeue/degrade gracefully is Phase 2's job.
         return
 
     output_ids = result["output_ids"]
@@ -290,10 +254,8 @@ async def _generate_under_lock(req: ChatCompletionRequest, input_ids: torch.Tens
     METRICS.prompt_tokens_total += prompt_tokens
     METRICS.generation_tokens_total += generated_len
 
-    # The server's own view of where time went -- independent of bench.py's
-    # client-side TTFT/ITL. When the two disagree, this file is how you tell
-    # "the model was slow" apart from "the request sat in the queue" or "HTTP
-    # overhead ate the difference."
+    # The server's own view of where time went, independent of bench.py's client-side
+    # TTFT/ITL -- lets you tell "model was slow" apart from "sat in queue". See docs.
     _log_request({
         "timestamp": time.time(),
         "prompt_tokens": prompt_tokens,
@@ -310,9 +272,8 @@ async def _generate_under_lock(req: ChatCompletionRequest, input_ids: torch.Tens
 
 
 def _log_request(entry: dict[str, Any]) -> None:
-    # Flushed every write, per request -- a long run that dies mid-sweep should
-    # not lose the requests that already completed. Mirrors bench.py's own
-    # per-request flush discipline on the client side.
+    # Flushed every write, per request -- a long run that dies mid-sweep should not
+    # lose completed requests. Mirrors bench.py's own client-side flush discipline.
     with open(SERVE_LOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
         f.flush()
@@ -322,19 +283,16 @@ def _log_request(entry: dict[str, Any]) -> None:
 async def chat_completions(req: ChatCompletionRequest) -> StreamingResponse:
     t0 = time.perf_counter()
     if not req.stream:
-        # Streaming only, deliberately -- see the module docstring. A
-        # non-streaming caller gets a clear error instead of a silent 60s hang
-        # waiting for the whole generation to buffer.
+        # Streaming only, deliberately: a non-streaming caller gets a clear error
+        # instead of a silent 60s hang waiting for the whole generation to buffer.
         raise HTTPException(
             status_code=400,
             detail="This baseline only supports stream=true. Non-streaming responses "
                    "are not implemented.",
         )
 
-    # Tokenization is CPU-only and cheap; it happens BEFORE the lock so a bad
-    # request (unknown chat_template_kwargs, malformed messages) fails fast
-    # with a real 400 instead of a 200 whose body silently ends early -- once
-    # StreamingResponse starts, the status code is already committed.
+    # Tokenization happens BEFORE the lock so a bad request fails fast with a real
+    # 400, not a 200 whose body silently ends early once streaming starts.
     try:
         input_ids = STATE.tokenizer.apply_chat_template(
             [m.model_dump() for m in req.messages],
@@ -346,9 +304,8 @@ async def chat_completions(req: ChatCompletionRequest) -> StreamingResponse:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid request: {e}") from None
 
-    # transformers 5.x returns a BatchEncoding (dict-like) from apply_chat_template
-    # when tokenize=True; 4.x returned a bare tensor. Accept either, so this file is
-    # not silently pinned to one major version of a dependency we did not choose.
+    # transformers 5.x returns a BatchEncoding from apply_chat_template(tokenize=True);
+    # 4.x returned a bare tensor. Accept either -- see docs.
     if not hasattr(input_ids, "shape"):
         input_ids = input_ids["input_ids"]
 
@@ -373,10 +330,8 @@ async def health() -> dict[str, Any]:
 
 @app.get("/metrics")
 async def metrics() -> PlainTextResponse:
-    # These are literally vLLM's metric names, even though this server is not
-    # vLLM. infra/idle-shutdown.sh polls exactly these names to decide whether
-    # the box is idle, and it has to work against this baseline in Phase 1 too
-    # -- so the names are load-bearing, not cosmetic.
+    # These are literally vLLM's metric names -- infra/idle-shutdown.sh polls them
+    # to decide idleness, and must work against this baseline too. Load-bearing names.
     body = (
         "# HELP vllm:num_requests_running Requests currently generating (this\n"
         "# baseline never runs more than one).\n"

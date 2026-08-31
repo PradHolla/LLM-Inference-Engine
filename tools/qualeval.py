@@ -5,39 +5,8 @@
 # ///
 """
 qualeval.py -- the Phase 4 quality instrument. Protocol: NOTES/phase4-eval-design.md.
-
-Deliberately NOT part of bench.py. bench.py is a load generator whose record schema every
-Phase 1-3 result and tools/curve.py depend on; adding full completion text would bloat it by
-kilobytes per request and break that schema. Same wire protocol, different job.
-
-Three modes, and the split is the point:
-
-  run       talk to a server, save EVERYTHING, grade nothing that cannot be regraded
-  grade     re-score a saved run offline, no GPU, because a grading bug is inevitable
-  compare   paired McNemar between two runs -- the actual statistical test
-
-WHAT THIS INSTRUMENT CAN GET WRONG, all of which produce plausible numbers not errors:
-
-  * SAMPLING SILENTLY ON. Qwen3's generation_config.json sets temperature 0.6 / top_p 0.95.
-    If the request's temperature=0 does not override it, outputs are random, the bf16-vs-bf16
-    noise floor swamps every effect, and the phase measures nothing. --check-determinism
-    sends one item twice and diffs. Run it before every session.
-
-  * BATCH SIZE NOT WHAT WAS PINNED. Quality depends on batch composition (incident 22), so
-    every configuration must decode at the same batch size. The design pins --max-num-seqs
-    server-side; this tool POLLS /metrics and records the achieved vllm:num_requests_running
-    rather than trusting the flag took.
-
-  * ANSWER EXTRACTED FROM THE THINKING BLOCK. A model writes "ANSWER: 42", reconsiders, and
-    ends at 37. Taking the first match grades the abandoned answer. Last match, post-thinking
-    content only.
-
-  * A LOOSE FALLBACK. If the format is missing, this tool does NOT hunt for the last integer
-    in the reply. A fallback that fires more often for one configuration applies a different
-    grading standard to each. Unparseable is its own outcome and is reported, never healed.
-
-  * TRUNCATION READ AS A WRONG ANSWER. finish_reason=="length" is recorded per item and
-    reported beside accuracy, never folded into it.
+Three modes -- run, grade, compare -- deliberately separate from bench.py's schema.
+See NOTES/code-notes.md for what this instrument can get wrong (all silent, not exceptions).
 
   uv run tools/qualeval.py --check-determinism --url http://IP:8000
   uv run tools/qualeval.py run --url http://IP:8000 --config bf16-a --slices math,gsm8k
@@ -61,22 +30,11 @@ PASSES = [
     ("longctx", False, 64),
 ]
 
-# [ \\t]* NOT \\s* around the colon, and [^\\n]+ not [^\\n]*. \\s crosses newlines, so the
-# case-insensitive "Answer:" inside a "### Final Answer:" heading swallowed the line break
-# and captured the WHOLE NEXT LINE ("ANSWER: 72") as the answer. normalize then rejected it
-# and the item scored unparseable with a correct answer sitting one line below. Requiring at
-# least one character on the SAME line makes the heading match nothing and the real marker win.
+# [ \t]* not \s*, and [^\n]+ not [^\n]*: \s crosses newlines, so a "### Final Answer:"
+# heading swallowed the next line's real "ANSWER: 72" as its own capture. See NOTES/code-notes.md.
 ANSWER_RE = re.compile(r"ANSWER[ \t]*:[ \t]*([^\n]+)", re.IGNORECASE)
-# Qwen3 is heavily trained to close a maths answer with \boxed{}, and it does so even when
-# the prompt demands "ANSWER: <integer>". Calibration measured 16% of COMPLETED, CORRECT
-# responses ending in \boxed{N} with no ANSWER: line -- graded wrong by an earlier version of
-# this file, with the model at 100% on everything it did state.
-#
-# This is NOT the loose fallback the design forbids. \boxed{} is an explicit, unambiguous
-# answer declaration, structurally identical to ANSWER:, and accepting it makes grading MORE
-# uniform across configurations rather than less. Hunting for a bare integer in prose remains
-# forbidden. The marker that matched is recorded per item, so a configuration that changes
-# convention is visible instead of silently mis-scored.
+# Qwen3 closes maths answers with \boxed{} even when told ANSWER:; 16% of correct answers
+# were graded wrong before this was added. Not a loose fallback -- see NOTES/code-notes.md.
 BOXED_RE = re.compile(r"\\boxed\s*\{((?:[^{}]|\{[^{}]*\})*)\}")   # one nested level, for \\boxed{\\text{42}}
 THINK_CLOSE = re.compile(r"</think\s*>", re.IGNORECASE)
 
@@ -91,10 +49,7 @@ def post_thinking(text: str) -> str:
 
 def extract(text: str) -> tuple[str | None, str | None]:
     """Last explicit answer marker in post-thinking content, and which marker it was.
-
-    Both markers are scanned and the one appearing LATEST wins, because that is the model's
-    final stated answer regardless of which convention it reached for.
-    """
+    Both markers are scanned; the one appearing LATEST wins as the model's final answer."""
     body = post_thinking(text)
     hits = [(m.start(), m.group(1), "answer") for m in ANSWER_RE.finditer(body)]
     hits += [(m.start(), m.group(1), "boxed") for m in BOXED_RE.finditer(body)]
@@ -105,12 +60,9 @@ def extract(text: str) -> tuple[str | None, str | None]:
 
 
 def normalize(raw: str | None, slice_: str) -> str | None:
-    """Strip pure FORMATTING. Never search for a value that was not offered as the answer.
-
-    Permitted: markdown bold, currency, thousands separators, trailing punctuation, case.
-    Not permitted: pulling an integer out of prose. That is the line between normalising a
-    format and inventing an answer, and crossing it grades configurations differently.
-    """
+    """Strip pure FORMATTING; never search for a value not offered as the answer.
+    Permitted: bold, currency, separators, punctuation, case; not permitted: pulling an
+    integer out of prose -- see NOTES/code-notes.md."""
     if raw is None:
         return None
     s = raw.strip()
@@ -167,9 +119,8 @@ class Rec:
 
 async def one(client, url, item, cfg, think, max_tokens, seed, attempts=3):
     """Retry transient transport errors. A dropped connection must not become a missing
-    item: compare() joins on id, so lost items silently shrink the denominator, and they
-    do not go missing at the same rate for every configuration. That is a biased sample,
-    which is worse than a slow run."""
+    item -- compare() joins on id, and losses are not evenly distributed across configs.
+    See NOTES/code-notes.md."""
     for a in range(attempts):
         r = await _one(client, url, item, cfg, think, max_tokens, seed)
         if r.status != "exception":
@@ -237,9 +188,8 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
         return r
 
     rtext, ctext = "".join(reasoning), "".join(content)
-    # vLLM splits <think> into reasoning_content ONLY when --reasoning-parser is set.
-    # Otherwise the block arrives inline. Handle both and RECORD WHICH, or the thinking-token
-    # metric is silently zero on one of the two paths.
+    # vLLM splits <think> into reasoning_content only with --reasoning-parser; otherwise it
+    # arrives inline. Handle both and RECORD WHICH (see NOTES/code-notes.md).
     if rtext:
         r.think_path = "reasoning_content"
         r.reasoning_chars, r.content_chars = len(rtext), len(ctext)
@@ -275,9 +225,8 @@ async def probe_batch(url, stop, out):
             except Exception:
                 pass
             try:
-                # 4 Hz, not 1 Hz. At 1 Hz a short pass finishes inside a single interval and
-                # the only sample taken is the one before any request landed -- which reads
-                # zero and is indistinguishable from a broken metric.
+                # 4 Hz not 1 Hz: at 1 Hz a short pass can finish inside a single interval and
+                # the only sample taken reads zero, indistinguishable from a broken metric.
                 await asyncio.wait_for(stop.wait(), timeout=0.25)
             except asyncio.TimeoutError:
                 pass
@@ -289,10 +238,8 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     sel = [i for i in items if i["slice"] == slice_]
     rng = random.Random(args.order_seed)
     rng.shuffle(sel)                       # same order every configuration
-    # Per-pass caps. Taken AFTER the shuffle, so a subsample is spread across k rather than
-    # being the first N of one level, and so the SAME N items are chosen for every
-    # configuration (order_seed is fixed). That is what lets a capped run still pair against
-    # an uncapped one: compare joins on item id and drops the surplus.
+    # Per-pass caps, taken AFTER the shuffle: spreads the subsample across k and picks the
+    # SAME N items every configuration (order_seed fixed), so a capped run still pairs.
     label = f"{slice_}/{'think' if think else 'nothink'}"
     cap = args.limit
     for spec in (args.limit_pass or "").split(","):
@@ -318,12 +265,8 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
     stop = asyncio.Event()
     probe = asyncio.create_task(probe_batch(args.url, stop, samples))
 
-    # max_keepalive MUST be set alongside max_connections. Left at its default of 20
-    # against 40 max_connections, the pool evicts and closes connections under fast
-    # turnover, and the next request reuses a dead one and dies instantly with ReadError.
-    # Measured: 36% failures on the fast no-thinking pass against 1% on the slow thinking
-    # pass -- the opposite of a network timeout, which is what this was first misdiagnosed
-    # as. bench.py sets the two equal and never had the problem.
+    # max_keepalive MUST equal max_connections, or the pool evicts connections under fast
+    # turnover and the next request dies with ReadError (measured 36% vs 1%; see NOTES/code-notes.md).
     limits = httpx.Limits(max_connections=args.concurrency + 8,
                           max_keepalive_connections=args.concurrency + 8)
     async with httpx.AsyncClient(limits=limits, timeout=args.timeout) as client:
@@ -459,9 +402,7 @@ def summarize(recs):
 
 def mcnemar_exact(b: int, c: int) -> float:
     """Two-sided exact McNemar. Under the null, b ~ Binomial(b+c, 0.5).
-
-    Exact rather than the chi-square approximation because the discordant counts here are
-    small -- often under 20 -- which is exactly where the approximation misbehaves.
+    Exact rather than chi-square: discordant counts here are small, often under 20.
     """
     n = b + c
     if n == 0:
@@ -480,9 +421,8 @@ def cmd_compare(args):
     na, nb = len(A), len(B)
     print(f"A = {args.a}  ({na} ok)")
     print(f"B = {args.b}  ({nb} ok)")
-    # Warn whenever EITHER side lost records. The first version only warned when the pair
-    # count differed from both totals, so a run where B alone dropped 3 items reported
-    # nothing -- and a silently shrinking denominator is how a biased sample gets in.
+    # Warn whenever EITHER side lost records -- warning only when totals differed let a
+    # run where just B dropped items report nothing. See NOTES/code-notes.md.
     print(f"paired on {len(keys)} items"
           + (f"   WARNING: dropped {na-len(keys)} from A, {nb-len(keys)} from B"
              if len(keys) < max(na, nb) else ""))

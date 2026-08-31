@@ -23,8 +23,7 @@ export VLLM_PORT=$VLLM_PORT
 EOF
 
 # --- idle shutdown ----------------------------------------------------------
-# Cron, not a systemd timer: cron is already running on every Ubuntu AMI, so
-# there is nothing to enable and nothing to debug at boot.
+# Cron, not a systemd timer -- already running on every Ubuntu AMI (NOTES/code-notes.md).
 cat > /usr/local/bin/idle-shutdown.sh <<'IDLESCRIPT'
 __IDLE_SHUTDOWN_BODY__
 IDLESCRIPT

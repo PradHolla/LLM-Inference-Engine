@@ -5,36 +5,9 @@
 # ///
 """
 specmon.py -- measure speculative-decoding acceptance off vLLM's Prometheus endpoint.
-
-Phase 5's central quantity is the acceptance rate `a`, and it arrives from a source this
-project has never validated. CLAUDE.md section 2: assume any new measurement tool is
-wrong until proven otherwise. Hence `selftest`, and hence section 9a of
-NOTES/phase5-spec-design.md, which says no Phase 5 number is used until this tool
-reproduces a constructed floor (a -> 0) and a constructed ceiling (a -> 1).
-
-WHY THE PER-POSITION CURVE IS THE POINT
-  A scalar a=0.6 is consistent with "every position accepts 60%" and with "position 1
-  accepts 95%, position 3 accepts 5%". Those imply opposite choices of k and only the
-  second is visible in the curve. Reporting the scalar alone would hide the one thing
-  that decides the parameter.
-
-METRIC NAMES ARE DISCOVERED, NOT HARDCODED
-  CLAUDE.md section 1: never quote a remembered number, and the same applies to a
-  remembered API. vLLM's spec-decode counter names differ across releases, so this tool
-  pattern-matches whatever the server exposes and prints what it bound to. `discover`
-  shows the raw list. If a binding is missing, the derived value is None -- never 0,
-  because 0 is a legitimate measurement and None is "not measured" (incident 28).
-
-DERIVATIONS
-  a  = accepted_draft_tokens / drafted_tokens
-  L  = (accepted + drafts) / drafts       mean tokens emitted per verify step; the "+
-                                          drafts" is the bonus token the verify pass
-                                          always produces, even on total rejection
-  pos_i = accepted_at_position_i / drafts
-
-  E_iid = (1 - a^(k+1)) / (1 - a)         what L WOULD be if acceptance were i.i.d.
-  Comparing E_iid to the measured L tests that assumption rather than inheriting it;
-  they diverge exactly to the degree acceptance is correlated across positions.
+Discovers metric names rather than hardcoding them, and reports the per-position
+acceptance curve, not just the scalar rate. See NOTES/code-notes.md for why, and for the
+derivations (a, L, pos_i, E_iid).
 
   uv run tools/specmon.py discover  --url http://localhost:8000
   uv run tools/specmon.py wrap      --url http://localhost:8000 --label s3-bf16-r4 \
@@ -49,12 +22,8 @@ from pathlib import Path
 # ---------------------------------------------------------------- prometheus parsing
 
 def parse_prom(text: str) -> dict[str, float]:
-    """Prometheus text exposition -> {name{labels}: value}.
-
-    Keys keep their label set verbatim so positional series stay distinguishable.
-    Deliberately tolerant: unparseable lines are skipped, not fatal, because a single
-    malformed series must not cost the whole sample.
-    """
+    """Prometheus text exposition -> {name{labels}: value}. Deliberately tolerant:
+    unparseable lines are skipped, not fatal -- see NOTES/code-notes.md."""
     out: dict[str, float] = {}
     for line in text.splitlines():
         line = line.strip()
@@ -94,14 +63,8 @@ def _labels(key: str) -> dict[str, str]:
 
 # ---------------------------------------------------------------- name binding
 
-# Ordered most-specific first: `per_pos` must be tested before the bare `accepted`
-# pattern, or the positional series would be bound as the scalar total.
-#
-# NOT_A_COUNT exists because a binding test against a plausible older naming scheme
-# captured `spec_decode_draft_acceptance_rate` -- a RATIO -- into the `accepted` role,
-# where it would have been summed with a token count. No exception, just a number a few
-# tenths too large. That is exactly the failure class CLAUDE.md section 2 is about, so
-# roles that mean "a count of things" reject any name that announces itself as a rate.
+# Ordered most-specific first: `per_pos` must be tested before `accepted`, or positional
+# series get bound as the scalar total. NOT_A_COUNT guards a rate summed as a count; see NOTES/code-notes.md.
 NOT_A_COUNT = ("rate", "ratio", "efficiency", "per_second", "seconds", "_time")
 
 def _is_count(n: str) -> bool:
@@ -348,15 +311,7 @@ def selftest() -> int:
 
 def split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
     """Split on the first bare `--`: flags to the left, wrapped command to the right.
-
-    NOT argparse.REMAINDER. REMAINDER is greedy from the first positional onward, so
-    `specmon.py discover --url http://host:8931` bound cmd=['--url','http://host:8931']
-    and left `--url` at its DEFAULT. The tool then scraped localhost:8000, got
-    ConnectionRefused, and the error pointed at the network rather than at argv. On the
-    box the default IS the right URL, so this would have hidden entirely and only
-    resurfaced as a wrap-mode misparse. Incident 28's lesson: test the boundary you
-    just invented.
-    """
+    NOT argparse.REMAINDER -- it swallows --url; see NOTES/code-notes.md (incident 28)."""
     if "--" in argv:
         i = argv.index("--")
         return argv[:i], argv[i + 1:]

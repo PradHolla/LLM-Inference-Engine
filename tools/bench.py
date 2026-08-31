@@ -4,20 +4,9 @@
 # dependencies = ["httpx>=0.28"]
 # ///
 """
-bench.py -- open-loop load generator for a streaming OpenAI-compatible endpoint.
-
-THE ONE IDEA THIS FILE EXISTS FOR:
-
-  Closed-loop (the naive version) sends a request, waits for the reply, sends the
-  next. A queue can never form, because the load offered is throttled by the very
-  latency you are trying to measure. Your p95 looks wonderful and means nothing.
-
-  Open-loop fires at a fixed RATE regardless of whether earlier requests finished.
-  If the server cannot keep up, a backlog builds -- exactly as it would in
-  production. That backlog IS the measurement.
-
-Arrivals are Poisson (exponential gaps), not evenly spaced, because real traffic is
-bursty and evenly-spaced arrivals badly underestimate queueing.
+bench.py -- open-loop load generator for a streaming OpenAI-compatible endpoint. Fires
+requests at a fixed Poisson-distributed rate rather than waiting for replies, so a queue
+can form under load; see NOTES/code-notes.md for why that distinction is the point of this file.
 
   # single load point
   python tools/bench.py --url http://localhost:8000 --rate 4 --duration 60
@@ -64,13 +53,8 @@ class Record:
 
 
 def min_samples(p: float) -> int:
-    """Samples needed before a percentile means anything.
-
-    A p95 computed from 7 samples is interpolating between the 6th and 7th value:
-    it is the maximum wearing a percentile's name, and it moves wildly run to run.
-    Rule: you need at least 1/(1-p) samples for the percentile to be bounded by
-    real data rather than by the tail of your sample size. p95 -> 20, p99 -> 100.
-    """
+    """Samples needed before a percentile means anything: p95 -> 20, p99 -> 100.
+    See NOTES/code-notes.md."""
     return 2 if p <= 50 else int(round(1 / (1 - p / 100)))
 
 
@@ -89,9 +73,7 @@ def pct(xs: list[float], p: float) -> float:
 
 
 def make_prompt(target_tokens: int, unique: bool) -> str:
-    # ~4 chars/token. Crude, but the exact count does not matter as long as it is
-    # STABLE across the sweep -- you are comparing load points, not measuring a
-    # tokenizer.
+    # ~4 chars/token, crude but STABLE across the sweep -- see NOTES/code-notes.md.
     body = FILLER * max(1, target_tokens * 4 // len(FILLER) + 1)
     body = body[: target_tokens * 4]
     if unique:
@@ -116,9 +98,8 @@ async def one_request(client: httpx.AsyncClient, args, rate: float,
     if args.no_think:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
     if not args.no_usage:
-        # Ask the server for the authoritative completion_tokens in a final chunk.
-        # WITHOUT THIS, out_tokens counts SSE chunks, and speculative decoding puts
-        # several tokens in one chunk -- see the note on out_tokens above.
+        # Ask the server for authoritative completion_tokens; else out_tokens just
+        # counts SSE chunks (see the out_tokens field comment above, and NOTES/code-notes.md).
         payload["stream_options"] = {"include_usage": True}
 
     last = rec.t_sent
@@ -165,9 +146,8 @@ async def one_request(client: httpx.AsyncClient, args, rate: float,
         rec.status, rec.error = "exception", f"{type(e).__name__}: {e}"
         rec.e2e = time.perf_counter() - rec.t_sent
 
-    # Flush per request. A sweep that only writes at the end loses everything to a
-    # crash, a ctrl-C, or a spot reclaim -- and sweeps are exactly long enough for
-    # that to happen.
+    # Flush per request -- a sweep that only writes at the end loses everything to a
+    # crash, ctrl-C, or spot reclaim. See NOTES/code-notes.md.
     if out:
         async with lock:
             out.write(json.dumps(asdict(rec)) + "\n")
@@ -188,17 +168,15 @@ async def run_point(args, rate: float, out, lock) -> list[Record]:
             # on the clock, never on the server.
             await asyncio.sleep(random.expovariate(rate))
             if len(inflight) >= args.max_inflight:
-                # Safety valve so a hopelessly overloaded server cannot OOM the
-                # client. Counted and reported -- a run with drops is not a valid
-                # measurement of that load point.
+                # Safety valve so an overloaded server cannot OOM the client; drops
+                # are counted and reported -- see NOTES/code-notes.md.
                 dropped += 1
                 continue
             t = asyncio.create_task(one_request(client, args, rate,
                                                 time.perf_counter(), out, lock))
             inflight.add(t)
-            # `inflight` tracks concurrency for the max-inflight valve; results are
-            # collected separately, or discarding a finished task would discard its
-            # record with it.
+            # `inflight` tracks concurrency only; results are collected separately,
+            # or discarding a finished task would discard its record too.
             t.add_done_callback(inflight.discard)
             t.add_done_callback(
                 lambda f: recs.append(f.result()) if not f.cancelled()
@@ -213,26 +191,15 @@ async def run_point(args, rate: float, out, lock) -> list[Record]:
 
 
 async def run_serial(args, out, lock) -> tuple[list[Record], float]:
-    """Closed-loop: one request at a time, each awaited before the next.
-
-    This is the deliberate EXCEPTION to the open-loop rule at the top of this file,
-    and it is correct here for a specific reason: open-loop exists to make a queue
-    form, because queueing is what you are measuring when you want CAPACITY. When
-    you want SINGLE-STREAM latency, a queue is contamination -- there is literally
-    one user, so anything waiting behind another request is not part of the answer.
-
-    Learned the hard way: a first attempt at a batch-1 number used --rate 0.25
-    against ~3s of service time. Utilisation hit ~0.8, and the reported "TTFT" of
-    11s was 10.8s of queue wait plus 195ms of actual prefill.
-    """
+    """Closed-loop: one request at a time, each awaited before the next. Deliberate
+    EXCEPTION to the open-loop rule at the top of this file; see NOTES/code-notes.md."""
     recs: list[Record] = []
     t0 = time.perf_counter()
     async with httpx.AsyncClient() as client:
         for i in range(args.warmup + args.serial):
             rec = await one_request(client, args, 0.0, time.perf_counter(), out, lock)
-            # The first request through a fresh model pays CUDA kernel autotuning and
-            # allocator warmup -- measured 9.09s of "prefill" against a 195ms steady
-            # state, a 47x outlier. Discarding it is not cheating; including it is.
+            # First request pays CUDA autotuning/allocator warmup (measured 47x
+            # outlier); discarding it is not cheating -- see NOTES/code-notes.md.
             rec.warmup = i < args.warmup
             recs.append(rec)
     return recs, time.perf_counter() - t0
@@ -240,11 +207,8 @@ async def run_serial(args, out, lock) -> tuple[list[Record], float]:
 
 def summarize(rate: float, recs: list[Record], duration: float) -> dict:
     ok = [r for r in recs if r.status == "ok" and not r.warmup]
-    # Throughput must divide by the time actually spent, not the arrival window.
-    # At saturation the backlog drains long after the window closes: a 60s sweep
-    # point that took 90s to finish reported 0.50 req/s against a true 0.33 --
-    # a 50% overstatement, precisely in the overloaded regime where the number
-    # matters most.
+    # Throughput divides by time actually spent, not the arrival window -- at
+    # saturation the backlog drains long after the window closes (incident 10).
     if ok:
         span = max(r.t_sent + (r.e2e or 0) for r in ok) - min(r.t_sent for r in ok)
         duration = max(span, duration * 0.5)

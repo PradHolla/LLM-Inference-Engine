@@ -5,29 +5,8 @@
 # ///
 """
 kvprobe.py -- measure the KV cache directly. No server, no benchmark, no scheduler.
-
-Answers three questions that Phase 1 could not, because Phase 1 never batched:
-
-  1. Is KV really 144 KiB/token?     -- read the tensor shapes, do not trust the config
-  2. Does VRAM grow by exactly that per decode step?
-  3. What is the largest batch that actually fits at a given context length?
-
-TWO TRAPS, both of which produce a plausible wrong number rather than an exception:
-
-  * LOGITS EXPLOSION. HF computes logits at every prefill position unless told not to.
-    batch 12 x 4096 ctx x 151,936 vocab in bf16 = 14.9 GiB of logits. That OOMs with
-    the KV cache barely touched and looks exactly like KV exhaustion. Hence
-    logits_to_keep=1 on every forward.
-
-  * ACTIVATION SPIKE. Prefilling 4096 tokens in one pass makes activation memory scale
-    with batch x context, so an OOM would again be misattributed to KV. Hence prefill
-    in chunks, so the only term growing with context is the cache itself.
-
-Memory is read three ways because they measure different things:
-  torch allocated  -- live tensors torch knows about
-  torch reserved   -- what torch has taken from the driver, including free blocks
-  driver free/total (mem_get_info) -- ground truth, includes the CUDA context that
-                                      never appears in torch's numbers at all
+Validates KV bytes/token, growth per decode step, and the largest batch that fits.
+Two OOM traps (logits explosion, activation spike) are handled; see NOTES/code-notes.md.
 
   uv run tools/kvprobe.py --probe-api        # cheap: structure only, validates the API
   uv run tools/kvprobe.py --context 4096     # full run including the ceiling walk

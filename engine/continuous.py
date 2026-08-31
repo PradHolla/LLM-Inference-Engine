@@ -1,49 +1,6 @@
 """
-continuous.py -- Phase 2 step 3a: continuous batching, offline.
-
-step 2 (engine/static_batch.py) put a number on static batching's flaw: a finished
-row cannot free its slot, so a ragged workload ([256,128,64,64,32,32,16,16]) measured
-29.7% utilisation -- 3,360 of 4,096 slot-steps computed tokens for sequences that had
-already finished. Continuous batching is the fix: every step, finished rows are
-EVICTED and queued requests are ADMITTED into the freed slots, so the batch composition
-changes mid-flight instead of being fixed at launch.
-
-The three mechanics this needs -- left-padded rows with per-row (buffer-decoupled)
-RoPE position_ids, index_select eviction, and pad-then-cat admission -- are proven
-token-for-token identical to batch-1 references in engine/cache_probe.py. This file
-does not re-derive or alter that design; it batches admission (cache_probe admits one
-newcomer at a time to keep its demo simple) and wraps it in a real FIFO scheduler.
-
-  1. eviction:  index_select(0, keep_idx) on every layer's K/V, on mask, on nxt/next_pos
-  2. admission: ALL newcomers that fit are prefilled together in ONE forward (batched,
-     not greedy one-at-a-time -- GEMM efficiency rises with token count: the prefill
-     sweep measured 8x412 tokens together at ~975ms vs ~1,187ms done singly, 18%
-     faster), then left-padded with zero KV up to the current buffer length and cat'd
-     onto the batch dimension
-  3. decode:    one forward, one token for every currently active row
-
-Order within a step matters and is fixed: EVICT (shrink) -> ADMIT (grow) -> DECODE.
-Evicting first means admission always sees the true freed-slot count; growing before
-shrinking would either admit into slots that are not yet free or require a second
-eviction pass.
-
-PROMPTS ARE UNIFORM, same as static_batch.py -- every request uses the same
---prompt-tokens template, built with engine.manual.make_prompt. Only OUTPUT length
-(--lengths, cycled across --n-requests) is ragged. That keeps admission padding-free
-*within* an admission batch (item C), and keeps ragged-output-length the only variable
-this file measures, not ragged-prompt-length (a separate, unmeasured problem).
-
-TOKEN-COUNT CONVENTION -- decode-loop-only, matching static_batch.py's
-per_seq_max_tokens, NOT engine.manual's max_new_tokens (which counts the prefill token
-too). This file's Request.max_new_tokens is deliberately the *static_batch* convention:
-it counts tokens produced by the DECODE phase only, not the one token admission's own
-prefill produces for free. That is what makes --lengths default
-(256,128,64,64,32,32,16,16, "the same spread step 2c used") land on the SAME per-row
-decode-step counts step 2c measured, so item H's static-equivalent arithmetic is
-comparing like with like. Every completed request therefore ends up with
-len(tokens) == max_new_tokens + 1 (the free admission token plus the requested decode
-tokens) -- which is exactly what item E's `useful_tokens = sum(len(r.tokens))` expects:
-no special-casing needed, the +1 falls out of the token list itself.
+continuous.py -- Phase 2 step 3a: continuous batching, offline. Finished rows are
+EVICTED and queued ones ADMITTED into freed slots every step; see docs for design.
 
   /opt/llm/.venv/bin/python -m engine.continuous
   /opt/llm/.venv/bin/python -m engine.continuous --max-batch 16 --n-requests 128
@@ -51,10 +8,8 @@ no special-casing needed, the +1 falls out of the token list itself.
 from __future__ import annotations
 
 import os
-# MUST precede `import torch` (transitively, via engine.manual/engine.cache_probe
-# below) -- read once at CUDA allocator init, silently ignored after. See
-# engine/manual.py's identical comment and NOTES/predictions.md for the measured
-# +29% concurrency this buys.
+# MUST precede `import torch` (transitively) -- read once at CUDA init, ignored after.
+# See engine/manual.py's identical comment; NOTES/predictions.md measured +29% from this.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # Import the VERIFIED helpers rather than duplicating them. Importing engine.manual /
@@ -100,7 +55,7 @@ def _f(v: float, w: int, suffix: str = "") -> str:
 class Request:
     rid: int
     prompt_ids: "torch.Tensor"          # 1-D, [prompt_len]
-    max_new_tokens: int                 # decode-loop tokens only -- see module docstring
+    max_new_tokens: int                 # decode-loop tokens only -- see docs
     admitted_step: int | None = None    # engine step at which this row entered the batch
     first_token_s: float | None = None  # TTFT: admission-forward start -> its own return
     finish_step: int | None = None      # engine step at which this row was marked done
@@ -111,15 +66,9 @@ class Request:
 
 # ----------------------------------------------------------------------------- Engine
 class Engine:
-    """Fixed max_batch, FIFO pending queue, step() = evict -> admit -> decode.
-
-    Buffer layout matches engine.cache_probe.padded_batch_run exactly: every row is
-    left-padded into one shared [B, L] buffer (mask, K, V all share L on their sequence
-    dimension), L growing by exactly 1 every decode step regardless of eviction/
-    admission (those only ever touch the batch dimension, dim 0). position_ids is
-    tracked per row and is deliberately decoupled from a row's physical position in the
-    buffer -- only the mask and position_ids need to be right, per cache_probe's proof.
-    """
+    """Fixed max_batch, FIFO pending queue, step() = evict -> admit -> decode. Buffer
+    layout matches engine.cache_probe.padded_batch_run: one shared [B, L] KV buffer,
+    position_ids decoupled from buffer index -- see cache_probe's proof."""
 
     def __init__(self, model, fwd_kw: str | None, max_batch: int, device,
                  eos_ids: set[int], ignore_eos: bool = True,
@@ -133,10 +82,8 @@ class Engine:
         self.eos_ids = eos_ids
         self.ignore_eos = ignore_eos
         self.on_complete = on_complete
-        # Fires once per token produced for a row -- the admission-forward's free
-        # token AND every decode-loop token (see _admit/_decode below). Added for
-        # Phase 2 step 3b (engine/server.py) so a live server can stream tokens out
-        # as they're produced instead of only learning about a row at on_complete.
+        # Fires once per token produced for a row (admission's free token plus every
+        # decode-loop token). Added for engine/server.py streaming; see docs.
         self.on_token = on_token
         # Trim the buffer once this many dead left-pad positions accumulate. Low enough
         # to keep the buffer tight, high enough that the ~2.4 ms copy amortises.
@@ -168,7 +115,7 @@ class Engine:
         return {self.fwd_kw: 1} if self.fwd_kw else {}
 
     def _finished(self, r: Request) -> bool:
-        # tokens[0] is the free admission token (see module docstring) -- decode_count
+        # tokens[0] is the free admission token (see docs) -- decode_count
         # excludes it so max_new_tokens compares like with like against static_batch.py.
         decode_count = len(r.tokens) - 1
         if decode_count >= r.max_new_tokens:
@@ -210,18 +157,9 @@ class Engine:
             self.rows = []
 
     def _compact(self) -> None:
-        """Trim dead left-padding off the FRONT of the buffer.
-
-        Every row is right-aligned: a row of true length L occupies [cur_L - L, cur_L).
-        So the first cur_L - max(true_len) positions are padding for EVERY active row at
-        once, and slicing them off cannot touch valid data. next_pos already holds each
-        row's true length, so the trim point costs nothing to find.
-
-        Without this the buffer grows by one per decode step and only resets when the
-        batch empties -- which under sustained load never happens. A server would drift
-        its own ITL upward for as long as it stayed busy, making every measurement a
-        function of run length.
-        """
+        """Trim dead left-padding off the buffer front; every row is right-aligned so
+        the first cur_L - max(true_len) positions are padding for all rows at once.
+        Needed because unbounded buffer growth would drift ITL upward under load."""
         if self.cache is None or not self.rows:
             return
         cur_L = get_kv(self.cache, 0)[0].shape[2]
@@ -242,15 +180,8 @@ class Engine:
         self.trimmed += waste
 
     # ---- phase 2: admit -------------------------------------------------------------
-    # KNOWN LIMITATION, deliberately measured rather than fixed here:
-    # the left-padded buffer grows by one every decode step and only resets when the
-    # batch empties completely, which with a full queue never happens. Over a 64-request
-    # run it climbs from 412 to roughly 1,020, and EVERY row attends over the whole
-    # buffer -- including a row admitted at step 600, whose real content is 412 tokens
-    # sitting behind 600 tokens of zero padding it still pays to read. Expect ITL to
-    # drift upward across the run. For a long-lived server this is unbounded and would
-    # need periodic compaction. A paged cache removes the problem entirely by never
-    # requiring rows to share a buffer length; that is step 4.
+    # Left-padded buffer grows unboundedly without compaction (see _compact); a paged
+    # cache removes this by never requiring rows to share a buffer length -- see docs.
     def _admit(self) -> None:
         free = self.max_batch - len(self.rows)
         if free <= 0 or not self.pending:
@@ -260,10 +191,8 @@ class Engine:
 
         lens = {int(r.prompt_ids.shape[0]) for r in newcomers}
         if len(lens) != 1:
-            # Design assumes uniform prompts (module docstring) so the admission batch
-            # itself needs no internal padding. Fail loudly rather than silently
-            # mis-padding -- see the file's uncertainty list for why this is an assert,
-            # not a feature.
+            # Design assumes uniform prompts, so an admission batch needs no internal
+            # padding. Fail loudly rather than silently mis-pad -- see docs.
             raise RuntimeError(f"admission batch has ragged prompt lengths {lens}; "
                                 f"this design assumes uniform --prompt-tokens prompts")
         new_L = lens.pop()
@@ -308,9 +237,8 @@ class Engine:
             cur_L = get_kv(self.cache, 0)[0].shape[2]
             padn = cur_L - new_L
             if padn < 0:
-                # Cannot happen with uniform prompts: cur_L only grows (by decode steps)
-                # from an initial value == new_L, so it is always >= new_L by the time a
-                # second admission occurs. Fail loudly if that invariant is ever broken.
+                # Cannot happen with uniform prompts: cur_L only grows from new_L, so it
+                # is always >= new_L by a second admission. Fail loudly if ever broken.
                 raise RuntimeError(f"newcomer prefill length {new_L} exceeds current "
                                     f"buffer length {cur_L}; buffer/admission invariant "
                                     f"violated")
@@ -370,11 +298,8 @@ class Engine:
 
     @torch.inference_mode()
     def step(self) -> None:
-        # inference_mode is NOT optional. Without it every forward builds an autograd
-        # graph and retains activations, and the engine OOMs at 21.7 GiB on a workload
-        # that should sit near 16. Every other module in engine/ has it; this one was
-        # written without it and a fake-torch harness cannot detect the difference,
-        # because a fake torch has no autograd to leak.
+        # inference_mode is NOT optional: without it, autograd retains activations and
+        # the engine OOMs (measured 21.7 GiB vs an expected ~16 GiB) -- see docs.
         self.step_n += 1
         self._evict()
         self._compact()
@@ -424,13 +349,9 @@ def compute_metrics(engine: Engine, completed: list[Request]) -> dict:
 
 
 def static_equivalent(lengths_cycled: list[int], max_batch: int) -> dict:
-    """Item H -- pure arithmetic, no GPU. What static batching (step 2's design) would
-    have cost for this SAME per-request length list: process requests in consecutive
-    groups of max_batch, each group costing max(group lengths) decode steps (its own
-    one-time prefill produces a free token per row too, uncounted here -- mirrors
-    static_batch.py's compute_metrics, where tokens_produced only counts the decode
-    loop). Group size is the count of requests actually in that slice, not padded out
-    to max_batch -- matters only if --n-requests is not a multiple of --max-batch."""
+    """Item H -- pure arithmetic, no GPU. What static batching would have cost for this
+    SAME per-request length list: groups of max_batch, each costing max(group lengths)
+    decode steps. See docs for the prefill-token and group-size conventions."""
     total_steps = 0
     slot_steps = 0
     useful_tokens = 0
@@ -439,10 +360,8 @@ def static_equivalent(lengths_cycled: list[int], max_batch: int) -> dict:
         steps = max(group)
         total_steps += steps
         slot_steps += len(group) * steps
-        # +1 per request: prefill emits a token before the decode loop starts, and the
-        # requester receives it. The Engine counts it in len(r.tokens), so static must
-        # count it too or the A/B compares two different conventions. Worth 5.6% at the
-        # smoke test's 18-token average and 1.3% at the real workload's 76.
+        # +1 per request: the free prefill token must be counted here too, or this
+        # compares two different conventions against the Engine. See docs for the size.
         useful_tokens += sum(group) + len(group)
     utilization = useful_tokens / slot_steps if slot_steps else float("nan")
     return {"total_steps": total_steps, "slot_steps": slot_steps,
@@ -480,20 +399,13 @@ def write_jsonl(out, rec: ReqRecord) -> None:
 
 def run_warmup(model, fwd_kw: str | None, max_batch: int, template_row: "torch.Tensor",
                eos_ids: set[int], device) -> None:
-    """One short (8-decode-token) run at max_batch shape, discarded before any measured
-    run. MEASURED 2026-08-21 in engine/manual.py: cuBLAS picks kernels per problem
-    SHAPE, so warming at the wrong (batch, seq) shape warms nothing. This warms the
-    INITIAL max_batch-sized admission and the max_batch-sized decode shape -- it does
-    NOT separately warm the smaller incremental admission shapes (1..max_batch-1
-    newcomers) that occur later in a real run once eviction starts freeing single
-    slots; see this file's uncertainty list."""
+    """One short (8-decode-token) run at max_batch shape, discarded before measuring.
+    cuBLAS picks kernels per problem SHAPE (measured 2026-08-21), so this warms only
+    the max_batch admission/decode shapes, not every incremental admission size."""
     print(f"warming up (discarded)... shapes 1..{max_batch}", end=" ", flush=True)
     t0 = time.perf_counter()
-    # Warm EVERY admission batch size, not just max_batch. Once eviction starts freeing
-    # slots one or two at a time, admissions happen at n_new = 1..max_batch-1, and each
-    # of those is a distinct GEMM shape cuBLAS has never selected a kernel for. Incident
-    # 15 was exactly this: a 36% latency outlier that survived a warmup done at the
-    # wrong shape. Costs ~max_batch extra prefills once; buys a clean prefill_time.
+    # Warm EVERY admission batch size, not just max_batch -- eviction later frees slots
+    # 1-2 at a time, and each n_new is a distinct GEMM shape cuBLAS hasn't seen. See docs.
     for n_new in range(1, max_batch + 1):
         warm_engine = Engine(model, fwd_kw, n_new, device, eos_ids, ignore_eos=True)
         for i in range(n_new):
@@ -545,10 +457,8 @@ def main() -> int:
     fwd_kw = pick_logits_kwarg(model)
     print(f"logits kwarg: {fwd_kw or 'NOT FOUND -- logits explosion risk, see kvprobe.py'}")
 
-    # Uniform prompts, no padding -- deliberate, see the module docstring. Always
-    # no-think, same reasoning as static_batch.py: what this file measures (scheduler
-    # bookkeeping, not generation content) does not depend on it, so there is no CLI
-    # flag for it here.
+    # Uniform prompts, no padding, always no-think -- this file measures scheduler
+    # bookkeeping, not generation content, so there's no CLI flag for it. See docs.
     body = make_prompt(args.prompt_tokens)
     input_ids = tok.apply_chat_template(
         [{"role": "user", "content": body}],

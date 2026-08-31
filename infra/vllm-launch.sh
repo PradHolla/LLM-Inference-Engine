@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Launch vLLM on the box with a given argument set, wait for health, and print the
-# configuration the server actually resolved. Runs ON the box.
-#
-# Every Phase 5 comparison is a matched pair, and Phase 3's trap was that two identical
-# launches produced KV budgets 28% apart. So the KV size, the resolved speculative
-# config, and the rejection sampling method are captured from THIS run's own log, never
-# assumed. `rejection_sample_method` matters because 'synthetic' fabricates acceptance
-# and would report beautiful fictional numbers with no error.
-#
+# Launch vLLM on the box with a given argument set, wait for health, and print
+# the configuration the server actually resolved (KV size, speculative config,
+# rejection sampling method -- see NOTES/code-notes.md for why). Runs ON the box.
 #   ./vllm-launch.sh <label> [vllm args...]
 set -uo pipefail
 LABEL="${1:?usage: vllm-launch.sh <label> [args...]}"; shift

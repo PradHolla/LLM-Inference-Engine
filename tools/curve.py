@@ -5,15 +5,8 @@
 # ///
 """
 curve.py -- collapse bench.py sweep records into latency-vs-throughput curve points.
-
-One row per load point: achieved throughput against TTFT and ITL percentiles. This is
-what the Phase 3 chart is built from, and it recomputes from the raw per-request JSONL
-rather than trusting bench.py's printed summary -- the two agree, which is the point of
-keeping it separate.
-
-Throughput is measured over the OBSERVED span (first send to last completion), never the
-nominal window. Dividing by the nominal window overstates throughput by 50% at saturation;
-that was incident 10.
+Recomputes from raw per-request JSONL rather than trusting bench.py's summary; throughput
+uses the observed span, not the nominal window (incident 10). See NOTES/code-notes.md.
 
   uv run tools/curve.py > curve.json
 """

@@ -1,23 +1,9 @@
 """
 manual.py -- Phase 2 step 1: replace `.generate()` with a decode loop we control.
-
-Offline only -- fixed prompts, no server, no batching (batch is always 1 here; that
-is Phase 2 step 2's job). The point of this file is narrower: prove the manual
-prefill+decode loop produces token-for-token IDENTICAL output to HF's `.generate()`
-under greedy decoding, and instrument it well enough to trust the numbers once later
-steps start changing the loop (batching, paging) in ways `.generate()` cannot do at
-all.
-
-Patterns below are copied from tools/kvprobe.py and baseline/server.py, both already
-VERIFIED against torch 2.13.0 / transformers 5.15.1 on the GPU box. Not re-derived:
-  - past_key_values=None on the first forward, reuse out.past_key_values after
-  - logits_to_keep (or num_logits_to_keep) detected via inspect, not assumed
-  - explicit cache_position, advanced by exactly the number of new positions
-  - apply_chat_template returns a BatchEncoding in transformers 5 -- unwrap ["input_ids"]
-  - dtype=torch.bfloat16, device_map="cuda:0"
+Offline, batch=1; proves token-for-token IDENTICAL output under greedy decoding.
+Reuses patterns verified in tools/kvprobe.py / baseline/server.py -- see docs.
 
   /opt/llm/.venv/bin/python -m engine.manual --impl compare --reps 3
-  /opt/llm/.venv/bin/python -m engine.manual --impl manual --prompt-tokens 512 --max-new-tokens 128
 """
 from __future__ import annotations
 
@@ -43,10 +29,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 GIB = 1 << 30
 
-# Same filler text and ~4 chars/token heuristic as tools/bench.py, duplicated rather
-# than imported so this file stays a self-contained two-file deliverable. The exact
-# count does not matter, only that it lands near --prompt-tokens so results are
-# comparable to Phase 1's 512-token measurements.
+# Same filler text/heuristic as tools/bench.py, duplicated (not imported) so this
+# file stays self-contained; count only needs to land near --prompt-tokens. See docs.
 FILLER = ("The quick brown fox jumps over the lazy dog while the system under test "
           "processes tokens one at a time in strict sequence. ")
 
@@ -64,9 +48,8 @@ def pick_logits_kwarg(model) -> str | None:
 
 def warn_nongreedy_config(model) -> list[str]:
     """Report generation_config fields that would make .generate() diverge from a bare
-    argmax. The ones we can neutralize are passed explicitly in generate_hf; this
-    catches anything left so a compare-mode mismatch is diagnosable instead of a
-    mystery. Returns the offending field names."""
+    argmax; anything neutralizable is passed explicitly in generate_hf. Returns the
+    offending field names, so a compare-mode mismatch is diagnosable, not a mystery."""
     gc = getattr(model, "generation_config", None)
     if gc is None:
         return []
@@ -85,11 +68,9 @@ def warn_nongreedy_config(model) -> list[str]:
 
 
 def collect_eos_ids(tok, model) -> set[int]:
-    """Union of tokenizer.eos_token_id and generation_config.eos_token_id, normalized
-    to a set of ints. The manual loop's stop check and generate_hf's eos_token_id=
-    kwarg must agree exactly on this set -- if they didn't, a real difference in
-    stopping behaviour would look exactly like a bug in the manual loop instead of
-    what it is."""
+    """Union of tokenizer.eos_token_id and generation_config.eos_token_id, normalized to
+    a set of ints. The manual loop and generate_hf's eos_token_id= must agree exactly on
+    this set, or a real stopping-behaviour difference would look like a manual-loop bug."""
     ids: set[int] = set()
     for src in (getattr(tok, "eos_token_id", None),
                 getattr(getattr(model, "generation_config", None), "eos_token_id", None)):
@@ -129,18 +110,9 @@ def pct(xs: list[float], p: float) -> float:
 # --------------------------------------------------------------------- the loop
 def generate_manual(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
                      eos_ids: set[int]) -> tuple[list[int], dict[str, Any]]:
-    """Manual prefill + decode loop. GREEDY only -- no sampling, no temperature,
-    no top-p, because determinism against generate_hf's output is the entire point
-    of this step. `tok` is accepted for signature symmetry with generate_hf (and in
-    case a future step needs it for logging) but is unused here: eos_ids is already
-    resolved by the caller.
-
-    Returns (generated_ids, timings) where generated_ids excludes the prompt, and
-    timings = {"prefill_s": float, "decode_s": [float, ...]}. decode_s has one entry
-    per token produced by the DECODE loop -- it does not include the first token,
-    which comes out of prefill and whose cost is prefill_s (== TTFT). That split is
-    what item H's "not over total wall time" throughput rule depends on.
-    """
+    """Manual prefill + decode loop, GREEDY only (determinism against generate_hf is
+    the point). Returns (generated_ids, timings); decode_s excludes the prefill-produced
+    first token (cost = prefill_s / TTFT). See docs for the full return-shape rationale."""
     device = input_ids.device
     prompt_len = input_ids.shape[1]
     fwd_kw = pick_logits_kwarg(model)
@@ -166,10 +138,8 @@ def generate_manual(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
         generated.append(tok_id)
         pos = prompt_len
 
-        # DECODE -- one token in, one token out, cache carried forward. max_new_tokens
-        # counts total generated tokens including the one prefill already produced,
-        # matching HF's own convention (so generate_hf and generate_manual are
-        # comparable at identical --max-new-tokens).
+        # DECODE loop. max_new_tokens counts total tokens including prefill's, matching
+        # HF's convention so generate_hf/generate_manual compare at identical values.
         while tok_id not in eos_ids and len(generated) < max_new_tokens:
             torch.cuda.synchronize()
             ts0 = time.perf_counter()
@@ -192,18 +162,9 @@ def generate_manual(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
 
 def generate_hf(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
                 eos_ids: set[int], pad_token_id: int) -> tuple[list[int], dict[str, Any]]:
-    """The control. Same prompt, same max_new_tokens, model.generate() with
-    do_sample=False, num_beams=1. eos_token_id is passed explicitly from the same
-    eos_ids set the manual loop checks against, so both implementations stop on
-    exactly the same condition -- letting HF fall back to its own default eos set
-    would risk a length mismatch that looks like a manual-loop bug but isn't one.
-
-    Deliberately NOT instrumented with a token streamer for per-token TTFT/ITL --
-    .generate() is a black box without one, and building that (thread + eos-agnostic
-    TextIteratorStreamer bridging, `.cpu()` sync semantics) is real, untestable-here
-    engineering this step did not ask for. Reported timing is total wall time only,
-    for a single naive tok/s number; see the note on --impl hf/compare output.
-    """
+    """The control: model.generate() with do_sample=False, num_beams=1, eos_token_id
+    passed from the same eos_ids the manual loop checks (else a length mismatch would
+    look like a manual-loop bug). Deliberately NOT streamed -- see docs for why."""
     attention_mask = torch.ones_like(input_ids)
     with torch.inference_mode():
         torch.cuda.synchronize()
@@ -216,12 +177,8 @@ def generate_hf(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
             num_beams=1,
             eos_token_id=sorted(eos_ids) if eos_ids else None,
             pad_token_id=pad_token_id,
-            # Neutralize every logits processor generation_config might enable.
-            # do_sample=False silences temperature/top_p/top_k, but repetition_penalty
-            # and no_repeat_ngram_size are applied to GREEDY decoding too. Qwen configs
-            # have shipped repetition_penalty != 1.0 before. If one is active here and
-            # the manual loop's bare argmax does not replicate it, compare mode fails on
-            # a difference that is not a bug in our loop -- the worst kind of red herring.
+            # Neutralize every logits processor generation_config might enable --
+            # repetition_penalty/no_repeat_ngram_size apply to greedy too. See docs.
             repetition_penalty=1.0,
             no_repeat_ngram_size=0,
             min_new_tokens=0,
@@ -236,17 +193,13 @@ def generate_hf(model, tok, input_ids: torch.Tensor, max_new_tokens: int,
 
 def run_warmup(model, tok, device, eos_ids: set[int], pad_token_id: int, impls: set[str],
                input_ids: torch.Tensor | None = None) -> None:
-    """One short (~8 token) generation per implementation, discarded before any
-    measured run. Phase 1 measured a 47x first-call outlier -- 9.09s vs 195ms
-    steady state -- from CUDA kernel autotuning and allocator warmup; including
-    that in a "decode latency" sample would corrupt every percentile downstream."""
+    """One short (~8 token) generation per implementation, discarded before measuring.
+    Phase 1 measured a 47x first-call outlier (9.09s vs 195ms steady state) from CUDA
+    kernel autotuning; including it in a latency sample would corrupt every percentile."""
     print("warming up (discarded)...", end=" ", flush=True)
     t0 = time.perf_counter()
-    # Warm up on the SHAPE we are about to measure, not a short throwaway prompt.
-    # MEASURED 2026-08-21: warming with a 6-token prompt then measuring a 412-token
-    # prefill left rep 0 at 202.5 ms against 148.4 ms for reps 1-2, a 36% outlier that
-    # survived warmup entirely. cuBLAS picks kernels per problem shape, so a warmup at
-    # the wrong shape warms nothing that matters.
+    # Warm up on the SHAPE we're about to measure -- cuBLAS picks kernels per problem
+    # shape. MEASURED 2026-08-21: wrong-shape warmup left a 36% outlier in rep 0. See docs.
     if input_ids is not None:
         ids = input_ids
     else:
@@ -369,10 +322,8 @@ def main() -> int:
     p.add_argument("--out", default="results/phase2-step1.jsonl")
     p.add_argument("--warmup", dest="warmup", action="store_true", default=True)
     p.add_argument("--no-warmup", dest="warmup", action="store_false")
-    # Default ON, unlike tools/bench.py's --no-think (which defaults thinking ON):
-    # step 1 wants bounded, comparable output lengths against a small
-    # --max-new-tokens, not Qwen3 spending the whole budget on reasoning tokens.
-    # --think overrides the default for anyone who wants it back.
+    # Default ON, unlike tools/bench.py's --no-think: step 1 wants bounded, comparable
+    # output lengths, not Qwen3 spending budget on reasoning tokens. See docs.
     p.add_argument("--no-think", dest="no_think", action="store_true", default=True)
     p.add_argument("--think", dest="no_think", action="store_false")
     args = p.parse_args()
@@ -428,10 +379,8 @@ def main() -> int:
 
     with out_path.open("a") as out:
         if args.impl == "compare":
-            # Correctness gate first, at rep 0 only, before spending more GPU time
-            # (this box costs $1.21/hr) on a loop already proven to be producing the
-            # wrong tokens. Rep 0's output IS reused as the first measured rep below,
-            # so this costs nothing extra when the check passes.
+            # Correctness gate first, at rep 0 only, before spending more GPU time on a
+            # loop already proven wrong. Rep 0 is reused as the first measured rep below.
             print(f"\n\033[1mcorrectness check\033[0m ({prompt_len} prompt, "
                   f"{args.max_new_tokens} max new, greedy)")
             r0m = manual_rep(model, tok, input_ids, args.max_new_tokens, eos_ids, 0)

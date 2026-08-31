@@ -1,19 +1,9 @@
 """
-mask_probe.py -- decompose the padding tax measured in step 3a.
+mask_probe.py -- decompose the padding tax measured in step 3a (ITL rising 27.4us
+per buffer token, 9.4x the KV-read model). See docs for the two candidate causes
+(KV reads over padding vs SDPA's masked path) and what each implies for step 4.
 
-Step 3a found ITL rising 27.4 microseconds per buffer token, 9.4x the KV-read model.
-Two candidate causes point in opposite directions for step 4:
-
-  KV reads over padded regions  -> a paged allocator fixes it
-  SDPA's masked path is slower  -> a paged allocator does NOT fix it, because ragged
-                                   rows need a mask however the KV is stored
-
-This holds batch, buffer length and cache contents FIXED and varies ONLY the mask, so
-whatever difference appears is attributable to the mask and nothing else.
-
-  A  attention_mask=None                       implicit causal, SDPA fast path
-  B  attention_mask=ones(B, L)                 explicit mask that masks nothing
-  C  attention_mask with real zeros            explicit mask that actually masks
+  A attention_mask=None   B attention_mask=ones(B,L)   C real zeros
 """
 from __future__ import annotations
 import os
@@ -26,12 +16,9 @@ from engine.manual import pick_logits_kwarg, make_prompt
 
 
 def timed_decode(model, cache, nxt, pos, mask, fwd_kw, steps: int) -> list[float]:
-    """N decode steps at a fixed shape. Returns per-step seconds.
-
-    The cache is NOT reused across conditions -- each condition gets its own freshly
-    prefilled copy, because DynamicCache grows in place and a shared one would make the
-    later conditions run at longer buffers than the earlier ones.
-    """
+    """N decode steps at a fixed shape; returns per-step seconds. Cache is NOT reused
+    across conditions -- DynamicCache grows in place, so a shared cache would leave later
+    conditions running at longer buffers than earlier ones."""
     kw = {fwd_kw: 1} if fwd_kw else {}
     out_t = []
     B = nxt.shape[0]

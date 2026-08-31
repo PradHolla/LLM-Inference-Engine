@@ -1,24 +1,7 @@
 """
-cache_probe.py -- prove the three mechanics continuous batching needs, before building it.
-
-Continuous batching requires rows at DIFFERENT sequence lengths in one batch. HF's cache
-API assumes one shared cache_position for the whole batch, which is precisely why vLLM
-wrote its own attention kernels. The way through without custom kernels:
-
-  left-pad every row into a common buffer, and DECOUPLE buffer index from RoPE position.
-
-A row's K/V are rotated by RoPE at write time, so where it physically sits in the buffer
-does not affect correctness -- only the attention mask and the position_ids do. If that
-holds, admitting and evicting a sequence become plain tensor ops on the batch dimension.
-
-Three things must be true. Each is checked against a batch-1 reference run, because the
-only acceptable evidence is token-for-token identical output:
-
-  1. per-row position_ids ([B,1] with different values per row) are honoured
-  2. left-padding plus a 2-D attention mask gives the same tokens as unpadded batch-1
-  3. cache rows can be DROPPED and APPENDED between steps and decoding continues correctly
-
-If any fails, the engine design changes before a line of it is written.
+cache_probe.py -- prove the three mechanics continuous batching needs, before
+building it: per-row position_ids, left-padded batching, and evict/admit via
+index_select. Checked token-for-token against batch-1 references; see docs.
 """
 from __future__ import annotations
 import os
@@ -71,15 +54,9 @@ def reference(model, ids, fwd_kw, steps=STEPS):
 
 
 def padded_batch_run(model, seqs, fwd_kw, device, steps=STEPS, drop_at=None, admit=None):
-    """Left-pad `seqs` (list of 1-D id tensors, ragged lengths) into one batch and decode.
-
-    Buffer index and RoPE position are deliberately decoupled: a left-padded row's real
-    tokens sit at buffer indices [pad_n, L) but carry position_ids 0..n-1. The mask hides
-    the pad region, so the model never attends to it and never sees the offset.
-
-    drop_at: (step, row) -- evict a row mid-decode by slicing the batch dim of the cache.
-    admit:   (step, ids) -- prefill a new sequence separately, left-pad it, append it.
-    """
+    """Left-pad `seqs` (ragged-length 1-D id tensors) into one batch and decode. Buffer
+    index and RoPE position are deliberately decoupled -- the mask hides padding so the
+    model never sees the offset. drop_at=(step,row) evicts; admit=(step,ids) admits."""
     kw = {fwd_kw: 1} if fwd_kw else {}
     lens = [s.shape[0] for s in seqs]
     L = max(lens)
