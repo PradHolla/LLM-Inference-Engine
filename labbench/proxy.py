@@ -121,15 +121,29 @@ class StreamAccounting:
         if det.get("cached_tokens") is not None:
             self.tr.cached_tokens = int(det["cached_tokens"])
 
-    def finish(self, now: float) -> Trace:
+    def _derive(self) -> None:
         tr = self.tr
-        tr.e2e_ms = (now - self.t0) * 1e3
         tr.inter_event_p50_ms = pct(self.gaps, 0.50)
         tr.inter_event_p95_ms = pct(self.gaps, 0.95)
         if tr.completion_tokens and tr.n_content_events:
             tr.tokens_per_event = tr.completion_tokens / tr.n_content_events
-        if tr.completion_tokens and tr.completion_tokens > 1 and tr.ttft_ms is not None:
+        if (tr.completion_tokens and tr.completion_tokens > 1
+                and tr.ttft_ms is not None and tr.e2e_ms is not None):
             tr.itl_ms_derived = (tr.e2e_ms - tr.ttft_ms) / (tr.completion_tokens - 1)
+
+    def partial(self, now: float) -> dict:
+        """Live snapshot of a request still streaming, so TTFT is server-measured from
+        the first token rather than only after the stream ends."""
+        self.tr.e2e_ms = (now - self.t0) * 1e3
+        self._derive()
+        d = asdict(self.tr)
+        d["status"] = "streaming"
+        return d
+
+    def finish(self, now: float) -> Trace:
+        tr = self.tr
+        tr.e2e_ms = (now - self.t0) * 1e3
+        self._derive()
         if tr.ttft_ms is None and tr.status == "ok":
             tr.status = "empty"
         return tr
@@ -163,6 +177,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 RECENT: list[Trace] = []
+INFLIGHT: dict[str, StreamAccounting] = {}
 
 
 @app.post("/v1/chat/completions")
@@ -190,6 +205,7 @@ async def _relay(body: bytes, tr: Trace):
     """Yield upstream bytes unchanged; account for them on the side."""
     t0 = time.perf_counter()
     acc = StreamAccounting(tr, t0)
+    INFLIGHT[tr.request_id] = acc
     try:
         async with CLIENT.stream("POST", f"{UPSTREAM}/v1/chat/completions", content=body,
                                  headers={"content-type": "application/json"}) as r:
@@ -204,6 +220,7 @@ async def _relay(body: bytes, tr: Trace):
     except Exception as e:
         tr.status, tr.error = "exception", f"{type(e).__name__}: {e}"
     finally:
+        INFLIGHT.pop(tr.request_id, None)
         _record(acc.finish(time.perf_counter()))
 
 
@@ -215,7 +232,10 @@ def _record(tr: Trace) -> None:
 
 @app.get("/labbench/traces")
 async def traces(n: int = 20):
-    return {"upstream": UPSTREAM, "traces": [asdict(t) for t in RECENT[-n:]]}
+    """Finished traces, then anything still streaming. Newest last either way."""
+    now = time.perf_counter()
+    live = [a.partial(now) for a in list(INFLIGHT.values())]
+    return {"upstream": UPSTREAM, "traces": [asdict(t) for t in RECENT[-n:]] + live}
 
 
 @app.get("/health")
@@ -258,6 +278,19 @@ def selftest() -> int:
     if out.completion_tokens == out.n_content_events:
         fails.append("  FAIL tokens equal event count -- chunk counting has crept back")
     chk("itl_ms_derived", round(out.itl_ms_derived, 3), round((190 - 100) / 6, 3))
+
+    tr4 = Trace(request_id="t4", t_wall=0.0, upstream="test")
+    acc4 = StreamAccounting(tr4, 0.0)
+    acc4.feed(ev("mid str"), 0.100)
+    acc4.feed(ev("eam here"), 0.140)
+    live = acc4.partial(0.150)
+    chk("partial marked streaming", live["status"], "streaming")
+    chk("partial has server ttft", round(live["ttft_ms"], 1), 100.0)
+    chk("partial content events", live["n_content_events"], 2)
+    # no usage chunk yet, so these stay unknown rather than being guessed from event count
+    chk("partial tokens unknown", live["completion_tokens"], None)
+    chk("partial tokens_per_event unknown", live["tokens_per_event"], None)
+    chk("partial does not break finish", round(acc4.finish(0.150).e2e_ms, 1), 150.0)
 
     tr2 = Trace(request_id="t2", t_wall=0.0, upstream="test")
     acc2 = StreamAccounting(tr2, 0.0)

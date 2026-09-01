@@ -37,7 +37,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 ROOFLINE_PATTERNS = {
     "kv_gib": r"= KV cache room\s+([\d.]+) GiB",
     "kv_tokens": r"max tokens in flight\s+([\d,]+)",
-    "concurrent": r"concurrent requests at",
+    "concurrent": r"([\d.]+)\s+concurrent requests at",
     "tok_s": r"realistic tok/s\s+([\d.]+)",
     "floor_ms_per_token": r"floor\s+ms/token\s+([\d.]+)",
 }
