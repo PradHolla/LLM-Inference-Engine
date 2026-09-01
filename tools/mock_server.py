@@ -27,20 +27,30 @@ async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens:
     # Prefill: compute-bound, proportional to prompt length.
     await asyncio.sleep(prompt_tokens * ARGS.prefill_ms_per_token / 1000)
 
+    per, emitted = max(1, ARGS.tokens_per_chunk), 0
     async with SEM:                      # capacity limit -> queueing -> the knee
         active += 1
         try:
-            for i in range(max_tokens):
-                # Decode slows as the batch fills: more KV to read every step.
+            while emitted < max_tokens:
+                # One sleep per STEP, not per token: a speculative step emits several
+                # tokens for the price of one, which is what --tokens-per-chunk models.
                 itl = ARGS.itl_ms * (1 + (active - 1) / ARGS.batch) / 1000
                 await asyncio.sleep(itl)
-                writer.write(chunk({"choices": [{"delta": {"content": f"tok{i} "},
+                n = min(per, max_tokens - emitted)
+                text = "".join(f"tok{emitted + j} " for j in range(n))
+                writer.write(chunk({"choices": [{"delta": {"content": text},
                                                  "index": 0, "finish_reason": None}]}))
                 await writer.drain()
+                emitted += n
         finally:
             active -= 1
 
     writer.write(chunk({"choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}]}))
+    if ARGS.usage:
+        writer.write(chunk({"choices": [], "usage": {
+            "prompt_tokens": prompt_tokens, "completion_tokens": emitted,
+            "total_tokens": prompt_tokens + emitted,
+            "prompt_tokens_details": {"cached_tokens": ARGS.cached_tokens}}}))
     writer.write(b"%x\r\ndata: [DONE]\n\n\r\n" % len(b"data: [DONE]\n\n"))
     writer.write(b"0\r\n\r\n")
     await writer.drain()
@@ -84,6 +94,12 @@ async def main() -> None:
     ap.add_argument("--batch", type=int, default=8, help="requests that can decode at once")
     ap.add_argument("--itl-ms", type=float, default=25, help="inter-token latency at batch 1")
     ap.add_argument("--prefill-ms-per-token", type=float, default=0.25)
+    ap.add_argument("--tokens-per-chunk", type=int, default=1,
+                    help="tokens per SSE chunk; >1 simulates speculative decoding")
+    ap.add_argument("--usage", action="store_true",
+                    help="emit a final usage chunk, as stream_options.include_usage does")
+    ap.add_argument("--cached-tokens", type=int, default=0,
+                    help="prompt_tokens_details.cached_tokens reported in that chunk")
     ARGS = ap.parse_args()
     SEM = asyncio.Semaphore(ARGS.batch)
     server = await asyncio.start_server(handle, "127.0.0.1", ARGS.port)
