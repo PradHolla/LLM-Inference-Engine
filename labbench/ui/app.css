@@ -15,6 +15,15 @@
   --error: #f0605a;
   --accent: #5aa9ff;
   --accent-dim: #2b6fc2;
+  /* decorative hues -- identify a panel/series/role, never a normal/warning/error state.
+     All chosen to read clearly against the dark surfaces above; kept out of the
+     green/amber/red family so semantic state is never ambiguous with decoration. */
+  --hue-request: #5aa9ff;
+  --hue-engine: #2dd4bf;
+  --hue-gpu-mem: #a78bfa;
+  --hue-gpu-power: #8a93f5;
+  --hue-conversation: #f072b6;
+  --hue-config: #c4d94a;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --radius: 3px;
@@ -38,6 +47,10 @@ body {
   font-size: 13px;
   line-height: 1.4;
 }
+
+/* React mounts into #root; display:contents makes it transparent to body's grid
+   so connBanner/topbar/main/drawer lay out as if they were direct grid children. */
+#root { display: contents; }
 
 pre, code, table, .metric-value, .metric-row-value, .mono-inline {
   font-family: var(--font-mono);
@@ -272,7 +285,8 @@ h2 {
   color: var(--text-dim);
   margin-bottom: 4px;
 }
-.msg-user .msg-role { text-align: right; }
+.msg-user .msg-role { text-align: right; color: var(--hue-request); }
+.msg-assistant .msg-role { color: var(--hue-engine); }
 
 .msg-bubble {
   border-radius: var(--radius);
@@ -281,8 +295,8 @@ h2 {
   line-height: 1.55;
   overflow-x: auto;
 }
-.msg-user .msg-bubble { background: var(--bg-raised); border: 1px solid var(--border); }
-.msg-assistant .msg-bubble { background: transparent; border: 1px solid transparent; padding-left: 0; padding-right: 0; }
+.msg-user .msg-bubble { background: var(--bg-raised); border: 1px solid var(--border); border-left: 3px solid var(--hue-request); }
+.msg-assistant .msg-bubble { background: transparent; border: 1px solid transparent; border-left: 3px solid var(--hue-engine); padding-left: 9px; padding-right: 0; }
 .msg-error .msg-bubble { border-color: var(--error); color: var(--error); }
 
 .msg-bubble p { margin: 0 0 8px 0; }
@@ -466,10 +480,16 @@ select#quantSelect { font-family: var(--font-mono); }
 
 .panel {
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-panel);
   overflow: hidden;
 }
+#panel-request { border-left-color: var(--hue-request); }
+#panel-engine { border-left-color: var(--hue-engine); }
+#panel-gpu { border-left-color: var(--hue-gpu-mem); }
+#panel-conversation { border-left-color: var(--hue-conversation); }
+#panel-config { border-left-color: var(--hue-config); }
 .panel-head {
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
@@ -545,7 +565,9 @@ select#quantSelect { font-family: var(--font-mono); }
 .bar-fill.state-normal { background: var(--normal); }
 .bar-fill.state-warning { background: var(--warning); }
 .bar-fill.state-error { background: var(--error); }
-.bar-power { background: var(--warning); }
+.bar-engine { background: var(--hue-engine); }
+.bar-gpu-mem { background: var(--hue-gpu-mem); }
+.bar-power { background: var(--hue-gpu-power); }
 
 .bound-details { margin-top: 8px; font-size: 11px; }
 .bound-details summary { cursor: pointer; color: var(--text-dim); }
@@ -580,7 +602,7 @@ select#quantSelect { font-family: var(--font-mono); }
 .ttft-bar {
   flex: 1 1 auto;
   min-width: 3px;
-  background: var(--accent);
+  background: var(--hue-conversation);
   border-radius: 1px 1px 0 0;
 }
 .ttft-bar.na { background: var(--border-strong); }
