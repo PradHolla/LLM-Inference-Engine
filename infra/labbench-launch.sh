@@ -16,7 +16,8 @@ sudo systemd-run --unit=labbench --collect --working-directory=$REPO \
   --setenv=LABBENCH_UPSTREAM=http://localhost:8000 \
   --setenv=LABBENCH_TRACE=$REPO/results/labbench-traces.jsonl \
   --setenv=LABBENCH_SCRATCH=$REPO/results/labbench \
-  --setenv=PATH=$REPO/.venv/bin:/usr/local/bin:/usr/bin:/bin \
+  --setenv=LABBENCH_UV=/home/ubuntu/.local/bin/uv \
+  --setenv=PATH=$REPO/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin \
   $REPO/.venv/bin/python -m uvicorn labbench.server:app \
     --host 127.0.0.1 --port "$PORT" >/dev/null 2>&1
 

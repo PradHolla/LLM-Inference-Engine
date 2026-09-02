@@ -3688,3 +3688,75 @@ which is a Phase 6 question, not worth another box start now.
   UNDERSTATEMENT of what the technique can do.
 - k is not a memory dial. It is purely a compute-vs-acceptance trade, which simplifies the
   Phase 7 scheduling question: k can be varied per request without touching the cache.
+
+---
+
+## P6L  The lab bench, 2026-09-02, written before the box was driven
+
+Phase 6a's instrument: a single-conversation chat UI whose purpose is to make five phases
+of invisible work visible while a request is in flight. Protocol in
+`NOTES/phase6a-labbench-design.md`. These are pre-registered so the session is an
+experiment rather than poking at a panel.
+
+Configuration for all of the below unless a row says otherwise: **Qwen3-8B, vLLM 0.27.1,
+fp8 weights via Marlin, fp16 KV, `--max-model-len 16384`, no speculative decoding,
+A10G 24 GB (g5.2xlarge), prefix caching and chunked prefill on by default.**
+
+| # | Prediction | Value | Derivation |
+|---|---|---|---|
+| P6L-1 | Power draw is markedly higher during prefill than during batch-1 decode | prefill approaching TDP, decode well below | prefill is compute-bound; decode leaves the tensor cores 99.6% idle (Phase 5) |
+| P6L-2 | TTFT is flat across turns 1-15 with prefix caching on | flat within 1.5x | turn N's prompt is turn N-1's prompt plus new text |
+| P6L-3 | Tokens per chunk is exactly 1.0 without speculation | 1.0 | one SSE event is one engine step; incident 32 |
+| P6L-4 | Switching vLLM bf16 to fp8 moves the startup KV line | 33,424 -> 68,592 tokens | Phase 3 and Phase 5 measured budgets |
+| P6L-5 | Bombard N=8: baseline TTFT grows roughly linearly with queue position; vLLM stays roughly flat until capacity | -- | Phase 1 serialises at 0.332 req/s, vLLM batches at 5.70 |
+| P6L-6 | Thinking on adds roughly 1,500 tokens and ~30 s to a reasoning turn | -- | Phase 4 and 5 thinking-slice behaviour |
+| P6L-7 | A backend switch completes in 60-105 s | -- | `CLAUDE.md` section 4, measured previously |
+| P6L-8 | Model load dominates the switch; stop plus GPU release are under 10 s combined | -- | 16.4 GB off a warm page cache |
+| P6L-9 | Cold-open TTFT at 16,384 tokens of context, cache empty | **4.2 s**, range 3.5-5.5 | 16,384 x 0.3093 ms/token / 1.21, from `results/phase2-prefill-*.jsonl` |
+| P6L-10 | Warm turn-over-turn TTFT, thinking stripped from history, ~450 new tokens | **158 ms**, range 120-220 | 450 x 0.3093 + one decode step. Passes the 250 ms criterion |
+| P6L-11 | The proxy's own cost, measured on the box rather than against the mock | **+2 ms** of TTFT | measured locally after moving to a process-lifetime httpx client |
+
+**P6L-9 is the weakest and is labelled an estimate until measured.** Its prefill constant
+is bf16, fit over 1,611-6,407 tokens and extrapolated 2.6x beyond the longest measured
+point, then divided by a vLLM speedup measured at 412 tokens. Attention is quadratic, so
+the extrapolation is more likely low than high.
+
+**And the box has now sharpened the objection.** vLLM logs on startup that this GPU has no
+native fp8, so weight-only fp8 runs through Marlin, warning that it "may degrade
+performance for compute-heavy workloads". Prefill is compute-heavy. If P6L-9 misses high,
+the Marlin dequant path is the first suspect and it was named before the measurement, not
+after.
+
+### P6L actuals, part 1 -- 2026-09-02, from the box
+
+Configuration column stated per row; all rows are Qwen3-8B, vLLM 0.27.1, fp16 KV,
+`--max-model-len 16384`, no speculative decoding, A10G 24 GB, 512-token prompts, serial.
+
+| # | prediction | measured | verdict |
+|---|---|---|---|
+| P6L-11 | proxy overhead +2 ms TTFT | **+2 ms** (28 -> 30 ms, fp8) | **correct** |
+| P6L-4, fp8 half | 68,592 KV tokens | **67,568** then **74,880** on identical relaunches | prediction sits between two runs of the same command |
+| P6L-4, bf16 half | 33,424 KV tokens | **26,080** | 22% low, but Phase 3 itself measured 26,176 and 33,424 on consecutive starts -- inside the known band |
+
+**The gate passed on real hardware.** `bench.py` direct at the engine vs through the lab
+bench proxy: 12/12 both ways, 768 tokens both ways, ITL 18.9 ms both ways, decode 53.8 vs
+53.8 tok/s, TTFT 28 vs 30 ms.
+
+#### A matched pair that fell out of a UI bug
+
+A mis-sent quantization launched bf16 when fp8 was intended, which produced both
+configurations on the same box inside an hour:
+
+| weights | KV tokens | KV memory | ITL p50 | decode |
+|---|---|---|---|---|
+| bf16 | 26,080 | 3.58 GiB | 34.2 ms | 29.9 tok/s |
+| fp8 (Marlin) | 74,880 | 10.28 GiB | 18.9 ms | 53.8 tok/s |
+
+**fp8 buys 2.87x the KV cache and 1.80x the decode rate.** Two independent cross-checks
+land: bf16 ITL 34.2 ms against Phase 3's 34.0 ms, and fp8 decode 53.8 tok/s against Phase
+5's 53.4 tok/s. Both within 1%, months apart, which is the cheapest possible evidence that
+nothing has drifted on this box.
+
+Note the KV ratio is 2.87x rather than the 2.05x that halving the weight bytes alone
+implies, because the freed memory is all KV and the fixed overheads do not scale. The
+decode ratio 1.80x is close to the 1.82x the Phase 5 figures imply.

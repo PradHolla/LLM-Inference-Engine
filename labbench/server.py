@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -27,6 +28,10 @@ from .proxy import RECENT, UPSTREAM, app
 REPO = Path(__file__).resolve().parent.parent
 UI_DIR = Path(__file__).resolve().parent / "ui"
 SCRATCH = os.environ.get("LABBENCH_SCRATCH", "/tmp/labbench")
+# systemd units do not load a login shell, so uv is not on PATH (incident 38). Resolve it
+# rather than assume it: bench.py carries a PEP 723 header and cannot run under bare python.
+UV = (shutil.which("uv") or os.environ.get("LABBENCH_UV")
+      or "/home/ubuntu/.local/bin/uv")
 
 # Measured on this hardware, not assumed: the bf16 batch-1 prefill fit over
 # 1,611-6,407 tokens (results/phase2-prefill-*.jsonl), and vLLM's edge over engine/manual.py.
@@ -136,7 +141,7 @@ async def prediction(context: int = 4096):
     quant = SWITCHER.state.quant
     dtype = {"bf16": "bf16", "fp8": "fp8", "int4": "int4"}.get(quant, "bf16")
     rc, out = await asyncio.to_thread(
-        probes._run, ["uv", "run", "tools/roofline.py", "--model", "qwen3-8b",
+        probes._run, [UV, "run", "tools/roofline.py", "--model", "qwen3-8b",
                       "--gpu", "a10g", "--dtype", dtype, "--context", str(context)], 60.0)
     text = ANSI.sub("", out)
     if rc != 0:
@@ -161,12 +166,14 @@ async def bombard_start(body: dict = Body(...)):
     n = max(1, min(int(body.get("n", 8)), 128))
     pt = max(1, min(int(body.get("prompt_tokens", 512)), 32768))
     mt = max(1, min(int(body.get("max_tokens", 64)), 4096))
+    if not os.path.exists(UV):
+        return {"job": None, "error": f"uv not found at {UV}; set LABBENCH_UV"}
     os.makedirs(SCRATCH, exist_ok=True)
     job = uuid.uuid4().hex[:8]
     # Straight at the engine, not through this proxy: the numbers must stay comparable
     # with everything already in results/.
     sm = await asyncio.to_thread(probes.served_model, UPSTREAM)
-    argv = ["uv", "run", "tools/bench.py", "--url", UPSTREAM, "--serial", str(n),
+    argv = [UV, "run", "tools/bench.py", "--url", UPSTREAM, "--serial", str(n),
             "--warmup", "1", "--prompt-tokens", str(pt), "--max-tokens", str(mt),
             "--out", f"{SCRATCH}/bombard-{job}.jsonl"]
     # bench.py defaults to --model test, which vLLM 404s. Runbook section 2 and its
@@ -242,6 +249,7 @@ DECODE ROOFLINE
         round(16384 * PREFILL_MS_PER_TOKEN / VLLM_PREFILL_SPEEDUP + itl, 1), 4209.1)
 
     chk("ansi stripped", ANSI.sub("", "\x1b[1mbold\x1b[0m"), "bold")
+    chk("uv is an absolute path, not a bare name", UV.startswith("/"), True)
 
     _PREFIX_LAST.update(q=None, h=None)
     base = {"prefix_queries": 1000.0, "prefix_hits": 800.0, "prefix_hit_rate_lifetime": 0.8}

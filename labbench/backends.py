@@ -5,7 +5,9 @@ released memory before any launch. See NOTES/code-notes.md for why both matter.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
+import re
 import shlex
 import sys
 import time
@@ -138,6 +140,33 @@ async def active_unit() -> str | None:
     return None
 
 
+ARGS_RE = re.compile(r"non-default args: (\{.*?\})")
+SPEC_RE = re.compile(r"speculative_config=(?:SpeculativeConfig\([^)]*\)|None)")
+
+
+def config_from_journal(unit: str) -> dict:
+    """The config a RUNNING server actually resolved, from its own log. Needed because
+    the lab bench may not have launched it, and because a restart forgets."""
+    j = probes.journal(unit, 4000)
+    text = "\n".join(j.get("lines") or [])
+    cfg = probes.kv_from_log(text)
+    cfg.pop("max_concurrency", None)
+    m = ARGS_RE.findall(text)
+    if m:
+        try:
+            args = ast.literal_eval(m[-1])
+        except (ValueError, SyntaxError):
+            args = {}
+        cfg["model"] = args.get("model", "")
+        cfg["max_model_len"] = args.get("max_model_len")
+        cfg["quantization"] = args.get("quantization") or "bf16"
+    # Same pattern infra/vllm-launch.sh greps. `speculative_config=None` appears in the
+    # log of every non-spec run, so testing for the word "speculative" always matches.
+    m2 = SPEC_RE.findall(text)
+    cfg["spec"] = None if (not m2 or m2[-1].endswith("None")) else m2[-1]
+    return cfg
+
+
 class Switcher:
     """Owns the one-at-a-time invariant. The GPU is the source of truth, not the click."""
 
@@ -160,6 +189,11 @@ class Switcher:
             if act is None:
                 self.state.config = {}
                 self.state.launch_cmd = ""
+        if act and not self.state.config.get("model"):
+            cfg = await asyncio.to_thread(config_from_journal, UNITS[act])
+            if cfg.get("model"):
+                self.state.config = cfg
+                self.state.quant = cfg.get("quantization", self.state.quant)
 
     def request(self, backend: str, quant: str | None) -> dict:
         """Accept a switch. Rejects an unknown enum before any subprocess runs."""
@@ -184,7 +218,11 @@ class Switcher:
     async def _switch(self, backend: str, quant: str) -> None:
         st = self.state
         st.status, st.error, st.quant = "switching", None, quant
-        st.config, st.launch_cmd = {}, ""
+        st.launch_cmd = ""
+        # We chose these, so show them immediately. Only the KV figures need the log.
+        st.config = {"model": MODEL_W4A16 if quant == "int4" else MODEL,
+                     "quantization": quant, "max_model_len": 16384,
+                     "kv_tokens": None, "kv_gib": None, "spec": None}
         try:
             argv = build_argv(backend, quant)
         except ValueError as e:
@@ -227,8 +265,10 @@ class Switcher:
         j = await asyncio.to_thread(probes.journal, unit, 4000)
         text = "\n".join(j.get("lines") or [])
         cfg = probes.kv_from_log(text)
+        cfg.pop("max_concurrency", None)
         cfg["model"] = MODEL_W4A16 if quant == "int4" else MODEL
-        cfg["max_model_len"] = cfg.pop("max_concurrency", None)
+        cfg["quantization"] = quant
+        cfg["max_model_len"] = 16384
         cfg["spec"] = "eagle3" if "--speculative-config" in st.launch_cmd else None
         st.config = cfg
         st.active, st.status, st.stage, st.error = backend, "ready", None, None
@@ -296,6 +336,12 @@ def selftest() -> int:
         fails.append(f"  FAIL _wait polled only {ncalls} times")
     if dt > 2.0:
         fails.append(f"  FAIL _wait overran its timeout: {dt:.2f}s")
+
+    j = "INFO speculative_config=None, tokenizer=x\nnon-default args: {'model': 'Qwen/Qwen3-8B', 'max_model_len': 16384}"
+    chk("spec None is read as None", SPEC_RE.findall(j)[-1].endswith("None"), True)
+    j2 = "speculative_config=SpeculativeConfig(method='eagle3', num_spec=2), x=1"
+    chk("a real spec config is not None", SPEC_RE.findall(j2)[-1].endswith("None"), False)
+    chk("the word alone does not imply spec", bool(SPEC_RE.findall("speculative decoding is nice")), False)
 
     s = State(active="vllm", status="ready", quant="fp8",
               config={"kv_tokens": 68592, "kv_gib": 9.42})

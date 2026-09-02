@@ -224,6 +224,11 @@ function renderBackendControls(backend) {
   }
   group.disabled = switching;
   quantSelect.disabled = switching;
+  // Same rule as the radio: show what is running, not what was clicked.
+  if (!switching && App.lastState && App.lastState.config &&
+      App.lastState.config.quantization && document.activeElement !== quantSelect) {
+    quantSelect.value = App.lastState.config.quantization;
+  }
 
   if (switching) {
     statusEl.className = "switch-status";
@@ -673,6 +678,16 @@ function stopStreaming() {
 
 let activeTab = "prompt";
 
+function initQuantSelect() {
+  const sel = qs("quantSelect");
+  sel.addEventListener("change", async () => {
+    const st = App.lastState && App.lastState.backend;
+    if (!st || st.active !== "vllm" || st.status === "switching") return;
+    try { await apiPost("/labbench/backend", { backend: "vllm", quantization: sel.value }); }
+    catch (e) { /* the poll reports the outcome */ }
+  });
+}
+
 function initDrawer() {
   qs("drawerToggle").addEventListener("click", () => {
     qs("drawer").classList.toggle("open");
@@ -833,6 +848,7 @@ async function pollBombard() {
 function init() {
   scrollAnchorInit();
   initBackendControls();
+  initQuantSelect();
   initDrawer();
 
   qs("sendBtn").addEventListener("click", sendMessage);
