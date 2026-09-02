@@ -79,27 +79,32 @@ async def metrics_raw():
         return {"text": "", "error": f"{type(e).__name__}: {e}"}
 
 
+_TOK = None
+
+
+def _render(messages: list, enable_thinking: bool) -> tuple[str, int]:
+    """Apply the model's own chat template locally. All Qwen3-8B variants share one
+    tokenizer, so this matches whatever the engine renders."""
+    global _TOK
+    if _TOK is None:
+        from transformers import AutoTokenizer
+        _TOK = AutoTokenizer.from_pretrained(backends.MODEL)
+    # tokenize=False returns a string; transformers 5 returns BatchEncoding otherwise.
+    prompt = _TOK.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
+                                      enable_thinking=enable_thinking)
+    return prompt, len(_TOK(prompt, add_special_tokens=False)["input_ids"])
+
+
 @app.post("/labbench/render")
 async def render(body: dict = Body(...)):
-    """Ask the engine to apply its own chat template, rather than guessing at it here."""
-    payload = {"messages": body.get("messages") or [], "add_generation_prompt": True,
-               "return_token_strs": True}
-    if body.get("enable_thinking") is not None:
-        payload["chat_template_kwargs"] = {"enable_thinking": bool(body["enable_thinking"])}
+    """The exact string the engine will prefill, rendered here rather than asked for."""
+    msgs = body.get("messages") or []
+    think = body.get("enable_thinking")
     try:
-        async with httpx.AsyncClient(timeout=20.0) as c:
-            r = await c.post(UPSTREAM.rstrip("/") + "/tokenize", json=payload)
-        if r.status_code != 200:
-            return {"prompt": "", "n_tokens": 0,
-                    "error": f"tokenize returned {r.status_code}: {r.text[:200]}"}
-        d = r.json()
+        prompt, n = await asyncio.to_thread(_render, msgs, True if think is None else bool(think))
+        return {"prompt": prompt, "n_tokens": n, "error": None}
     except Exception as e:
         return {"prompt": "", "n_tokens": 0, "error": f"{type(e).__name__}: {e}"}
-    strs = d.get("token_strs")
-    prompt = "".join(strs) if strs else ""
-    err = None if prompt else "engine returned no token strings; count only"
-    return {"prompt": prompt, "n_tokens": d.get("count", len(d.get("tokens") or [])),
-            "error": err}
 
 
 @app.post("/labbench/backend")
@@ -213,6 +218,30 @@ DECODE ROOFLINE
         round(16384 * PREFILL_MS_PER_TOKEN / VLLM_PREFILL_SPEEDUP + itl, 1), 4209.1)
 
     chk("ansi stripped", ANSI.sub("", "\x1b[1mbold\x1b[0m"), "bold")
+
+    # render(): verify the call contract with a stub, since the real tokenizer is on the box.
+    global _TOK
+    seen = {}
+
+    class StubTok:
+        def apply_chat_template(self, msgs, **kw):
+            seen.update(kw)
+            return "<|im_start|>user\nhi<|im_end|>\n"
+
+        def __call__(self, text, **kw):
+            seen["encode_kw"] = kw
+            return {"input_ids": list(range(len(text.split())))}
+
+    _TOK = StubTok()
+    prompt, n = _render([{"role": "user", "content": "hi"}], False)
+    chk("render returns a string", isinstance(prompt, str), True)
+    chk("tokenize=False passed (else transformers 5 returns BatchEncoding)",
+        seen.get("tokenize"), False)
+    chk("add_generation_prompt passed", seen.get("add_generation_prompt"), True)
+    chk("enable_thinking forwarded", seen.get("enable_thinking"), False)
+    chk("count excludes special tokens", seen["encode_kw"].get("add_special_tokens"), False)
+    chk("n_tokens from encoding, not from the string", n, 2)
+    _TOK = None
     chk("empty roofline yields no values",
         [k for k, p in ROOFLINE_PATTERNS.items()
          if (m := re.search(p, "")) and m.groups()], [])
