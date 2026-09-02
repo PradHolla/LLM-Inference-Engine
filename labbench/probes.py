@@ -120,6 +120,20 @@ def kv_from_log(text: str) -> dict:
     return out
 
 
+def served_model(url: str) -> dict:
+    """The id the engine will accept in a request. vLLM validates `model` and 404s on a
+    wrong one; baseline and engine ignore it. Discovered, because the backend changes."""
+    try:
+        import httpx
+        r = httpx.get(url.rstrip("/") + "/v1/models", timeout=5.0)
+        if r.status_code != 200:
+            return {"id": None, "error": f"/v1/models returned {r.status_code}"}
+        data = (r.json() or {}).get("data") or []
+        return {"id": (data[0].get("id") if data else None), "error": None}
+    except Exception as e:
+        return {"id": None, "error": f"{type(e).__name__}: {e}"}
+
+
 def bind_metrics(sample: dict[str, float]) -> dict[str, list[str]]:
     """Map each role to the series names that matched it, so the UI can show the binding."""
     return {role: sorted(k for k in sample if pred(specmon._name(k)))
@@ -191,6 +205,11 @@ def selftest() -> int:
 
     empty = bind_metrics({})
     chk("empty scrape binds nothing", all(v == [] for v in empty.values()), True)
+
+    # served_model must fail soft: a wrong id is a 404 on every request (runbook section 2)
+    sm = served_model("http://127.0.0.1:1")
+    chk("served_model unreachable -> id None", sm["id"], None)
+    chk("served_model unreachable -> error set", bool(sm["error"]), True)
 
     print("\n".join(fails) if fails else "labbench/probes.py selftest: all checks passed")
     return 1 if fails else 0

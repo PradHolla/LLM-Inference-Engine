@@ -57,6 +57,9 @@ async def state():
     snap = SWITCHER.state.snapshot()
     snap["engine"] = await asyncio.to_thread(probes.engine_metrics, UPSTREAM)
     snap["gpu"] = await asyncio.to_thread(probes.gpu)
+    sm = await asyncio.to_thread(probes.served_model, UPSTREAM)
+    snap["config"]["served_model"] = sm["id"]
+    snap["config"]["served_model_error"] = sm["error"]
     return snap
 
 
@@ -146,9 +149,14 @@ async def bombard_start(body: dict = Body(...)):
     job = uuid.uuid4().hex[:8]
     # Straight at the engine, not through this proxy: the numbers must stay comparable
     # with everything already in results/.
+    sm = await asyncio.to_thread(probes.served_model, UPSTREAM)
     argv = ["uv", "run", "tools/bench.py", "--url", UPSTREAM, "--serial", str(n),
             "--warmup", "1", "--prompt-tokens", str(pt), "--max-tokens", str(mt),
             "--out", f"{SCRATCH}/bombard-{job}.jsonl"]
+    # bench.py defaults to --model test, which vLLM 404s. Runbook section 2 and its
+    # troubleshooting table both say so; discovering it beats remembering it.
+    if sm["id"]:
+        argv += ["--model", sm["id"]]
     BOMBARD.update(job=job, running=True, stdout=f"$ {' '.join(argv)}\n", returncode=None)
     asyncio.create_task(_run_bombard(argv))
     return {"job": job, "error": None}

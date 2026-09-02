@@ -589,7 +589,7 @@ async function sendMessage() {
       headers: { "content-type": "application/json" },
       signal: ctrl.signal,
       body: JSON.stringify({
-        model: "labbench",
+        model: (App.lastState && App.lastState.config && App.lastState.config.served_model) || "labbench",
         messages: userMessages,
         stream: true,
         stream_options: { include_usage: true },
