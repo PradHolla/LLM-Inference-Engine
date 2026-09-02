@@ -10,49 +10,71 @@
 <div id="connBanner" class="conn-banner" hidden>disconnected from labbench server -- retrying</div>
 
 <header id="topbar" class="topbar">
-  <div class="topbar-row">
-    <span id="connIndicator" class="conn-indicator conn-unknown">connecting</span>
+  <div class="topbar-row topbar-row-status">
+    <span id="connIndicator" class="conn-indicator conn-unknown"><span class="conn-dot"></span>connecting</span>
     <span id="configSummary" class="config-summary">unavailable</span>
   </div>
   <div class="topbar-row topbar-controls">
-    <fieldset id="backendGroup" class="backend-group">
+    <fieldset id="backendGroup" class="backend-group segctrl">
       <legend>backend</legend>
-      <label><input type="radio" name="backend" value="vllm" id="backend-vllm"> vllm</label>
-      <label><input type="radio" name="backend" value="baseline" id="backend-baseline"> baseline</label>
-      <label><input type="radio" name="backend" value="engine" id="backend-engine"> engine</label>
+      <label class="segctrl-option">
+        <input type="radio" name="backend" value="vllm" id="backend-vllm">
+        <span>vllm</span>
+      </label>
+      <label class="segctrl-option">
+        <input type="radio" name="backend" value="baseline" id="backend-baseline">
+        <span>baseline</span>
+      </label>
+      <label class="segctrl-option">
+        <input type="radio" name="backend" value="engine" id="backend-engine">
+        <span>engine</span>
+      </label>
     </fieldset>
-    <label class="quant-label">quant
+
+    <label class="field-inline quant-label">
+      <span class="field-inline-text">quant</span>
       <select id="quantSelect">
         <option value="bf16">bf16</option>
         <option value="fp8">fp8</option>
         <option value="int4">int4</option>
       </select>
     </label>
+
     <span id="switchStatus" class="switch-status"></span>
-    <label class="thinking-toggle"><input type="checkbox" id="thinkingToggle" checked> thinking</label>
+
+    <label class="switch-toggle thinking-toggle">
+      <input type="checkbox" id="thinkingToggle" checked>
+      <span class="switch-track"><span class="switch-thumb"></span></span>
+      <span class="field-inline-text">thinking</span>
+    </label>
   </div>
 </header>
 
 <main class="main">
   <section class="chat-pane" id="chatPane">
     <div class="chat-messages" id="chatMessages"></div>
-    <button id="jumpLatest" class="jump-latest" hidden type="button">jump to latest</button>
-    <div class="chat-input-row">
-      <textarea id="chatInput" placeholder="message... (enter to send, shift+enter for newline)"></textarea>
-      <div class="chat-input-buttons">
-        <button id="sendBtn" type="button">send</button>
-        <button id="stopBtn" type="button" hidden>stop</button>
+    <button id="jumpLatest" class="jump-latest" hidden type="button">jump to latest &darr;</button>
+    <div class="composer">
+      <div class="composer-field">
+        <textarea id="chatInput" placeholder="message... (enter to send, shift+enter for newline)"></textarea>
+        <div class="composer-buttons">
+          <button id="sendBtn" class="btn btn-primary" type="button">send</button>
+          <button id="stopBtn" class="btn btn-stop" type="button" hidden>stop</button>
+        </div>
       </div>
     </div>
   </section>
 
   <aside class="instruments" id="instruments">
     <section class="panel" id="panel-request">
-      <h2>this request</h2>
+      <header class="panel-head"><h2>this request</h2></header>
       <div class="panel-body">
         <div class="metric-headline">
-          <div class="metric-value" id="req-ttft">pending</div>
-          <div class="metric-label">ttft (ms)</div>
+          <div class="metric-headline-row">
+            <div class="metric-value" id="req-ttft">pending</div>
+            <div class="metric-unit">ms</div>
+          </div>
+          <div class="metric-label">ttft</div>
           <div class="metric-sub">predicted <span id="req-ttft-pred">unavailable</span> ms &middot; gap <span id="req-ttft-gap">unavailable</span></div>
         </div>
         <div class="metric-row"><span class="metric-row-label">client-side (includes network)</span><span id="req-ttft-client" class="metric-row-value">unavailable</span></div>
@@ -66,12 +88,12 @@
     </section>
 
     <section class="panel" id="panel-engine">
-      <h2>engine now</h2>
+      <header class="panel-head"><h2>engine now</h2></header>
       <div class="panel-body">
         <div class="metric-row"><span class="metric-row-label">running</span><span id="eng-running" class="metric-row-value">unavailable</span></div>
         <div class="metric-row"><span class="metric-row-label">waiting</span><span id="eng-waiting" class="metric-row-value">unavailable</span></div>
         <div class="bar-row">
-          <div class="bar-label">kv cache <span id="eng-kv-pct">unavailable</span></div>
+          <div class="bar-label"><span>kv cache</span><span id="eng-kv-pct">unavailable</span></div>
           <div class="bar-track"><div id="eng-kv-bar" class="bar-fill"></div></div>
         </div>
         <div class="metric-row"><span class="metric-row-label">prefix cache hit rate</span><span id="eng-prefix-hit" class="metric-row-value">unavailable</span></div>
@@ -84,14 +106,14 @@
     </section>
 
     <section class="panel" id="panel-gpu">
-      <h2>gpu now</h2>
+      <header class="panel-head"><h2>gpu now</h2></header>
       <div class="panel-body">
         <div class="bar-row">
-          <div class="bar-label">memory <span id="gpu-mem-text">unavailable</span></div>
+          <div class="bar-label"><span>memory</span><span id="gpu-mem-text">unavailable</span></div>
           <div class="bar-track"><div id="gpu-mem-bar" class="bar-fill"></div></div>
         </div>
         <div class="bar-row power-row">
-          <div class="bar-label">power <span id="gpu-power-text">unavailable</span></div>
+          <div class="bar-label"><span>power</span><span id="gpu-power-text">unavailable</span></div>
           <div class="bar-track"><div id="gpu-power-bar" class="bar-fill bar-power"></div></div>
         </div>
         <div class="metric-row"><span class="metric-row-label">utilization</span><span id="gpu-util" class="metric-row-value">unavailable</span></div>
@@ -105,19 +127,22 @@
     </section>
 
     <section class="panel" id="panel-conversation">
-      <h2>this conversation</h2>
+      <header class="panel-head"><h2>this conversation</h2></header>
       <div class="panel-body">
         <div class="metric-row"><span class="metric-row-label">turns</span><span id="conv-turns" class="metric-row-value">0</span></div>
         <div class="bar-row">
-          <div class="bar-label">context <span id="conv-context-text">unavailable</span></div>
+          <div class="bar-label"><span>context</span><span id="conv-context-text">unavailable</span></div>
           <div class="bar-track"><div id="conv-context-bar" class="bar-fill"></div></div>
         </div>
-        <div class="ttft-chart" id="conv-ttft-chart"></div>
+        <div class="ttft-chart-wrap">
+          <div class="ttft-chart-title">ttft per turn</div>
+          <div class="ttft-chart" id="conv-ttft-chart"></div>
+        </div>
       </div>
     </section>
 
     <section class="panel" id="panel-config">
-      <h2>config</h2>
+      <header class="panel-head"><h2>config</h2></header>
       <div class="panel-body">
         <div class="metric-row"><span class="metric-row-label">model</span><span id="cfg-model" class="metric-row-value">unavailable</span></div>
         <div class="metric-row"><span class="metric-row-label">quantization</span><span id="cfg-quant" class="metric-row-value">unavailable</span></div>
@@ -132,7 +157,7 @@
 
 <section class="drawer" id="drawer">
   <div class="drawer-bar">
-    <button id="drawerToggle" class="drawer-toggle" type="button">drawer</button>
+    <button id="drawerToggle" class="drawer-toggle" type="button"><span class="drawer-toggle-chevron">&#9650;</span>drawer</button>
     <nav class="drawer-tabs" id="drawerTabs">
       <button class="tab-btn active" type="button" data-tab="prompt">prompt</button>
       <button class="tab-btn" type="button" data-tab="wire">wire</button>
@@ -145,14 +170,14 @@
   <div class="drawer-body" id="drawerBody">
     <div class="tab-panel active" id="tab-prompt">
       <div class="tab-toolbar">
-        <button id="promptRefresh" type="button">refresh</button>
-        <span>tokens: <span id="promptNTokens">unavailable</span></span>
+        <button id="promptRefresh" class="btn" type="button">refresh</button>
+        <span>tokens: <span id="promptNTokens" class="mono-inline">unavailable</span></span>
       </div>
       <pre id="promptOutput" class="scroll-pre">unavailable</pre>
     </div>
     <div class="tab-panel" id="tab-wire">
       <div class="tab-toolbar"><span id="wireSummary">unavailable</span></div>
-      <div class="scroll-pre">
+      <div class="scroll-pre table-scroll">
         <table class="wire-table">
           <thead><tr><th>#</th><th>t_ms</th><th>bytes</th><th>chars</th></tr></thead>
           <tbody id="wireBody"></tbody>
@@ -162,7 +187,7 @@
     <div class="tab-panel" id="tab-metrics">
       <div class="tab-toolbar">
         <input id="metricsFilter" type="text" placeholder="filter (case-insensitive)">
-        <button id="metricsRefresh" type="button">refresh</button>
+        <button id="metricsRefresh" class="btn" type="button">refresh</button>
       </div>
       <pre id="metricsOutput" class="scroll-pre">unavailable</pre>
     </div>
@@ -178,7 +203,7 @@
         <label>n <input id="bombardN" type="number" value="8" min="1"></label>
         <label>prompt tokens <input id="bombardPromptTokens" type="number" value="512" min="1"></label>
         <label>max tokens <input id="bombardMaxTokens" type="number" value="64" min="1"></label>
-        <button id="bombardRun" type="button">run</button>
+        <button id="bombardRun" class="btn btn-primary" type="button">run</button>
       </div>
       <pre id="bombardOutput" class="scroll-pre">unavailable</pre>
     </div>
