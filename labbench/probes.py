@@ -18,14 +18,23 @@ import specmon  # noqa: E402  -- reused for Prometheus parsing, not re-implement
 GPU_FIELDS = ("memory.total", "memory.used", "utilization.gpu",
               "power.draw", "power.limit", "temperature.gpu")
 
-# Role -> predicate over a metric name. Discovered, never hardcoded: vLLM renames
-# these between versions and a wrong binding reports a plausible number.
+# Series that are not the value they appear to be. `_created` is a unix timestamp of
+# counter creation, `_bucket`/`_sum` are histogram internals, `external_` is the KV
+# connector's cache rather than the local prefix cache, and `_by_reason` is a breakdown
+# of a total that is bound separately -- summing both double-counts.
+def _usable(n: str) -> bool:
+    return not (n.endswith("_created") or n.endswith("_bucket") or n.endswith("_sum")
+                or "external_" in n or "_by_reason" in n)
+
+
+# Role -> predicate over a metric name. Discovered, never hardcoded: vLLM renames these
+# between versions and a wrong binding reports a plausible number rather than an error.
 BINDINGS = [
-    ("running",        lambda n: "num_requests_running" in n),
-    ("waiting",        lambda n: "num_requests_waiting" in n),
-    ("kv_usage",       lambda n: "cache_usage_perc" in n and "prefix" not in n),
-    ("prefix_queries", lambda n: "prefix_cache_queries" in n),
-    ("prefix_hits",    lambda n: "prefix_cache_hits" in n),
+    ("running",        lambda n: _usable(n) and "num_requests_running" in n),
+    ("waiting",        lambda n: _usable(n) and "num_requests_waiting" in n),
+    ("kv_usage",       lambda n: _usable(n) and "cache_usage_perc" in n and "prefix" not in n),
+    ("prefix_queries", lambda n: _usable(n) and "prefix_cache_queries" in n),
+    ("prefix_hits",    lambda n: _usable(n) and "prefix_cache_hits" in n),
 ]
 
 KV_PATTERNS = {
@@ -150,7 +159,7 @@ def engine_metrics(url: str) -> dict:
     values = {role: (sum(sample[k] for k in keys) if keys else None)
               for role, keys in bound.items()}
     if values.get("prefix_queries") and values.get("prefix_hits") is not None:
-        values["prefix_hit_rate"] = values["prefix_hits"] / values["prefix_queries"]
+        values["prefix_hit_rate_lifetime"] = values["prefix_hits"] / values["prefix_queries"]
     return {"values": values, "bound": bound, "n_series": len(sample)}
 
 
@@ -161,12 +170,21 @@ INFO 09-01 10:22:14 gpu_worker.py:284] Available KV cache memory: 9.42 GiB
 INFO 09-01 10:22:15 kv_cache_utils.py:864] GPU KV cache size: 68,592 tokens
 INFO 09-01 10:22:15 kv_cache_utils.py:868] Maximum concurrency for 16,384 tokens per request: 4.19x
 """
+# Captured from vLLM 0.27.1 on the box, 2026-09-02. Includes the decoys that broke the
+# first binding: _created timestamps, external_ variants and the _by_reason breakdown.
 PROM_FIXTURE = """# HELP whatever
-vllm:num_requests_running{model_name="q"} 3.0
-vllm:num_requests_waiting{model_name="q"} 7.0
-vllm:gpu_cache_usage_perc{model_name="q"} 0.412
-vllm:gpu_prefix_cache_queries_total{model_name="q"} 1000.0
-vllm:gpu_prefix_cache_hits_total{model_name="q"} 830.0
+vllm:num_requests_running{engine="0",model_name="q"} 3.0
+vllm:num_requests_waiting{engine="0",model_name="q"} 7.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="q",reason="capacity"} 5.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="q",reason="deferred"} 2.0
+vllm:kv_cache_usage_perc{engine="0",model_name="q"} 0.412
+vllm:prefix_cache_queries_total{engine="0",model_name="q"} 1000.0
+vllm:prefix_cache_queries_created{engine="0",model_name="q"} 1788319007.8163457
+vllm:prefix_cache_hits_total{engine="0",model_name="q"} 830.0
+vllm:prefix_cache_hits_created{engine="0",model_name="q"} 1788319007.8163683
+vllm:external_prefix_cache_queries_total{engine="0",model_name="q"} 0.0
+vllm:external_prefix_cache_queries_created{engine="0",model_name="q"} 1788319007.8163999
+vllm:external_prefix_cache_hits_total{engine="0",model_name="q"} 0.0
 """
 
 
@@ -202,6 +220,19 @@ def selftest() -> int:
     chk("prefix_hits bound once", len(b["prefix_hits"]), 1)
     chk("no series binds two roles",
         max(sum(k in keys for keys in b.values()) for k in sample), 1)
+
+    # each role must bind exactly one series against the REAL name set, not merely
+    # "no series binds two roles" -- the first version passed that and still summed a
+    # timestamp into a counter.
+    for role in ("running", "waiting", "kv_usage", "prefix_queries", "prefix_hits"):
+        if len(b[role]) != 1:
+            fails.append(f"  FAIL {role} bound {len(b[role])} series, want exactly 1: {b[role]}")
+    vals = {r: (sum(sample[k] for k in ks) if ks else None) for r, ks in b.items()}
+    chk("waiting is the total, not total plus its breakdown", vals["waiting"], 7.0)
+    chk("prefix_queries excludes the _created timestamp", vals["prefix_queries"], 1000.0)
+    chk("prefix_hits excludes the _created timestamp", vals["prefix_hits"], 830.0)
+    if vals["prefix_queries"] and vals["prefix_queries"] > 1e9:
+        fails.append("  FAIL prefix_queries looks like a unix timestamp")
 
     empty = bind_metrics({})
     chk("empty scrape binds nothing", all(v == [] for v in empty.values()), True)

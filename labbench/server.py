@@ -43,6 +43,9 @@ ROOFLINE_PATTERNS = {
 }
 
 SWITCHER = backends.Switcher()
+# vLLM's prefix counters are cumulative for the server's life, so a lifetime ratio barely
+# moves and shows nothing. The panel wants the rate since the last scrape.
+_PREFIX_LAST: dict[str, float | None] = {"q": None, "h": None}
 BOMBARD: dict = {"job": None, "running": False, "stdout": "", "returncode": None}
 
 
@@ -60,7 +63,20 @@ async def state():
     sm = await asyncio.to_thread(probes.served_model, UPSTREAM)
     snap["config"]["served_model"] = sm["id"]
     snap["config"]["served_model_error"] = sm["error"]
+    snap["engine"]["values"]["prefix_hit_rate"] = _windowed_prefix_rate(snap["engine"]["values"])
     return snap
+
+
+def _windowed_prefix_rate(v: dict) -> float | None:
+    """Hit rate since the previous scrape, falling back to lifetime on the first one."""
+    q, h = v.get("prefix_queries"), v.get("prefix_hits")
+    if q is None or h is None:
+        return None
+    lq, lh = _PREFIX_LAST["q"], _PREFIX_LAST["h"]
+    _PREFIX_LAST.update(q=q, h=h)
+    if lq is None or q <= lq:
+        return v.get("prefix_hit_rate_lifetime")
+    return (h - lh) / (q - lq)
 
 
 @app.get("/labbench/journal")
@@ -226,6 +242,17 @@ DECODE ROOFLINE
         round(16384 * PREFILL_MS_PER_TOKEN / VLLM_PREFILL_SPEEDUP + itl, 1), 4209.1)
 
     chk("ansi stripped", ANSI.sub("", "\x1b[1mbold\x1b[0m"), "bold")
+
+    _PREFIX_LAST.update(q=None, h=None)
+    base = {"prefix_queries": 1000.0, "prefix_hits": 800.0, "prefix_hit_rate_lifetime": 0.8}
+    chk("first scrape falls back to lifetime", _windowed_prefix_rate(dict(base)), 0.8)
+    # 100 new queries, 90 of them hits -> the window is 0.9 even though lifetime is 0.81
+    nxt = {"prefix_queries": 1100.0, "prefix_hits": 890.0, "prefix_hit_rate_lifetime": 0.809}
+    chk("second scrape uses the window", round(_windowed_prefix_rate(nxt), 4), 0.9)
+    chk("no new queries falls back rather than dividing by zero",
+        _windowed_prefix_rate(dict(nxt)), 0.809)
+    chk("missing counters -> None", _windowed_prefix_rate({}), None)
+    _PREFIX_LAST.update(q=None, h=None)
 
     # render(): verify the call contract with a stub, since the real tokenizer is on the box.
     global _TOK
