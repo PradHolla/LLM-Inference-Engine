@@ -3760,3 +3760,39 @@ nothing has drifted on this box.
 Note the KV ratio is 2.87x rather than the 2.05x that halving the weight bytes alone
 implies, because the freed memory is all KV and the fixed overheads do not scale. The
 decode ratio 1.80x is close to the 1.82x the Phase 5 figures imply.
+
+---
+
+## P6L-2 controlled  The prefix-caching arm, 2026-09-02, written before the run
+
+The first hands-on session could not answer P6L-2 because backends were switched under it
+and every restart empties the prefix cache, so long prompts were disproportionately cold.
+This run fixes that: **one server, no restarts, one conversation, two arms.**
+
+Configuration: Qwen3-8B, vLLM 0.27.1, fp8 weights via Marlin, fp16 KV,
+`--max-model-len 16384`, no speculative decoding, prefix caching on (default),
+A10G 24 GB. 25 turns, `--max-tokens 300`, thinking off, temperature 0.
+Driver `tools/convo.py`, sequential through the lab bench gateway on localhost.
+
+**Arms.** WARM grows one conversation normally, so turn N's prompt is turn N-1's prompt
+plus roughly 315 new tokens. COLD is identical except each turn is prefixed with fresh
+random text, which moves the first differing token to position zero and destroys the hit.
+The cold arm is the control: without it, a flat warm curve could just mean prefill is cheap
+at these lengths rather than that caching is working.
+
+Prefill constant 0.3093 ms/token from `results/phase2-prefill-*.jsonl`, divided by vLLM's
+1.21x, giving 0.2556 ms/token. Decode step 18.9 ms, measured on this box yesterday.
+
+| # | Prediction | Value |
+|---|---|---|
+| P6L-2w | WARM TTFT is flat: every turn prefills only ~315 new tokens | **~99 ms at every turn**, late/early ratio **under 1.5x** (decision rule D1) |
+| P6L-2c | COLD TTFT grows linearly with total context | turn 2 ~102 ms, turn 25 **~2,085 ms**, ratio **~20x** |
+| P6L-2s | Separation between arms at turn 25 | **~21x** |
+| P6L-2k | `cached_tokens` in usage tracks `prompt_tokens` minus the new tokens each warm turn | possibly absent -- yesterday's traces reported none, so vLLM 0.27.1 may not populate `prompt_tokens_details`. If absent, the metrics endpoint carries it instead and TTFT is the primary evidence |
+
+**What would falsify what.** If WARM rises like COLD, prefix caching is not surviving the
+gateway and the Phase 6 prompt-layout design is wrong. If COLD stays flat too, prefill is
+simply not the cost at these context lengths and the whole framing needs revisiting. If
+COLD rises but with a slope far from 0.2556 ms/token, the bf16 prefill constant does not
+transfer to fp8 on Marlin -- which is the standing open question from P6L-9 and is the
+outcome I would bet on being at least partly true.
