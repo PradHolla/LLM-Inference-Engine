@@ -3830,3 +3830,24 @@ than Phase 5's 0.3035 or the draft is not loading. If spec still wins at 6 req/s
 crossover moved, and the most likely reason is that 16,384 ctx leaves the batch smaller
 than Phase 5's 4,096 did, so the server never reaches the batch size where verification
 overhead dominates.
+
+### P6B correction, before the run: real prompts, not filler
+
+The scope note above became moot: `bench.py` gained `--prompts-file` and the sweep now
+sends **650 real multi-step arithmetic word problems** from `results/phase4-items.jsonl`,
+cycled in a fixed order so every configuration sees the identical sequence. `--max-tokens`
+raised 64 to 128, because a 64-token cap truncates a reasoning answer and would measure
+mostly prefill.
+
+That moves two predictions, and the direction is the point: Phase 5 measured acceptance
+0.3035 on filler against 0.4905-0.6708 on real content, so speculation should do
+**materially better here than the original numbers assumed**.
+
+| # | Superseded | Revised |
+|---|---|---|
+| P6B-5 | tokens per chunk ~1.5 | **1.7 - 2.1** |
+| P6B-6 | batch-1 gain 1.4-1.5x | **1.6 - 1.9x** (Phase 5 measured 1.85x on gsm8k-think) |
+
+P6B-7 through P6B-9 stand unchanged: ahead at 2 req/s, behind at 6, sign flips between.
+If speculation now wins at 6 req/s too, the likely cause is that better acceptance moved
+the crossover to a higher rate, which would itself be the finding.

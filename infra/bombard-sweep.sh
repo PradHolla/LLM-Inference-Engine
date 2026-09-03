@@ -8,11 +8,16 @@ cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv
 DUR="${1:-45}"
 OUT=results/phase6-bombard.jsonl
+# Real prompts, not filler. Phase 5 measured filler as the worst possible content for
+# speculation, so a spec sweep on filler measures the technique at its weakest.
+PROMPTS="${PROMPTS:-results/phase4-items.jsonl}"
 SUM=results/phase6-bombard-summary.txt
 EAGLE='{"model":"RedHatAI/Qwen3-8B-speculator.eagle3","method":"eagle3","num_speculative_tokens":2}'
 : > "$SUM"
 
 [ -x "$UV" ] || { echo "ABORT: uv missing at $UV"; exit 1; }
+[ -s "$PROMPTS" ] || { echo "ABORT: prompt file $PROMPTS missing or empty"; exit 1; }
+echo "prompts: $(wc -l < "$PROMPTS") from $PROMPTS"
 
 for quant in bf16 fp8 int4; do
   for spec in off on; do
@@ -41,12 +46,12 @@ for quant in bf16 fp8 int4; do
 
     echo "--- batch 1 latency"
     $UV run tools/bench.py --url http://localhost:8000 --model "$served" \
-        --serial 12 --warmup 1 --prompt-tokens 512 --max-tokens 64 \
+        --serial 12 --warmup 1 --prompts-file "$PROMPTS" --max-tokens 128 \
         --out "$OUT" 2>&1 | tail -8 | tee -a "$SUM"
 
     echo "--- open loop 2 and 6 req/s"
     $UV run tools/bench.py --url http://localhost:8000 --model "$served" \
-        --sweep 2,6 --duration "$DUR" --prompt-tokens 512 --max-tokens 64 \
+        --sweep 2,6 --duration "$DUR" --prompts-file "$PROMPTS" --max-tokens 128 \
         --out "$OUT" 2>&1 | tail -8 | tee -a "$SUM"
   done
 done

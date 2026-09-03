@@ -72,10 +72,45 @@ def pct(xs: list[float], p: float) -> float:
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+POOL: list[str] = []
+_pool_i = 0
+
+
+def load_prompts(path: str) -> list[str]:
+    """Real prompts, one per line or JSONL with a prompt/question/text field.
+    Filler is the WORST content for speculative decoding (Phase 5: acceptance 0.30
+    against 0.49-0.67 on real text), so a spec measurement on filler understates it."""
+    out: list[str] = []
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("{"):
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            v = d.get("prompt") or d.get("question") or d.get("text")
+            if v:
+                out.append(str(v))
+        else:
+            out.append(line)
+    if not out:
+        raise SystemExit(f"no prompts found in {path}")
+    return out
+
+
 def make_prompt(target_tokens: int, unique: bool) -> str:
-    # ~4 chars/token, crude but STABLE across the sweep -- see NOTES/code-notes.md.
-    body = FILLER * max(1, target_tokens * 4 // len(FILLER) + 1)
-    body = body[: target_tokens * 4]
+    global _pool_i
+    if POOL:
+        # Cycled in a fixed order, so every configuration in a sweep sees the same
+        # prompts in the same sequence and the comparison stays matched.
+        body = POOL[_pool_i % len(POOL)]
+        _pool_i += 1
+    else:
+        # ~4 chars/token, crude but STABLE across the sweep -- see NOTES/code-notes.md.
+        body = FILLER * max(1, target_tokens * 4 // len(FILLER) + 1)
+        body = body[: target_tokens * 4]
     if unique:
         # A random head defeats prefix caching. Without this, run 2 of a sweep is
         # measuring the cache, not the model, and looks mysteriously faster.
@@ -270,6 +305,8 @@ async def main() -> None:
     ap.add_argument("--sweep", help="comma-separated rates, e.g. 1,2,4,8,16")
     ap.add_argument("--duration", type=float, default=60, help="seconds per load point")
     ap.add_argument("--prompt-tokens", type=int, default=512)
+    ap.add_argument("--prompts-file", help="real prompts to send instead of filler; "
+                    "one per line, or JSONL with a prompt/question/text field")
     ap.add_argument("--max-tokens", type=int, default=128)
     ap.add_argument("--unique-prefix", action="store_true",
                     help="random head per request, to defeat prefix caching")
@@ -282,6 +319,10 @@ async def main() -> None:
     ap.add_argument("--out", default="results/bench.jsonl")
     ap.add_argument("--settle", type=float, default=3, help="seconds between load points")
     args = ap.parse_args()
+    if args.prompts_file:
+        POOL.extend(load_prompts(args.prompts_file))
+        print(f"prompts: {len(POOL)} real prompts from {args.prompts_file}, "
+              f"cycled in a fixed order")
 
     if not args.rate and not args.sweep and not args.serial:
         ap.error("need --rate, --sweep, or --serial")
