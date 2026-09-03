@@ -707,3 +707,144 @@ select#quantSelect { font-family: var(--font-mono); }
   .chat-pane { border-right: none; border-bottom: 1px solid var(--border); min-height: 50vh; }
   .instruments { flex: 1 1 auto; width: 100%; overflow-y: visible; }
 }
+
+/* ============================================================================
+   Instrument rail and drawer. Everything here must scroll: the previous version of
+   this block set display:flex without overflow, which silently removed the scrolling
+   the earlier rule provided and made the rail rigid.
+   ========================================================================== */
+
+.instruments {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 16px 64px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.instruments::-webkit-scrollbar { width: 9px; }
+.instruments::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 5px;
+  border: 2px solid var(--bg-page);
+}
+.instruments::-webkit-scrollbar-track { background: transparent; }
+
+.grp {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.grp-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 15px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.grp-head h2 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+}
+.grp-body { padding: 4px 15px 12px; }
+
+/* One metric: label left, value right on the same baseline, explanation beneath.
+   The value cannot be pushed into the label because flex holds it at its own width. */
+.m { padding: 11px 0; border-bottom: 1px solid var(--border); }
+.m:last-child { border-bottom: 0; }
+.m-main {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+}
+.m-label {
+  font-size: 11.5px; letter-spacing: 0.04em; color: var(--text-dim);
+  line-height: 1.4; min-width: 0;
+}
+.m-value {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px; color: var(--text); white-space: nowrap; flex: 0 0 auto;
+}
+.m-value.ok   { color: #6ee7a8; }
+.m-value.warn { color: #f2c14e; }
+.m-value.bad  { color: #f2766a; }
+.m-note {
+  margin-top: 5px; font-size: 11px; line-height: 1.5; color: #6b7783;
+}
+.m-note.bad { color: #f2766a; }
+
+.meter {
+  margin-top: 8px; height: 4px; border-radius: 2px;
+  background: var(--bg-sunken); overflow: hidden;
+}
+.meter-fill { height: 100%; background: #5aa9e6; transition: width 140ms ease; }
+.meter-fill.ok   { background: #3ea06b; }
+.meter-fill.warn { background: #c9971f; }
+.meter-fill.bad  { background: #c2554a; }
+
+.pill {
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 3px;
+  background: var(--bg-sunken); color: var(--text-dim);
+}
+.pill.live { background: #24404f; color: #7fd2f0; }
+
+.chart-block { padding: 12px 0 2px; }
+.chart {
+  position: relative; display: flex; align-items: flex-end; gap: 3px;
+  height: 76px; margin-top: 9px; padding-bottom: 1px;
+}
+.chart-bar-wrap { flex: 1 1 0; min-width: 3px; height: 100%; display: flex; align-items: flex-end; }
+.chart-bar { width: 100%; background: #5aa9e6; border-radius: 1px 1px 0 0; }
+.chart-baseline { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--border-strong); }
+.chart-scale {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font-size: 10px; color: var(--text-dim);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.chart-empty { font-size: 11.5px; color: var(--text-dim); padding: 20px 0; }
+
+/* ---- drawer ---- */
+.drawer.open { height: 55vh; }
+.drawer-body { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tab-btn {
+  padding: 10px 16px; font-size: 12.5px; letter-spacing: 0.03em;
+  color: var(--text-dim); background: transparent; border: 0;
+  border-bottom: 2px solid transparent;
+}
+.tab-btn:hover { color: var(--text); background: var(--bg-hover); }
+.tab-btn.active { color: var(--text); border-bottom-color: #5aa9e6; background: var(--bg-raised); }
+
+.tab-panel {
+  padding: 14px 18px; min-height: 0; height: 100%;
+  overflow: auto; scrollbar-width: thin;
+}
+.tab-panel pre, pre.scroll-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.7; color: var(--text);
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  border-radius: 5px; padding: 14px 16px;
+  overflow: auto; white-space: pre; tab-size: 2; margin: 0;
+  max-height: none;
+}
+.tab-panel table { font-size: 12.5px; border-collapse: collapse; width: 100%; }
+.tab-panel th {
+  text-align: left; font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-panel);
+}
+.tab-panel td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums;
+}
+.tab-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex: 0 0 auto; }
+.tab-toolbar input {
+  flex: 1; min-width: 0; background: var(--bg-sunken);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 8px 11px; color: var(--text); font-size: 12.5px;
+}
+
+@media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }

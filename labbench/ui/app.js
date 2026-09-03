@@ -425,209 +425,206 @@ function ChatPane({ messages, streamingActive, streamRef, onSend, onStop, inputD
 
 // ---- instrument panels ----
 
-function RequestPanel({ requestDisplay, clientTtftMs }) {
-  const pending = requestDisplay.kind === "pending";
-  const trace = pending ? null : requestDisplay.trace;
-  const prediction = pending ? null : requestDisplay.prediction;
-
-  let ttftText, ttftNa;
-  if (pending) { ttftText = "pending"; ttftNa = true; }
-  else if (trace && isNum(trace.ttft_ms)) { ttftText = fmtNum(trace.ttft_ms, 0); ttftNa = false; }
-  else { ttftText = "unavailable"; ttftNa = true; }
-
-  const predVal = prediction && prediction.values ? prediction.values.ttft_ms : null;
-  let predText, gapText;
-  if (!pending && isNum(predVal)) {
-    predText = fmtNum(predVal, 0);
-    if (trace && isNum(trace.ttft_ms) && predVal !== 0) {
-      const gap = ((trace.ttft_ms - predVal) / predVal) * 100;
-      gapText = (gap >= 0 ? "+" : "") + gap.toFixed(1) + "%";
-    } else {
-      gapText = "unavailable";
-    }
-  } else {
-    predText = pending ? "unavailable" : withError("unavailable", prediction && prediction.error);
-    gapText = "unavailable";
-  }
-
-  let interText;
-  if (!pending && trace && (isNum(trace.inter_event_p50_ms) || isNum(trace.inter_event_p95_ms))) {
-    interText = fmtNum(trace.inter_event_p50_ms, 1) + " / " + fmtNum(trace.inter_event_p95_ms, 1) + " ms";
-  } else {
-    interText = "unavailable";
-  }
-
-  const predNa = predText === "unavailable" || predText.indexOf("unavailable") === 0;
-  const gapNa = gapText === "unavailable";
-
-  return html`
-    <section class="panel" id="panel-request">
-      <header class="panel-head"><h2>this request</h2></header>
-      <div class="panel-body">
-        <div class="metric-headline">
-          <div class="metric-headline-row">
-            <div class="metric-value${ttftNa ? " na" : ""}" id="req-ttft">${ttftText}</div>
-            <div class="metric-unit">ms</div>
-          </div>
-          <div class="metric-label">ttft</div>
-          <div class="metric-sub">predicted <span class=${predNa ? "na" : ""} id="req-ttft-pred">${predText}</span> ms · gap <span class=${gapNa ? "na" : ""} id="req-ttft-gap">${gapText}</span></div>
-        </div>
-        <${MetricRow} label="client-side (includes network)" text=${rowText(clientTtftMs, 0, " ms")} />
-        <${MetricRow} label="inter-event latency p50 / p95" text=${interText} />
-        <${MetricRow} label="per-token itl" text=${rowText(trace && trace.itl_ms_derived, 1, " ms")} />
-        <${MetricRow} label="tokens per event" text=${rowText(trace && trace.tokens_per_event, 2)} />
-        <${MetricRow} label="prompt tokens" text=${rowText(trace && trace.prompt_tokens, 0)} />
-        <${MetricRow} label="cached tokens" text=${rowText(trace && trace.cached_tokens, 0)} />
-        <${MetricRow} label="completion tokens" text=${rowText(trace && trace.completion_tokens, 0)} />
-      </div>
-    </section>`;
-}
-
-function EngineNowPanel({ engine }) {
-  if (!engine || engine.error) {
-    return html`
-      <section class="panel" id="panel-engine">
-        <header class="panel-head"><h2>engine now</h2></header>
-        <div class="panel-body">
-          <${MetricRow} label="running" text="unavailable" />
-          <${MetricRow} label="waiting" text="unavailable" />
-          <${BarRow} label="kv cache" text="unavailable" pct=${0} fillClass="bar-fill" />
-          <${MetricRow} label="prefix cache hit rate" text="unavailable" />
-          <details class="bound-details"><summary>metric bindings</summary><${ScrollPre} id="eng-bound" text=${null} extraClass="small-pre" /></details>
-          <div class="probe-error" id="eng-error">${engine && engine.error ? engine.error : ""}</div>
-        </div>
-      </section>`;
-  }
-  const v = engine.values || {};
-  return html`
-    <section class="panel" id="panel-engine">
-      <header class="panel-head"><h2>engine now</h2></header>
-      <div class="panel-body">
-        <${MetricRow} label="running" text=${rowText(v.running, 0)} />
-        <${MetricRow} label="waiting" text=${rowText(v.waiting, 0)} />
-        <${BarRow} label="kv cache" text=${isNum(v.kv_usage) ? fmtPctFrac(v.kv_usage, 1) : "unavailable"}
-          pct=${isNum(v.kv_usage) ? v.kv_usage * 100 : 0} fillClass=${isNum(v.kv_usage) ? "bar-fill bar-engine" : "bar-fill"} />
-        <${MetricRow} label="prefix cache hit rate" text=${isNum(v.prefix_hit_rate) ? fmtPctFrac(v.prefix_hit_rate, 1) : "unavailable"} />
-        <details class="bound-details"><summary>metric bindings</summary><${ScrollPre} id="eng-bound" text=${engine.bound ? JSON.stringify(engine.bound, null, 2) : null} extraClass="small-pre" /></details>
-        <div class="probe-error" id="eng-error"></div>
-      </div>
-    </section>`;
-}
-
-function GpuNowPanel({ gpu }) {
-  const noData = !gpu || gpu.error || !gpu.devices || !gpu.devices.length;
-  if (noData) {
-    return html`
-      <section class="panel" id="panel-gpu">
-        <header class="panel-head"><h2>gpu now</h2></header>
-        <div class="panel-body">
-          <${BarRow} label="memory" text="unavailable" pct=${0} fillClass="bar-fill bar-gpu-mem" />
-          <${BarRow} label="power" text="unavailable" pct=${0} fillClass="bar-fill bar-power" />
-          <${MetricRow} label="utilization" text="unavailable" />
-          <${MetricRow} label="temperature" text="unavailable" />
-          <table class="proc-table" id="gpu-proc-table">
-            <thead><tr><th>pid</th><th>used mib</th></tr></thead>
-            <tbody id="gpu-proc-body"></tbody>
-          </table>
-          <div class="probe-error" id="gpu-error">${gpu && gpu.error ? gpu.error : (gpu ? "no devices reported" : "")}</div>
-        </div>
-      </section>`;
-  }
-  const d = gpu.devices[0];
-  const memOk = isNum(d.memory_used) && isNum(d.memory_total) && d.memory_total > 0;
-  const memPct = memOk ? (d.memory_used / d.memory_total) * 100 : 0;
-  const memText = memOk ? fmtNum(d.memory_used, 0) + " / " + fmtNum(d.memory_total, 0) + " MiB (" + memPct.toFixed(1) + "%)" : "unavailable";
-  const pwrOk = isNum(d.power_draw) && isNum(d.power_limit) && d.power_limit > 0;
-  const pwrPct = pwrOk ? (d.power_draw / d.power_limit) * 100 : 0;
-  const pwrText = pwrOk ? fmtNum(d.power_draw, 0) + " / " + fmtNum(d.power_limit, 0) + " W" : "unavailable";
-  const procs = gpu.processes || [];
-  return html`
-    <section class="panel" id="panel-gpu">
-      <header class="panel-head"><h2>gpu now</h2></header>
-      <div class="panel-body">
-        <${BarRow} label="memory" text=${memText} pct=${memPct} fillClass="bar-fill bar-gpu-mem" />
-        <${BarRow} label="power" text=${pwrText} pct=${pwrPct} fillClass="bar-fill bar-power" />
-        <${MetricRow} label="utilization" text=${rowText(d.utilization_gpu, 0, "%")} />
-        <${MetricRow} label="temperature" text=${rowText(d.temperature_gpu, 0, " C")} />
-        <table class="proc-table" id="gpu-proc-table">
-          <thead><tr><th>pid</th><th>used mib</th></tr></thead>
-          <tbody id="gpu-proc-body">
-            ${procs.length === 0
-              ? html`<tr><td colspan="2" class="na">unavailable</td></tr>`
-              : procs.map((p, i) => html`<tr key=${i}><td>${fmtOr(p.pid)}</td><td>${fmtNum(p.used_mib, 0)}</td></tr>`)}
-          </tbody>
-        </table>
-        <div class="probe-error" id="gpu-error"></div>
-      </div>
-    </section>`;
-}
-
 function TtftChart({ turnTtfts }) {
-  if (!turnTtfts.length) return html`<div class="ttft-chart" id="conv-ttft-chart"></div>`;
-  const max = Math.max(1, ...turnTtfts.filter(isNum));
+  const vals = (turnTtfts || []).filter(isNum);
+  if (!vals.length) return html`<div class="chart-empty">no messages yet</div>`;
+  const max = Math.max(...vals, 1);
   return html`
-    <div class="ttft-chart" id="conv-ttft-chart">
-      ${turnTtfts.map((v, i) => isNum(v)
-        ? html`<div key=${i} class="ttft-bar" style=${{ height: Math.max(2, (v / max) * 100) + "%" }} title=${v.toFixed(0) + " ms"}></div>`
-        : html`<div key=${i} class="ttft-bar na" style=${{ height: "100%" }} title="unavailable"></div>`)}
+    <div class="chart">
+      ${vals.map((v, i) => html`
+        <div class="chart-bar-wrap" key=${i} title=${v.toFixed(0) + " ms on message " + (i + 1)}>
+          <div class="chart-bar" style=${{ height: Math.max(4, (v / max) * 100) + "%" }}></div>
+        </div>`)}
+      <div class="chart-baseline"></div>
+    </div>
+    <div class="chart-scale"><span>message 1</span><span>peak ${max.toFixed(0)} ms</span></div>`;
+}
+
+// ---- instruments -------------------------------------------------------------
+// Every metric the engine exposes, kept. Each carries a one-line explanation so the
+// panel teaches rather than just reports, and the whole rail scrolls.
+
+function M({ label, value, note, tone }) {
+  return html`
+    <div class="m">
+      <div class="m-main">
+        <span class="m-label">${label}</span>
+        <span class="m-value ${tone || ""}">${value}</span>
+      </div>
+      ${note ? html`<div class="m-note">${note}</div>` : null}
     </div>`;
 }
 
-function ConversationPanel({ turns, promptTokens, maxModelLen, turnTtfts }) {
-  const ok = isNum(promptTokens) && isNum(maxModelLen) && maxModelLen > 0;
-  const pct = ok ? (promptTokens / maxModelLen) * 100 : 0;
-  const text = ok ? promptTokens + " / " + maxModelLen + " (" + pct.toFixed(1) + "%)" : "unavailable";
-  const fillClass = ok ? "bar-fill " + (pct > 95 ? "state-error" : pct > 80 ? "state-warning" : "state-normal") : "bar-fill";
+function Bar({ label, value, note, pct, tone }) {
+  const p = isNum(pct) ? Math.max(0, Math.min(100, pct)) : 0;
   return html`
-    <section class="panel" id="panel-conversation">
-      <header class="panel-head"><h2>this conversation</h2></header>
-      <div class="panel-body">
-        <${MetricRow} label="turns" text=${String(turns)} />
-        <${BarRow} label="context" text=${text} pct=${pct} fillClass=${fillClass} />
-        <div class="ttft-chart-wrap">
-          <div class="ttft-chart-title">ttft per turn</div>
-          <${TtftChart} turnTtfts=${turnTtfts} />
-        </div>
+    <div class="m">
+      <div class="m-main">
+        <span class="m-label">${label}</span>
+        <span class="m-value ${tone || ""}">${value}</span>
       </div>
+      <div class="meter"><div class="meter-fill ${tone || ""}" style=${{ width: p + "%" }}></div></div>
+      ${note ? html`<div class="m-note">${note}</div>` : null}
+    </div>`;
+}
+
+function Group({ title, badge, children }) {
+  return html`
+    <section class="grp">
+      <header class="grp-head"><h2>${title}</h2>${badge || null}</header>
+      <div class="grp-body">${children}</div>
     </section>`;
+}
+
+function ttftTone(ms) {
+  if (!isNum(ms)) return null;
+  return ms < 250 ? "ok" : ms < 1000 ? "warn" : "bad";
+}
+
+function RequestPanel({ requestDisplay, clientTtftMs }) {
+  const rd = requestDisplay || {};
+  const t = rd.kind === "trace" ? rd.trace : null;
+  const pred = rd.prediction && rd.prediction.values ? rd.prediction.values.ttft_ms : null;
+  const streaming = t && t.status === "streaming";
+  const itl = t && t.itl_ms_derived;
+  const toks = isNum(itl) && itl > 0 ? 1000 / itl : null;
+  const gap = isNum(pred) && t && isNum(t.ttft_ms) && pred > 0
+    ? ((t.ttft_ms - pred) / pred) * 100 : null;
+  const badge = streaming ? html`<span class="pill live">streaming</span>`
+              : !t ? html`<span class="pill">waiting</span>` : null;
+  return html`
+    <${Group} title="last response" badge=${badge}>
+      <${M} label="time to first token" tone=${ttftTone(t && t.ttft_ms)}
+            value=${rowText(t && t.ttft_ms, 1, " ms")}
+            note=${"measured at the engine. target under 250 ms"
+                   + (isNum(pred) ? ". roofline predicted " + pred.toFixed(0) + " ms"
+                      + (gap !== null ? ", gap " + (gap > 0 ? "+" : "") + gap.toFixed(0) + "%" : "") : "")} />
+      <${M} label="ttft, client side" value=${rowText(clientTtftMs, 0, " ms")}
+            note="what your browser saw, including the ssh tunnel round trip" />
+      <${M} label="inter-token latency" value=${rowText(itl, 2, " ms")}
+            note="decode time divided by tokens. this is the real per-token cost" />
+      <${M} label="throughput" value=${toks ? toks.toFixed(1) + " tok/s" : "unavailable"}
+            note=${toks ? "reading speed is about 6 tok/s, so roughly " + (toks/6).toFixed(0) + "x faster than you can read" : null} />
+      <${M} label="inter-event p50 / p95"
+            value=${t && isNum(t.inter_event_p50_ms)
+                    ? t.inter_event_p50_ms.toFixed(1) + " / " + rowText(t.inter_event_p95_ms, 1) + " ms"
+                    : "unavailable"}
+            note="gap between network chunks. equals inter-token latency while speculation is off" />
+      <${M} label="tokens per event" value=${rowText(t && t.tokens_per_event, 3)}
+            note="tokens carried in one chunk. exactly 1 without speculation; with it this becomes the acceptance rate" />
+      <${M} label="prompt tokens" value=${rowText(t && t.prompt_tokens, 0)}
+            note="everything the model read: system prompt, whole history, your message" />
+      <${M} label="cached tokens" value=${rowText(t && t.cached_tokens, 0)}
+            note="how much of that prompt was reused from the prefix cache instead of recomputed" />
+      <${M} label="completion tokens" value=${rowText(t && t.completion_tokens, 0)}
+            note="counted from the server usage field, never by counting chunks" />
+      <${M} label="content events" value=${rowText(t && t.n_content_events, 0)}
+            note="chunks that carried visible text" />
+      <${M} label="end to end" value=${rowText(t && t.e2e_ms, 0, " ms")}
+            note="first byte of the request to the last token" />
+    </${Group}>`;
+}
+
+function EngineNowPanel({ engine }) {
+  const v = (engine && engine.values) || {};
+  const err = engine && engine.error;
+  const kv = isNum(v.kv_usage) ? v.kv_usage * 100 : null;
+  const hit = isNum(v.prefix_hit_rate) ? v.prefix_hit_rate * 100 : null;
+  return html`
+    <${Group} title="engine right now">
+      ${err ? html`<div class="m-note bad">${err}</div>` : null}
+      <${M} label="requests running" value=${rowText(v.running, 0)}
+            note="how many sequences the scheduler is decoding in this batch" />
+      <${M} label="requests waiting" value=${rowText(v.waiting, 0)}
+            tone=${isNum(v.waiting) && v.waiting > 0 ? "warn" : null}
+            note="queued because the batch is full. anything above zero is queue wait added to someone's ttft" />
+      <${Bar} label="kv cache in use" value=${kv === null ? "unavailable" : kv.toFixed(1) + "%"}
+              pct=${kv} tone=${kv > 90 ? "bad" : kv > 70 ? "warn" : "ok"}
+              note="share of the key value cache holding live conversations. this is what limits concurrency" />
+      <${Bar} label="prefix cache hit rate" value=${hit === null ? "unavailable" : hit.toFixed(1) + "%"}
+              pct=${hit} tone=${hit > 50 ? "ok" : null}
+              note="fraction of prompt tokens served from cache since the last scrape, rather than prefilled again" />
+    </${Group}>`;
+}
+
+function GpuNowPanel({ gpu }) {
+  const d = gpu && gpu.devices && gpu.devices[0];
+  if (!d) {
+    return html`<${Group} title="gpu right now">
+      <div class="m-note bad">${(gpu && gpu.error) || "unavailable"}</div></${Group}>`;
+  }
+  const memPct = isNum(d.memory_used) && d.memory_total ? (d.memory_used / d.memory_total) * 100 : null;
+  const pwPct = isNum(d.power_draw) && d.power_limit ? (d.power_draw / d.power_limit) * 100 : null;
+  const busy = isNum(d.power_draw) && d.power_draw > 120;
+  return html`
+    <${Group} title="gpu right now">
+      <${Bar} label="power draw"
+              value=${isNum(d.power_draw) ? d.power_draw.toFixed(0) + " / " + d.power_limit.toFixed(0) + " W" : "unavailable"}
+              pct=${pwPct} tone=${busy ? "warn" : "ok"}
+              note=${busy ? "working. prefill is compute bound and pulls hardest, decode is memory bound and pulls less"
+                          : "idle at roughly 65 W. watch it climb the moment you send"} />
+      <${Bar} label="video memory"
+              value=${isNum(d.memory_used) ? d.memory_used.toFixed(0) + " / " + d.memory_total.toFixed(0) + " MiB" : "unavailable"}
+              pct=${memPct} tone="ok"
+              note="weights plus the whole kv cache, claimed at startup and held for the process lifetime" />
+      <${M} label="utilisation" value=${rowText(d.utilization_gpu, 0, "%")}
+            note="fraction of time a kernel is resident. high during decode even though the compute units are nearly idle" />
+      <${M} label="temperature" value=${rowText(d.temperature_gpu, 0, " C")} />
+      ${(gpu.processes || []).map((pr, i) => html`
+        <${M} key=${i} label=${"process " + pr.pid} value=${pr.used_mib.toFixed(0) + " MiB"}
+              note=${i === 0 ? "one server at a time: two would not fit in 23 GB" : null} />`)}
+    </${Group}>`;
+}
+
+function ConversationPanel({ turns, contextTokens, maxModelLen, turnTtfts, perTurnTokens }) {
+  const ok = isNum(contextTokens) && isNum(maxModelLen) && maxModelLen > 0;
+  const pct = ok ? (contextTokens / maxModelLen) * 100 : null;
+  const left = ok && perTurnTokens > 0 ? Math.floor((maxModelLen - contextTokens) / perTurnTokens) : null;
+  return html`
+    <${Group} title="this conversation">
+      <${M} label="messages" value=${String(turns)} />
+      <${Bar} label="context used"
+              value=${ok ? contextTokens.toLocaleString() + " / " + maxModelLen.toLocaleString() : "unavailable"}
+              pct=${pct} tone=${pct > 95 ? "bad" : pct > 80 ? "warn" : "ok"}
+              note=${ok ? pct.toFixed(1) + "% full"
+                     + (left !== null ? ", room for roughly " + left + " more messages at this rate" : "") : null} />
+      <div class="chart-block">
+        <div class="m-label">time to first token, per message</div>
+        <${TtftChart} turnTtfts=${turnTtfts} />
+        <div class="m-note">flat means the prefix cache is working. a rising line means every turn is being re-prefilled</div>
+      </div>
+    </${Group}>`;
 }
 
 function ConfigPanel({ config }) {
-  if (!config) {
-    return html`
-      <section class="panel" id="panel-config">
-        <header class="panel-head"><h2>config</h2></header>
-        <div class="panel-body">
-          <${MetricRow} label="model" text="unavailable" />
-          <${MetricRow} label="quantization" text="unavailable" />
-          <${MetricRow} label="max model len" text="unavailable" />
-          <${MetricRow} label="kv tokens" text="unavailable" />
-          <${MetricRow} label="kv gib" text="unavailable" />
-          <${MetricRow} label="spec" text="unavailable" />
-        </div>
-      </section>`;
-  }
+  const c = config || {};
+  const q = c.quantization;
+  const why = q === "fp8" ? "half size weights, so decode reads about 8 GB per token instead of 16"
+            : q === "int4" ? "quarter size weights. fastest decode, most kv room, and it pays compute to unpack"
+            : q === "bf16" ? "full size weights. slowest decode and the least room for context"
+            : null;
   return html`
-    <section class="panel" id="panel-config">
-      <header class="panel-head"><h2>config</h2></header>
-      <div class="panel-body">
-        <${MetricRow} label="model" text=${fmtOr(config.model)} />
-        <${MetricRow} label="quantization" text=${fmtOr(config.quantization)} />
-        <${MetricRow} label="max model len" text=${rowText(config.max_model_len, 0)} />
-        <${MetricRow} label="kv tokens" text=${rowText(config.kv_tokens, 0)} />
-        <${MetricRow} label="kv gib" text=${rowText(config.kv_gib, 2, " GiB")} />
-        <${MetricRow} label="spec" text=${fmtOr(config.spec)} />
-      </div>
-    </section>`;
+    <${Group} title="what is running">
+      <${M} label="model" value=${fmtOr(c.model)} />
+      <${M} label="quantization" value=${fmtOr(q)} note=${why} />
+      <${M} label="max model len" value=${rowText(c.max_model_len, 0, " tok")}
+            note="longest single conversation this server will accept" />
+      <${M} label="kv cache budget" value=${rowText(c.kv_tokens, 0, " tok")}
+            note="total tokens the gpu can hold across every live conversation" />
+      <${M} label="kv cache memory" value=${rowText(c.kv_gib, 2, " GiB")} />
+      <${M} label="speculative decoding" value=${fmtOr(c.spec) === "unavailable" ? "off" : fmtOr(c.spec)}
+            note="off means one token per forward pass, so tokens per event stays at 1" />
+    </${Group}>`;
 }
 
-const Instruments = memo(function Instruments({ requestDisplay, clientTtftMs, engine, gpu, turns, promptTokens, maxModelLen, turnTtfts, config }) {
+const Instruments = memo(function Instruments({ requestDisplay, clientTtftMs, engine, gpu, turns, contextTokens, maxModelLen, turnTtfts, perTurnTokens, config }) {
   return html`
     <aside class="instruments" id="instruments">
       <${RequestPanel} requestDisplay=${requestDisplay} clientTtftMs=${clientTtftMs} />
       <${EngineNowPanel} engine=${engine} />
+      <${ConversationPanel} turns=${turns} contextTokens=${contextTokens} maxModelLen=${maxModelLen}
+                            turnTtfts=${turnTtfts} perTurnTokens=${perTurnTokens} />
       <${GpuNowPanel} gpu=${gpu} />
-      <${ConversationPanel} turns=${turns} promptTokens=${promptTokens} maxModelLen=${maxModelLen} turnTtfts=${turnTtfts} />
       <${ConfigPanel} config=${config} />
     </aside>`;
 });
@@ -1020,7 +1017,15 @@ function App() {
   const gpu = pollState ? pollState.gpu : null;
   const controlsDisabled = !backend || backend.status === "switching" || backend.active === null;
   const assistantTurns = useMemo(() => messages.filter((m) => m.role === "assistant").length, [messages]);
+  // The context meter must show what the NEXT request will carry, not what the last one
+  // did. The last reply is already in the history, so it counts even though it was not
+  // in the prompt that produced it -- otherwise the meter lags a whole turn behind.
   const promptTokens = finalTrace ? finalTrace.prompt_tokens : null;
+  const contextTokens = finalTrace && isNum(finalTrace.prompt_tokens)
+    ? finalTrace.prompt_tokens + (finalTrace.completion_tokens || 0)
+    : null;
+  const perTurnTokens = assistantTurns > 0 && isNum(contextTokens)
+    ? Math.max(1, Math.round(contextTokens / assistantTurns)) : 0;
   const maxModelLen = config ? config.max_model_len : null;
 
   const tabProps = {
@@ -1046,7 +1051,8 @@ function App() {
         <${ChatPane} messages=${messages} streamingActive=${streamingActive} streamRef=${streamHandleRef}
           onSend=${handleSend} onStop=${handleStop} inputDisabled=${controlsDisabled} sending=${sending} />
         <${Instruments} requestDisplay=${requestDisplay} clientTtftMs=${clientTtftMs} engine=${engine} gpu=${gpu}
-          turns=${assistantTurns} promptTokens=${promptTokens} maxModelLen=${maxModelLen} turnTtfts=${turnTtfts} config=${config} />
+          turns=${assistantTurns} contextTokens=${contextTokens} maxModelLen=${maxModelLen}
+          turnTtfts=${turnTtfts} perTurnTokens=${perTurnTokens} config=${config} />
       </main>
       <${Drawer} open=${drawerOpen} onToggle=${() => setDrawerOpen((o) => !o)} activeTab=${activeTab} onTabClick=${handleTabClick} tabProps=${tabProps} />
     </${Fragment}>`;
@@ -1154,6 +1160,16 @@ function initialMockMessages() {
       reasoningContent: "The user is asking for a short definition; keep it to one sentence.",
     },
   ];
+}
+
+// Testability hook. Undefined in a browser so this is inert there. The render checker
+// predefines it, which lets the instrument components run with real React and
+// representative props, including all-null props, outside a browser.
+if (typeof globalThis.__LABBENCH_TEST__ !== "undefined") {
+  Object.assign(globalThis.__LABBENCH_TEST__, {
+    RequestPanel, EngineNowPanel, GpuNowPanel, ConversationPanel, ConfigPanel,
+    TtftChart, M, Bar, Group,
+  });
 }
 
 })();
