@@ -3919,3 +3919,39 @@ not start when the budget cannot hold a single maximum-length sequence.
 Phase 5 measured this as bf16+EAGLE3 giving 1.91x concurrency and called it unusable. At
 16k context it is not merely unusable, it does not run. **The strongest form of "quantization
 is what makes speculation affordable" is that without it there is nothing to measure.**
+
+### P6B follow-up: the KV-headroom claim, now measured rather than inferred
+
+The reading above ("the crossover is a KV-headroom effect, not verification overhead") was
+stated from tail latencies alone. vLLM logs `GPU KV cache usage` and `Running/Waiting`
+counts every ten seconds, and those lines were already in the journal when that claim was
+written. Reading them first was the obvious move and it was not made -- incident 26 again,
+stating a cause before testing it against data already in hand.
+
+Read now, per-invocation, from `journalctl -u vllm`:
+
+| config | KV max | KV p90 | max running | **max WAITING** |
+|---|---|---|---|---|
+| fp8 + spec | 97.6% | **95.7%** | 90 | **26** |
+| int4 + spec | 62.2% | **18.6%** | 88 | **0** |
+
+*Qwen3-8B, vLLM 0.27.1, 16,384 ctx, EAGLE3 k=2, A10G, 650 real arithmetic prompts.*
+
+**Reason A confirmed, Reason B not needed.** fp8+spec spent its load window at 95-98% KV
+occupancy with up to **26 requests queued**. int4+spec never exceeded 62%, sat at 18.6% at
+p90, and **never queued a single request** while running a near-identical batch (90 against
+88 concurrent). Two configurations running the same number of sequences, one starved of
+cache and one not.
+
+That is queueing, not verification overhead. If overhead were the cause, int4+spec would
+have degraded too, since it runs the same draft head at the same batch size. It did not.
+
+**Caveat, stated rather than buried.** These two segments have only 15 and 13 ten-second
+samples, because the load windows were short. The effect is large enough that the sample
+count does not threaten the direction -- 0 queued against 26, 18.6% against 95.7% -- but a
+dedicated run at several rates would locate the crossover instead of bracketing it.
+
+The 8,192-context rerun proposed earlier is **withdrawn as the discriminating test**: vLLM
+allocates KV in blocks on demand rather than reserving `max_model_len` per request, so
+halving that limit would not cleanly double the sequences held, and it would perturb
+admission at the same time. It was proposed with more confidence than it deserved.
