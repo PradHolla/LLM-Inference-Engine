@@ -3955,3 +3955,35 @@ The 8,192-context rerun proposed earlier is **withdrawn as the discriminating te
 allocates KV in blocks on demand rather than reserving `max_model_len` per request, so
 halving that limit would not cleanly double the sequences held, and it would perturb
 admission at the same time. It was proposed with more confidence than it deserved.
+
+### P6B derived: the Marlin dequantization tax, from data already collected
+
+Not a new run. The sweep's measured ITL divided into the weight bytes each configuration
+must read per token gives achieved memory bandwidth, against the A10G's 600 GB/s peak.
+
+| weights | bytes/token | ITL p50 | achieved | % of peak |
+|---|---|---|---|---|
+| bf16 | 16.38 GB | 34.2 ms | 479 GB/s | **79.8%** |
+| fp8 via Marlin | 8.19 GB | 18.9 ms | 433 GB/s | **72.2%** |
+| int4 via Marlin | 4.10 GB | 11.9 ms | 344 GB/s | **57.4%** |
+
+*Qwen3-8B, 8,190,735,360 params, batch 1, A10G 600 GB/s. Derived from the P6B sweep.*
+
+**Bandwidth efficiency falls as quantization deepens.** This is the dequantization penalty
+made visible, and it explains why fp8 is worth 1.81x rather than the 2.0x that halving the
+weight bytes implies. vLLM states the mechanism at startup: sm86 has no native fp8, so
+weight-only fp8 runs through Marlin, spending compute inside a memory-bound operation.
+
+Held at bf16's 79.8% efficiency, fp8 would run **17.1 ms / 58.5 tok/s** instead of 18.9 /
+52.9, and int4 **8.6 ms / 116.9 tok/s** instead of 11.9 / 84.0. So the tax is roughly **10%
+of decode at fp8 and 39% at int4**.
+
+**This partly answers an open question in `PROJECT.md` section 10**, "the real Marlin dequant
+penalty on sm86", which was carried out of Phase 4 with three candidate causes and no number.
+It also sharpens the still-open L4 question: `g6.xlarge` is sm89 with native fp8 and the same
+24 GB, so it should recover the 7.6 points directly, with no kernel work. That is now a
+cheap and decisive experiment rather than a speculative one.
+
+Caveat: this is derived from batch-1 ITL only, and attributes the entire gap to
+dequantization. Confirming that attribution needs a profiler on a single decode step, which
+would also say whether the cost is ALU, occupancy or memory coalescing.
