@@ -3796,3 +3796,37 @@ simply not the cost at these context lengths and the whole framing needs revisit
 COLD rises but with a slope far from 0.2556 ms/token, the bf16 prefill constant does not
 transfer to fp8 on Marlin -- which is the standing open question from P6L-9 and is the
 outcome I would bet on being at least partly true.
+
+---
+
+## P6B  Bombard sweep across quantization and speculation, 2026-09-02, written before the run
+
+Six configurations, vLLM only: {bf16, fp8, int4} x {spec off, EAGLE3 k=2}.
+Qwen3-8B, fp16 KV, `--max-model-len 16384`, A10G 24 GB, 512-token prompts / 64 max out.
+Per config: `bench.py --serial 12` for batch-1 latency, then `--sweep 2,6 --duration 45`
+open-loop Poisson for capacity. KV budget read from each run's own startup log.
+
+**Scope note, stated as one.** `bench.py` sends synthetic filler. Phase 5 measured filler
+as the least favourable content there is for speculation, acceptance 0.3035 against
+0.4905-0.6708 on real text, and found the benchmark understated the technique by 40%.
+**Every speculation number below is therefore a lower bound**, and the run cannot say what
+speculation is worth on real chat traffic. Fixing that needs a content-varying load
+generator, which does not exist yet.
+
+| # | Prediction | Value |
+|---|---|---|
+| P6B-1 | KV budget, spec off | bf16 ~26-33k, fp8 ~75k, int4 ~95k tokens |
+| P6B-2 | KV budget, spec on | each drops by roughly **16,000-25,000 tokens** for the draft head |
+| P6B-3 | ITL p50 at batch 1, spec off | bf16 **34.2 ms**, fp8 **18.9 ms**, int4 **~12 ms** |
+| P6B-4 | tokens per chunk, spec off | exactly **1.0** at every quantization |
+| P6B-5 | tokens per chunk, spec on, filler | **~1.5** (Phase 5 k=2 on filler) |
+| P6B-6 | batch-1 throughput gain from spec, filler | **1.4-1.5x** |
+| P6B-7 | capacity at 2 req/s | spec **ahead** of control |
+| P6B-8 | capacity at 6 req/s | spec **behind** control -- Phase 5 put the crossover at 4-6 req/s for this workload shape |
+| P6B-9 | The sign of the speculation effect flips between 2 and 6 req/s | the central claim of this sweep |
+
+**What would falsify what.** If spec never wins even at 2 req/s, filler acceptance is worse
+than Phase 5's 0.3035 or the draft is not loading. If spec still wins at 6 req/s, the
+crossover moved, and the most likely reason is that 16,384 ctx leaves the batch smaller
+than Phase 5's 4,096 did, so the server never reaches the batch size where verification
+overhead dominates.
