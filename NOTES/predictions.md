@@ -3851,3 +3851,71 @@ That moves two predictions, and the direction is the point: Phase 5 measured acc
 P6B-7 through P6B-9 stand unchanged: ahead at 2 req/s, behind at 6, sign flips between.
 If speculation now wins at 6 req/s too, the likely cause is that better acceptance moved
 the crossover to a higher rate, which would itself be the finding.
+
+### P6B actuals, 2026-09-02
+
+Qwen3-8B, vLLM 0.27.1, fp16 KV, `--max-model-len 16384`, A10G 24 GB (g5.2xlarge).
+650 real multi-step arithmetic prompts from `results/phase4-items.jsonl`, cycled in a fixed
+order so every configuration saw the identical sequence. 128 max output tokens.
+EAGLE3 `num_speculative_tokens=2`. KV budget read from each config's own startup log.
+Raw: `results/phase6-bombard.jsonl`, `results/phase6-bombard-summary.txt`.
+
+| weights | spec | KV budget | ITL p50 | tokens/chunk | batch-1 tok/s | cap @2 req/s | cap @6 req/s |
+|---|---|---|---|---|---|---|---|
+| bf16 | off | 33,312 | 34.2 ms | 1.00 | 29.5 | 1.72 req/s | 3.58 req/s |
+| bf16 | on | **would not start** | -- | -- | -- | -- | -- |
+| fp8 | off | 74,880 | 18.9 ms | 1.00 | 53.4 | 1.65 | 4.52 |
+| fp8 | on | 51,232 | 22.4 ms | **2.16** | **97.9** | 2.37 | 3.56 |
+| int4 | off | 101,920 | 11.9 ms | 1.00 | 84.6 | 1.65 | 4.73 |
+| int4 | on | 77,280 | 15.5 ms | **2.18** | **143.1** | 1.96 | **5.30** |
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6B-1 | KV off: bf16 26-33k, fp8 ~75k, int4 ~95k | 33,312 / 74,880 / 101,920 | correct; int4 7% above the range |
+| P6B-2 | spec costs 16-25k tokens | fp8 **23,648**, int4 **24,640** | correct. int4 matches Phase 5's 24,720 to 0.3% |
+| P6B-3 | ITL bf16 34.2, fp8 18.9, int4 ~12 | 34.2 / 18.9 / 11.9 | **exact on all three** |
+| P6B-4 | tokens per chunk = 1.0 with spec off | 1.00 at every quantization | correct |
+| P6B-5 (revised) | tokens per chunk 1.7-2.1 with spec | **2.16 / 2.18** | slightly above -- real content accepted better than assumed |
+| P6B-6 (revised) | batch-1 gain 1.6-1.9x | fp8 **1.83x**, int4 **1.69x** | correct |
+| P6B-7 | spec ahead at 2 req/s | fp8 **1.44x**, int4 **1.19x** | correct |
+| P6B-8 | spec behind at 6 req/s | fp8 **0.79x**, int4 **1.12x** | **half wrong** |
+| P6B-9 | the sign flips between 2 and 6 req/s | flips for fp8, **does not flip for int4** | **split** |
+
+#### The finding: the crossover is not a property of speculation, it is a property of KV headroom
+
+P6B-9 was stated as though the crossover belonged to the technique. It does not. Under the
+same offered load, on the same box, in the same hour:
+
+    fp8  + spec:  2 req/s 1.44x ahead  ->  6 req/s 0.79x BEHIND   (sign flips)
+    int4 + spec:  2 req/s 1.19x ahead  ->  6 req/s 1.12x ahead    (no flip)
+
+Speculation costs both configurations essentially the same KV, 23,648 and 24,640 tokens.
+What differs is what is left afterwards: fp8 keeps **51,232** tokens, int4 keeps **77,280**,
+a 51% larger budget. The tail latencies say the same thing far more loudly than the means:
+at 6 req/s, p99 TTFT is **28,163 ms for fp8+spec against 1,396 ms for int4+spec**, a 20x
+difference between two configurations whose batch-1 latencies differ by only 1.4x.
+
+So the mechanism is not that verification overhead stops being hidden at high batch, which
+is the textbook explanation and the one Phase 5 reached for. It is that speculation takes a
+fixed bite out of the KV budget, and whichever configuration cannot afford that bite starts
+queueing. **Quantization does not merely make speculation affordable, it decides whether the
+crossover exists at all in the range you care about.**
+
+This is falsifiable and should be tested: rerun fp8+spec at `--max-model-len 8192`, which
+roughly doubles how many sequences its 51,232 tokens can hold. If the flip disappears, the
+crossover is a KV-headroom effect. If it survives, verification overhead is the cause after
+all and this reading is wrong.
+
+#### bf16 + speculation would not start, which is itself the result
+
+The engine core failed to initialize. The captured log ends at "Engine core initialization
+failed. See root cause above" and the root cause line was not captured, which is a defect in
+`infra/vllm-launch.sh` worth fixing -- it should keep the whole log.
+
+The arithmetic is nevertheless unambiguous. bf16 has **33,312** KV tokens. Speculation costs
+~24,000 of them, leaving roughly **9,300** against a `--max-model-len` of 16,384. vLLM will
+not start when the budget cannot hold a single maximum-length sequence.
+
+Phase 5 measured this as bf16+EAGLE3 giving 1.91x concurrency and called it unusable. At
+16k context it is not merely unusable, it does not run. **The strongest form of "quantization
+is what makes speculation affordable" is that without it there is nothing to measure.**

@@ -1,0 +1,96 @@
+=== bf16-specoff
+  GPU KV cache size: 33,312 tokens
+  speculative_config=None
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    0.00    12     0    0.23       29 │       51m     n/a     n/a │      34m      35m │      n/a  [33m← n=12, need 20 for p95[0m
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                51 ms  (p50)
+  ITL               34.2 ms  (p50)   per STREAMED CHUNK
+  decode            29.5 tok/s   (1536 tokens / 52.10s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    87     0    1.72      221 │      112m     140m     n/a │      38m      46m │     5309m
+    6.00   294     0    3.58      458 │     1551m   17348m   29035m │      53m     304m │    30170m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (140ms) at ~6.0 req/s → [1m458 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== bf16-specon  LAUNCH FAILED
+=== fp8-specoff
+  GPU KV cache size: 74,880 tokens
+  speculative_config=None
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    0.00    12     0    0.41       52 │       48m     n/a     n/a │      19m      19m │      n/a  [33m← n=12, need 20 for p95[0m
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                48 ms  (p50)
+  ITL               18.9 ms  (p50)   per STREAMED CHUNK
+  decode            53.4 tok/s   (1536 tokens / 28.75s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    80     0    1.65      211 │       84m     129m     n/a │      19m      20m │     2833m
+    6.00   290     0    4.52      578 │      340m    2204m   12714m │      64m     575m │    27570m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (129ms) at ~6.0 req/s → [1m578 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== fp8-specon
+  GPU KV cache size: 51,232 tokens
+  speculative_config=SpeculativeConfig
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                58 ms  (p50)
+  ITL               22.4 ms  (p50)   per STREAMED CHUNK
+  tokens/chunk      2.16        1536 tokens in 711 chunks
+  per token         10.4 ms  (derived)
+  decode            97.9 tok/s   (1536 tokens / 15.68s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00   110     0    2.37      303 │       98m     153m     171m │      24m      44m │     1857m
+    6.00   279     0    3.56      456 │     1022m   20439m   28163m │     143m     597m │    33217m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (153ms) at ~6.0 req/s → [1m456 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== int4-specoff
+  GPU KV cache size: 101,920 tokens
+  speculative_config=None
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    0.00    12     0    0.64       82 │       42m     n/a     n/a │      12m      12m │      n/a  [33m← n=12, need 20 for p95[0m
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                42 ms  (p50)
+  ITL               11.9 ms  (p50)   per STREAMED CHUNK
+  decode            84.6 tok/s   (1536 tokens / 18.16s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    77     0    1.65      212 │       62m      97m     n/a │      12m      13m │     1817m
+    6.00   222     0    4.73      605 │      153m     446m     668m │      15m     125m │     6888m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (97ms) at ~6.0 req/s → [1m605 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== int4-specon
+  GPU KV cache size: 77,280 tokens
+  speculative_config=SpeculativeConfig
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                50 ms  (p50)
+  ITL               15.5 ms  (p50)   per STREAMED CHUNK
+  tokens/chunk      2.18        1536 tokens in 704 chunks
+  per token          7.1 ms  (derived)
+  decode           143.1 tok/s   (1536 tokens / 10.73s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    89     0    1.96      251 │       71m      88m     n/a │      16m      18m │     1190m
+    6.00   271     0    5.30      678 │      310m    1171m    1396m │      90m     439m │    17018m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (88ms) at ~6.0 req/s → [1m678 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
