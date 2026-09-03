@@ -596,6 +596,40 @@ function ConversationPanel({ turns, contextTokens, maxModelLen, turnTtfts, perTu
     </${Group}>`;
 }
 
+function MemoryPanel({ config, gpu, contextTokens, engine }) {
+  const c = config || {};
+  const d = gpu && gpu.devices && gpu.devices[0];
+  // Derive KiB/token from what this server reported rather than hardcoding 144.
+  const kib = isNum(c.kv_gib) && isNum(c.kv_tokens) && c.kv_tokens > 0
+    ? (c.kv_gib * 1024 * 1024) / c.kv_tokens : null;
+  const fits = isNum(c.kv_tokens) && isNum(c.max_model_len) && c.max_model_len > 0
+    ? c.kv_tokens / c.max_model_len : null;
+  const mine = isNum(contextTokens) && isNum(kib) ? (contextTokens * kib) / (1024 * 1024) : null;
+  const minePct = isNum(contextTokens) && isNum(c.kv_tokens) && c.kv_tokens > 0
+    ? (contextTokens / c.kv_tokens) * 100 : null;
+  const overhead = d && isNum(d.memory_used) && isNum(c.kv_gib)
+    ? d.memory_used / 1024 - c.kv_gib : null;
+  const v = (engine && engine.values) || {};
+  const live = isNum(v.kv_usage) && isNum(c.kv_tokens) ? v.kv_usage * c.kv_tokens : null;
+  return html`
+    <${Group} title="memory and kv cache">
+      <${M} label="kv per token" value=${kib ? kib.toFixed(1) + " KiB" : "unavailable"}
+            note="2 for key and value, times 36 layers, times 8 kv heads, times 128 dims, times 2 bytes. every token of every conversation costs this, forever" />
+      <${M} label="kv budget" value=${rowText(c.kv_tokens, 0, " tok")}
+            note=${isNum(c.kv_gib) ? c.kv_gib.toFixed(2) + " GiB, sized once at startup by profiling free memory and never resized" : null} />
+      <${M} label="full conversations that fit" value=${fits ? fits.toFixed(2) : "unavailable"}
+            note=${isNum(c.max_model_len) ? "budget divided by the " + c.max_model_len.toLocaleString() + " token context limit. this, not compute, is what caps concurrency" : null} />
+      <${M} label="this conversation holds"
+            value=${mine ? mine.toFixed(3) + " GiB" : "unavailable"}
+            note=${minePct !== null ? minePct.toFixed(2) + "% of the whole budget. it is held for as long as the chat is alive, not just while generating" : null} />
+      <${M} label="kv currently live" value=${live === null ? "unavailable" : live.toFixed(0) + " tok"}
+            note="tokens resident across every conversation on this server right now" />
+      <${M} label="weights and overhead"
+            value=${overhead ? overhead.toFixed(2) + " GiB" : "unavailable"}
+            note="video memory in use minus the kv cache: the weights themselves plus activations, cuda context and captured graphs" />
+    </${Group}>`;
+}
+
 function ConfigPanel({ config }) {
   const c = config || {};
   const q = c.quantization;
@@ -625,6 +659,7 @@ const Instruments = memo(function Instruments({ requestDisplay, clientTtftMs, en
       <${ConversationPanel} turns=${turns} contextTokens=${contextTokens} maxModelLen=${maxModelLen}
                             turnTtfts=${turnTtfts} perTurnTokens=${perTurnTokens} />
       <${GpuNowPanel} gpu=${gpu} />
+      <${MemoryPanel} config=${config} gpu=${gpu} contextTokens=${contextTokens} engine=${engine} />
       <${ConfigPanel} config=${config} />
     </aside>`;
 });
@@ -1168,7 +1203,7 @@ function initialMockMessages() {
 if (typeof globalThis.__LABBENCH_TEST__ !== "undefined") {
   Object.assign(globalThis.__LABBENCH_TEST__, {
     RequestPanel, EngineNowPanel, GpuNowPanel, ConversationPanel, ConfigPanel,
-    TtftChart, M, Bar, Group,
+    TtftChart, M, Bar, Group, MemoryPanel,
   });
 }
 

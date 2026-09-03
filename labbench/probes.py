@@ -117,6 +117,21 @@ def journal(name: str, lines: int = 200) -> dict:
     return {"unit": name, "lines": out.splitlines()}
 
 
+def journal_current(unit: str) -> str:
+    """The whole log of the unit's CURRENT invocation. `-n N` is wrong here: vLLM emits
+    more than N lines after startup, so the config line scrolls out, and a big enough N
+    reaches into a PREVIOUS run whose KV budget differs."""
+    rc, out = _run(["systemctl", "show", unit, "--property=InvocationID", "--value"])
+    inv = out.strip()
+    if rc == 0 and inv:
+        rc2, txt = _run(["journalctl", f"_SYSTEMD_INVOCATION_ID={inv}",
+                         "--no-pager", "-o", "cat"], 30.0)
+        if rc2 == 0 and txt.strip():
+            return txt
+    rc3, txt = _run(["journalctl", "-u", unit, "-n", "50000", "--no-pager", "-o", "cat"], 30.0)
+    return txt if rc3 == 0 else ""
+
+
 def kv_from_log(text: str) -> dict:
     """Resolved KV budget from a vLLM startup log. Patterns match infra/vllm-launch.sh."""
     out: dict = {}

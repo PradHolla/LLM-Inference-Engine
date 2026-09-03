@@ -147,8 +147,7 @@ SPEC_RE = re.compile(r"speculative_config=(?:SpeculativeConfig\([^)]*\)|None)")
 def config_from_journal(unit: str) -> dict:
     """The config a RUNNING server actually resolved, from its own log. Needed because
     the lab bench may not have launched it, and because a restart forgets."""
-    j = probes.journal(unit, 4000)
-    text = "\n".join(j.get("lines") or [])
+    text = probes.journal_current(unit)
     cfg = probes.kv_from_log(text)
     cfg.pop("max_concurrency", None)
     m = ARGS_RE.findall(text)
@@ -262,8 +261,7 @@ class Switcher:
             return await self._fail(f"not healthy within {READY_TIMEOUT:.0f}s")
 
         self._stage("reading resolved config")
-        j = await asyncio.to_thread(probes.journal, unit, 4000)
-        text = "\n".join(j.get("lines") or [])
+        text = await asyncio.to_thread(probes.journal_current, unit)
         cfg = probes.kv_from_log(text)
         cfg.pop("max_concurrency", None)
         cfg["model"] = MODEL_W4A16 if quant == "int4" else MODEL

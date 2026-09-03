@@ -49,6 +49,8 @@ const cases = [
   ["GpuNowPanel, no gpu",     "GpuNowPanel", { gpu: { devices: [], processes: [], error: "nvidia-smi missing" } }],
   ["ConversationPanel",       "ConversationPanel", { turns: 5, contextTokens: 490, maxModelLen: 16384, turnTtfts: [46, 107, 109, 112, 114], perTurnTokens: 98 }],
   ["ConversationPanel, empty","ConversationPanel", { turns: 0, contextTokens: null, maxModelLen: null, turnTtfts: [], perTurnTokens: 0 }],
+  ["MemoryPanel",             "MemoryPanel", { config, gpu, contextTokens: 490, engine }],
+  ["MemoryPanel, all null",   "MemoryPanel", { config: null, gpu: null, contextTokens: null, engine: null }],
   ["ConfigPanel",             "ConfigPanel", { config }],
   ["ConfigPanel, null",       "ConfigPanel", { config: null }],
   ["TtftChart",               "TtftChart", { turnTtfts: [46, 107, 109] }],
