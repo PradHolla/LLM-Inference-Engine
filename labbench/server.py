@@ -219,7 +219,7 @@ def selftest() -> int:
             fails.append(f"  FAIL {name}: got {got!r}, want {want!r}")
 
     paths = {getattr(r, "path", None) for r in app.routes}
-    for p in ("/v1/chat/completions", "/labbench/state", "/labbench/traces",
+    for p in ("/v1/chat/completions", "/v1/models", "/labbench/state", "/labbench/traces",
               "/labbench/journal", "/labbench/metrics/raw", "/labbench/render",
               "/labbench/backend", "/labbench/prediction", "/labbench/bombard"):
         if p not in paths:

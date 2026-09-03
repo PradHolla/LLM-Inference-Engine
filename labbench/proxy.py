@@ -238,6 +238,19 @@ async def traces(n: int = 20):
     return {"upstream": UPSTREAM, "traces": [asdict(t) for t in RECENT[-n:]] + live}
 
 
+@app.get("/v1/models")
+async def models():
+    """Pass through, so a client that DISCOVERS its model works against the gateway
+    exactly as it does against the engine. bench.py is told its model and never noticed."""
+    try:
+        r = await CLIENT.get(f"{UPSTREAM}/v1/models")
+        return Response(content=r.content, status_code=r.status_code,
+                        media_type=r.headers.get("content-type", "application/json"))
+    except Exception as e:
+        return Response(content=json.dumps({"error": f"{type(e).__name__}: {e}"}),
+                        status_code=502, media_type="application/json")
+
+
 @app.get("/health")
 async def health():
     return {"ok": True, "upstream": UPSTREAM}
