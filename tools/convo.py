@@ -74,6 +74,11 @@ async def prefix_stats(client, metrics_url: str) -> tuple[float, float] | None:
             if line.startswith("#"):
                 continue
             name = line.split("{")[0].split(" ")[0]
+            # `external_` is the KV-connector's cache, not the local prefix cache, and it
+            # sits at 0.0. It also ends with the same suffix, so without this guard it
+            # overwrites the real counters with zero. Same defect labbench/probes.py fixed.
+            if "external_" in name:
+                continue
             if name.endswith("prefix_cache_queries_total"):
                 q = float(line.rsplit(" ", 1)[1])
             elif name.endswith("prefix_cache_hits_total"):
@@ -152,7 +157,9 @@ async def run(a) -> int:
             rec, reply = await one_turn(client, a.url, a.model, send,
                                         a.max_tokens, a.think)
             after = await prefix_stats(client, a.metrics_url)
-            if before and after and after[0] > before[0]:
+            # `is not None`, not truthiness: a counter pair of (0.0, 0.0) is falsy in the
+            # wrong way and silently skipped the whole measurement.
+            if before is not None and after is not None and after[0] > before[0]:
                 rec.prefix_hit_rate = (after[1] - before[1]) / (after[0] - before[0])
             rec.turn = i
             rows.append(rec)
