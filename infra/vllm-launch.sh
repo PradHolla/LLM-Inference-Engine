@@ -5,6 +5,12 @@
 #   ./vllm-launch.sh <label> [vllm args...]
 set -uo pipefail
 LABEL="${1:?usage: vllm-launch.sh <label> [args...]}"; shift
+# KV_PIN pins --kv-cache-memory. vLLM sizes KV by profiling free memory at startup and that
+# profile is NOT deterministic: identical commands have taken 9.28, 9.51 and 10.28 GiB on
+# this box, and the greedy one OOMed during CUDA graph capture. Pinning also removes the
+# 10-15% run-to-run KV variance that makes capacity comparisons unattributable.
+PIN_ARGS=""
+[ -n "${KV_PIN:-}" ] && PIN_ARGS="--kv-cache-memory $KV_PIN"
 VENV=/opt/llm/.venv-vllm
 
 sudo systemctl stop vllm 2>/dev/null
@@ -32,7 +38,7 @@ sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --setenv=PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin \
   $VENV/bin/python -m vllm.entrypoints.openai.api_server \
-    --host 0.0.0.0 --port 8000 "$@" >/dev/null 2>&1
+    --host 0.0.0.0 --port 8000 $PIN_ARGS "$@" >/dev/null 2>&1
 INVID=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
 
 # Read THIS invocation only. `journalctl -u vllm` spans every launch, so in a sweep a
@@ -79,3 +85,11 @@ echo "$L" | grep -oE 'Maximum concurrency for [0-9,]+ tokens per request: [0-9.]
 echo "$L" | grep -oE 'speculative_config=SpeculativeConfig\([^)]*\)|speculative_config=None' | tail -1 | sed 's/^/  /'
 echo "$L" | grep -oE "rejection_sample_method='[a-z]*'"                   | tail -1 | sed 's/^/  /'
 echo "  vram: $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
+# vLLM prints this on EVERY startup, success included, and the launcher ignored it for
+# three phases while the reproducibility problem it solves went unfixed.
+REC=$(echo "$L" | grep -oE '\-\-kv-cache-memory=[0-9]+' | head -1 | cut -d= -f2)
+if [ -n "$REC" ]; then
+    echo "  kv pin recommended by the engine: --kv-cache-memory $REC ($(awk -v b="$REC" 'BEGIN{printf "%.2f", b/1073741824}') GiB)"
+    mkdir -p results && echo "$REC" > "results/kv-pin-$LABEL.txt"
+    [ -n "${KV_PIN:-}" ] && echo "  (this run was pinned at $KV_PIN)"
+fi
