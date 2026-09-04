@@ -4290,3 +4290,45 @@ and exactly 0.0% both where it scores 100% and where it scores 0%.
 **A noise floor is a property of the slice mix, not of the model.** Carrying `d0` between
 experiments with different mixes is invalid, and the P6Q writeup that leaned on 1.8% was
 wrong to. Correction stands beneath the original rather than replacing it.
+
+### P6L-2 cold arm: the CONTROL FAILED, and P6L-2 remains unanswered
+
+| arm | turns | prompt tokens | TTFT early -> late | slope ms/token |
+|---|---|---|---|---|
+| warm | 25 | 23 -> 7,724 | 111.5 -> 164.6 (1.48x) | **0.0068** |
+| cold | 25 | 36 -> 8,081 | 109.8 -> 167.9 (1.53x) | **0.0099** |
+
+Predicted separation at turn 25: **~21x**. Measured: **1.0x**. The two arms are
+indistinguishable.
+
+**The cold arm was not cold.** `convo.py --cold` prefixes noise to the new USER MESSAGE, and
+the conversation history is rendered *before* that message. So turn N's prompt was still
+`[system][turn 1]...[turn N-1][noise + question N]` -- every token up to the new message
+matched the previous turn exactly and the cache hit as normal. The noise moved the first
+differing token to precisely where it already was.
+
+To defeat the cache the noise must sit at **position zero of the rendered prompt**, which
+means a system message or the head of turn 1, not the head of turn N.
+
+`NOTES/code-notes.md` says this in the file's own documentation: *"The placement is the whole
+point ... noise at the FRONT moves that boundary to position zero."* I wrote that sentence
+and then put the noise at the front of the wrong string.
+
+**Second defect, same run.** `convo.py` opens `--out` in append mode, and the file already
+held two records from the attempt killed on 2026-09-02. The analysis pooled two runs; turn
+numbers restart mid-file (1, 2, 1, 2, 5...). The runner must truncate, or the analysis must
+key on run identity.
+
+#### What can still be said, and what cannot
+
+Warm TTFT rose 0.0068 ms per prompt token. A cold prefill is predicted at 0.2556 ms/token,
+so a full re-prefill of turn 25's 7,724 tokens would cost roughly **2,000 ms** against the
+**166 ms** measured. That is a 12x gap and it is suggestive.
+
+But it leans on the *predicted* constant, and measuring that constant rather than assuming it
+is the entire reason the cold arm exists. **P6L-2 is not answered.** The honest status is
+that the warm curve is consistent with prefix caching working and no control has ruled out
+the alternative.
+
+Cost of the mistake: one wasted run, and a control that would have been reported as a
+confirmation had the arms happened to differ for some other reason.
