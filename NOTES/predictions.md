@@ -4030,3 +4030,70 @@ multi-step reasoning. That is test 2 and it gates shipping, not this one.
 
 Phase 3's 1.57x for fp8 KV is not the prediction above: it was measured at bf16 weights on a
 different workload, so it indicates the shape and not the number.
+
+### P6K actuals, 2026-09-04
+
+Qwen3-8B, vLLM 0.27.1, fp8 weights, `--max-model-len 16384`, A10G, 650 real arithmetic
+prompts, 128 max output, EAGLE3 k=2. All four cells run fresh in one session.
+Raw: `results/phase6-kvdtype.jsonl`, `results/phase6-kvdtype-summary.txt`.
+
+| KV dtype | spec | KV budget | KV memory | batch-1 | cap@2 | cap@6 | KV p90 | max waiting |
+|---|---|---|---|---|---|---|---|---|
+| fp16 | off | 74,880 | 10.28 GiB | 53.4 tok/s | 1.95 | 5.12 | -- | -- |
+| fp16 | on | 58,816 | 8.30 GiB | 97.9 | 1.92 | 4.97 | 86.1% | **26** |
+| fp8 | off | 135,152 | 9.28 GiB | 52.7 | 2.25 | 4.42 | 55.4% | 10 |
+| fp8 | on | 102,464 | 7.23 GiB | 90.0 | 1.69 | **5.29** | **12.0%** | **0** |
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6K-1 | ~149,000 tok, spec off | **135,152** (1.80x, not 2.0x) | missed 9%. Bytes/token halved exactly, but the profiler gave KV 9.28 GiB instead of 10.28 |
+| P6K-2 | ~102,000 tok, spec on | **102,464** | correct |
+| P6K-3 | ITL within 2% | spec off **+1%**, spec on **+7.6%** | half correct |
+| P6K-4 | KV occupancy under 50% | **12.0% p90** | correct, and beyond the prediction |
+| P6K-5 | waiting falls to 0 | **0** | correct |
+| **P6K-6** | **spec rises above its control at 6 req/s** | **0.97x -> 1.20x** | **CONFIRMED** |
+| P6K-7 | cap@2 unchanged | 1.92 -> **1.69** | wrong, it fell 12% |
+
+#### The mechanism is confirmed by intervention
+
+Halving KV bytes per token, changing nothing about the draft, the batch or the kernel, took
+speculation from **86.1% KV occupancy with 26 requests queued** to **12.0% with none**, and
+its capacity at 6 req/s from 0.97x of control to 1.20x. The crossover is gone.
+
+A third piece of evidence arrived unplanned. This session's fp16-KV spec-on cell profiled
+**58,816** KV tokens where Tuesday's identical command profiled **51,232**, the startup
+variance this project keeps meeting. Capacity at 6 req/s across all three points:
+
+    KV  51,232 tokens -> 3.56 req/s
+    KV  58,816 tokens -> 4.97 req/s
+    KV 102,464 tokens -> 5.29 req/s
+
+Monotonic. A 14.8% difference in KV budget, from nothing but startup profiling noise,
+produced a **40% difference in capacity**. That is a stronger statement of the mechanism
+than the designed comparison, and it arrived by accident.
+
+#### But fp8 KV is not free, and the control says so
+
+**With speculation off, fp8 KV made capacity worse: 5.12 -> 4.42 req/s, down 14%**, despite
+holding 135,152 tokens against 74,880. Its p99 TTFT at 6 req/s was 10,870 ms against the
+fp16 control's 1,818 ms. `cap@2` also fell in three of four comparisons.
+
+Batch-1 ITL barely moved (18.9 -> 19.1 ms), so this is not a per-token cost. The likely
+mechanism is that fp8 KV trades memory for compute on every attention read, and that compute
+scales with batch times context, so it only shows up under load. **Not verified** -- it is
+the same shape of claim the P6B follow-up made and had to go and measure, and it should be
+measured the same way rather than asserted.
+
+**So fp8 KV is not a free win. It helps exactly where KV is the binding constraint and hurts
+where it is not.** For fp8+speculation, where KV is binding, it is worth 1.20x. For fp8
+alone, where 74,880 tokens were already enough, it costs 14%.
+
+That is the same lesson as Phase 3's prefix caching and Phase 4's quantization, for the
+third time: **check whether anything is actually pressing against the limit you are about to
+relieve.**
+
+#### What this does not settle
+
+Batch-1 throughput fell 97.9 -> 90.0 tok/s with fp8 KV, 8%, which nobody predicted and which
+the +7.6% ITL explains arithmetically but not mechanically. And nothing here touches accuracy:
+test 2 still gates shipping.
