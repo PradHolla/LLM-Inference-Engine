@@ -4237,3 +4237,56 @@ nothing and "harmless" becomes a measurement. If it lands near 2%, fp8 KV really
 answers -- symmetrically, so accuracy is unharmed, but the claim would need restating as
 "unbiased" rather than "inert". **P6Q-C1 predicts the first, which is the outcome that would
 make my own earlier caveat unnecessary -- so it is the prediction to distrust most.**
+
+### P6Q-C actuals: the noise floor, 2026-09-04
+
+fp16 KV against an independent rerun of itself. 1,210 paired items, zero dropped.
+Raw: `results/phase6-qual-kvfp16b.jsonl`.
+
+**The floor is `d0` = 7.8% pooled answer difference, not the 1.8% carried over from Phase 4.**
+Rerunning the identical configuration also moved accuracy by **0.6 points**, 52.6% to 52.0%.
+
+| slice | n | floor `d0` | vs fp8 KV | above floor |
+|---|---|---|---|---|
+| gsm8k / think | 200 | 13.0% | 15.0% | +2.0 |
+| gsm8k / nothink | 200 | 1.5% | 8.0% | +6.5 |
+| **longctx** | 90 | **0.0%** | **0.0%** | **0.0** |
+| math / think / k4 | 45 | 4.4% | 4.4% | 0.0 |
+| math / think / k8 | 75 | 5.3% | 8.0% | +2.7 |
+| math / think / k16 | 105 | 25.7% | 33.3% | +7.6 |
+| math / think / k32 | 135 | 23.7% | 32.6% | +8.9 |
+| math / nothink / k4 | 45 | 0.0% | 4.4% | +4.4 |
+| math / nothink / k8 | 75 | 0.0% | 9.3% | +9.3 |
+| math / nothink / k16, k32 | 240 | 0.0% | 0.0% | 0.0 |
+| **ALL** | **1210** | **7.8%** | **11.7%** | **+3.9** |
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6Q-C1 | floor 8-14% | **7.8%** | just under, essentially correct |
+| P6Q-C2 | longctx floor 0.0% | **0.0%** | correct |
+| P6Q-C3 | churn concentrates near the competence limit | exactly: 25.7% and 23.7% on the think slices the model half-solves; **0.0%** where it is confident (longctx 100%, math/nothink/k4 93%) and **0.0%** where it is hopeless (math/nothink/k16 and k32 at 0%) | correct |
+| P6Q-C4 | control McNemar p > 0.05 | **0.5341** | correct |
+
+#### The precise claim, which is not the one I would have made without this arm
+
+**fp8 KV is unbiased, not inert.** It adds **3.9 points of answer churn above the floor**,
+and the addition is real and systematic -- present on eight of eleven slices, up to +9.3.
+
+But it costs no accuracy. The delta from swapping the KV dtype is **0.1 points**, while the
+delta from **rerunning the identical config** is **0.6 points**. *The treatment moved accuracy
+less than doing nothing did.*
+
+Without this arm the honest statement would have stopped at "passes the gate". With it:
+fp8 KV perturbs which answers come out, does not bias whether they are right, and the
+perturbation is smaller than the run-to-run variance already present in the system.
+
+#### Phase 4's `d0` of 1.8% does not transfer, and the reason is the mechanism
+
+Phase 4 measured 1.8% on bf16 over a different slice mix, and concluded the floor tracks
+**how close the model is to its competence limit**, not chain length. This arm is that
+conclusion reproduced with a much harder mix: 25.7% churn where the model scores 65.7%,
+and exactly 0.0% both where it scores 100% and where it scores 0%.
+
+**A noise floor is a property of the slice mix, not of the model.** Carrying `d0` between
+experiments with different mixes is invalid, and the P6Q writeup that leaned on 1.8% was
+wrong to. Correction stands beneath the original rather than replacing it.
