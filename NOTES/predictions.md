@@ -4332,3 +4332,56 @@ the alternative.
 
 Cost of the mistake: one wasted run, and a control that would have been reported as a
 confirmation had the arms happened to differ for some other reason.
+
+---
+
+## P6L-2 ANSWERED, 2026-09-04: prefix caching is worth 13.4x, measured against a verified control
+
+Qwen3-8B, vLLM 0.27.1, fp8 weights, fp16 KV, 16,384 ctx, no speculation, A10G. One
+conversation grown 25 turns, 300 output tokens per turn, through the lab bench gateway.
+COLD prefixes a fresh random system message per turn, placing new text at position zero.
+
+**The control verified itself before collecting data**: prefix cache hit rate **0.000 at
+every one of 25 turns**, checked at turn 3 with an abort if it exceeded 0.35. The previous
+attempt (incident 45) put the noise on the new user message, where the history renders first
+and the cache hit exactly as in the warm arm.
+
+| turn | context | WARM | COLD | ratio |
+|---|---|---|---|---|
+| 1 | 62 | 28.4 ms | 32.4 ms | 1.1x |
+| 5 | 1,346 | 116.4 ms | 387.3 ms | 3.3x |
+| 10 | 2,947 | 128.5 ms | 820.2 ms | 6.4x |
+| 15 | 4,554 | 141.8 ms | 1,290.0 ms | 9.1x |
+| 20 | 6,156 | 153.2 ms | 1,779.0 ms | 11.6x |
+| **25** | **7,761** | **165.7 ms** | **2,290.8 ms** | **13.8x** |
+
+    WARM slope   0.0100 ms per prompt token   intercept  94.4 ms
+    COLD slope   0.2912 ms per prompt token   intercept -14.3 ms
+    slope ratio  29x
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6L-2 | warm flat within 1.5x turn 2 to 25 | **1.48x** (111.5 -> 165.7 ms) | correct, at the boundary |
+| P6L-2c | cold rises linearly to ~2,085 ms at turn 25 | **2,290.8 ms** | correct, 10% high |
+| P6L-2s | separation ~21x | **13.4x** | right order and direction, 36% low |
+| -- | cold slope 0.2556 ms/token | **0.2912** | **1.14x higher than predicted** |
+
+#### Prefix caching is confirmed, and the residual is attention, not recomputation
+
+Warm TTFT rises 0.0100 ms per prompt token; cold rises 0.2912. **A cached token costs 29x
+less than an uncached one, but it does not cost nothing.** The warm curve is not flat and
+should not have been predicted flat: caching removes the *recomputation* of old tokens, but
+each turn's ~320 new tokens must still attend over every cached token. That residual is what
+the 0.0100 slope measures.
+
+#### The cold slope is 14% above prediction, and the Marlin warning predicted this
+
+Predicted 0.2556 ms/token = the bf16 fit from `results/phase2-prefill-*.jsonl` divided by
+vLLM's 1.21x. Measured **0.2912** on fp8.
+
+So vLLM+fp8 prefills only 6% faster than bf16 did on `engine/manual.py`, not the 21% the
+engine speedup alone implies. Prefill is compute-bound and fp8 on sm86 runs through Marlin,
+which vLLM warns "may degrade performance for compute-heavy workloads". **P6L-9 flagged this
+as the prediction most likely to be wrong, for this exact reason, and it was wrong in that
+exact direction.** The dequantization tax now has a second independent measurement: 7.6
+points of decode bandwidth efficiency, and 14% of prefill throughput.

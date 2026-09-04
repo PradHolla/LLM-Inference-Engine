@@ -12,9 +12,16 @@ uses the observed span, not the nominal window (incident 10). See NOTES/code-not
 """
 import json, sys, glob, os
 def pct(xs,p):
+    # A percentile needs 1/(1-p) samples or it is the maximum in disguise (incident 11).
     if not xs: return None
+    if p >= 100 or len(xs) < 1 / (1 - p / 100): return None
     s=sorted(xs); k=(len(s)-1)*p/100; lo=int(k); hi=min(lo+1,len(s)-1)
     return s[lo]+(s[hi]-s[lo])*(k-lo)
+
+def ms(v):
+    """Seconds to ms, preserving None. `(x or 0)*1000` turns 'unmeasurable' into 0 ms."""
+    return None if v is None else v*1000
+
 
 def curve(path):
     by={}
@@ -33,10 +40,13 @@ def curve(path):
         span=max(t1-t0,1e-9)
         itl=[i for r in rs for i in (r.get("itls") or [])]
         out.append({"rate":rate,"n":len(rs),"rps":len(rs)/span,
-                    "ttft_p50":pct([r["ttft"] for r in rs],50)*1000,
-                    "ttft_p95":pct([r["ttft"] for r in rs],95)*1000,
-                    "itl_p50":(pct(itl,50) or 0)*1000,
-                    "itl_p95":(pct(itl,95) or 0)*1000})
+                    # pct returns None when the sample is too small to support the
+                    # percentile (incident 11); ms() keeps that None rather than
+                    # substituting 0, which would read as a spectacular latency.
+                    "ttft_p50":ms(pct([r["ttft"] for r in rs],50)),
+                    "ttft_p95":ms(pct([r["ttft"] for r in rs],95)),
+                    "itl_p50":ms(pct(itl,50)),
+                    "itl_p95":ms(pct(itl,95))})
     return out
 
 SERIES=[

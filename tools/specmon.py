@@ -68,7 +68,10 @@ def _labels(key: str) -> dict[str, str]:
 NOT_A_COUNT = ("rate", "ratio", "efficiency", "per_second", "seconds", "_time")
 
 def _is_count(n: str) -> bool:
-    return not any(w in n for w in NOT_A_COUNT)
+    # `external_` is the KV-connector's own counter, a different thing that shares the
+    # suffix. It sits at 0.0 today, so summing it is currently harmless -- but it is the
+    # same defect that overwrote convo.py's prefix counters with zero.
+    return not any(w in n for w in NOT_A_COUNT) and "external_" not in n
 
 BINDINGS = [
     ("per_pos",  lambda n: "spec_decode" in n and "accept" in n and _is_count(n)

@@ -22,7 +22,16 @@ echo "  bench flags: ${BENCH_FLAGS:-<none>}"
 
 # PATH must include the venv bin or FlashInfer's JIT cannot find ninja and the engine
 # dies during warmup with a FileNotFoundError that names the tool, not the cause.
+# Stop, then wait for the driver to reclaim VRAM. The port closing and the memory freeing
+# are different moments, and launching in the gap makes vLLM profile against memory the
+# previous server still holds (incident 39, and it cost an hour on 2026-09-04).
 $SSH "sudo systemctl stop vllm 2>/dev/null; sudo systemctl reset-failed vllm 2>/dev/null;
+      for i in \$(seq 1 60); do
+          u=\$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+          [ -z \"\$u\" ] && break
+          [ \"\$u\" -lt 1024 ] && break
+          sleep 2
+      done;
       sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
         --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
         --setenv=PYTHONUNBUFFERED=1 \
