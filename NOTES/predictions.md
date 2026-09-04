@@ -4210,3 +4210,30 @@ confident or hopeless show 0.0% -- longctx at 100%, math/nothink/k16 and k32 at 
 
 Consistent with harmless nondeterminism, not proof of it. Resolving it costs one more arm:
 fp16 KV against itself.
+
+### P6Q-C  The control arm, written before it runs
+
+fp16 KV against **itself**: an independent second run of the identical configuration, so the
+only difference is batch composition reordering floating-point accumulation. Whatever
+disagreement appears has no cause, and is the noise floor `d0` for this slice mix.
+
+Not pinned, matching arm A's conditions exactly. Label `kvfp16b`.
+
+| # | Prediction | Value |
+|---|---|---|
+| P6Q-C1 | control ansdiff, pooled | **8 - 14%**, i.e. close to the 11.7% measured against fp8 KV |
+| P6Q-C2 | longctx control ansdiff | **0.0%**, matching both earlier arms |
+| P6Q-C3 | the churn concentrates near the competence limit | gsm8k/think and math/think/k16 high, math/nothink/k16 and k32 at zero |
+| P6Q-C4 | control McNemar p | **> 0.05**, since a config cannot be biased against itself |
+
+**Reasoning.** Phase 4 measured `d0` at 1.8%, but on bf16 weights over a different slice mix,
+and it also established that the floor tracks **how close the model is to its competence
+limit**, not chain length. Today's mix is far harder -- gsm8k/think sits at 57% and
+math/think/k16 at 66-72%, both squarely in the regime where Phase 4 said nondeterminism flips
+answers. So the floor here should be much higher than 1.8%.
+
+**What each outcome means.** If the control lands near 11.7%, fp8 KV contributed essentially
+nothing and "harmless" becomes a measurement. If it lands near 2%, fp8 KV really is moving
+answers -- symmetrically, so accuracy is unharmed, but the claim would need restating as
+"unbiased" rather than "inert". **P6Q-C1 predicts the first, which is the outcome that would
+make my own earlier caveat unnecessary -- so it is the prediction to distrust most.**
