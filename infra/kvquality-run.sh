@@ -12,7 +12,12 @@ SLICES="math,gsm8k,longctx"
 # hour the other one already cost.
 ARMS="${1:-kvfp16 kvfp8}"
 for arm in $ARMS; do
-    kflag=""; [ "$arm" = kvfp8 ] && kflag="--kv-cache-dtype fp8"
+    # Pin the KV allocation instead of letting vLLM profile it. Its profiler is
+    # non-deterministic: the same command took 9.28 GiB in the kv sweep and 10.28 GiB here,
+    # and the greedy run OOMed during CUDA graph capture on an otherwise idle GPU. vLLM
+    # prints this exact value as the fix. Pinning also removes the 10-15% run-to-run KV
+    # variance that has made capacity comparisons unattributable since Phase 3.
+    kflag=""; [ "$arm" = kvfp8 ] && kflag="--kv-cache-dtype fp8 --kv-cache-memory 9959978415"
     echo "########## arm $arm"
     if ! ./infra/vllm-launch.sh "qual-$arm" --model Qwen/Qwen3-8B --max-model-len 16384 \
            --quantization fp8 $kflag; then
