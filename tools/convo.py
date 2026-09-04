@@ -51,14 +51,36 @@ class Turn:
     usage_cached_tokens: int | None = None
     usage_completion_tokens: int | None = None
     itls_ms: list[float] = field(default_factory=list)
+    prefix_hit_rate: float | None = None   # measured per turn from vLLM's counters
     status: str = "ok"
     error: str | None = None
 
 
-def noise(n: int = 24) -> str:
-    """Random text to place at the FRONT of the prompt, which is what defeats a prefix
-    cache: the hit ends at the first differing token."""
+def noise(n: int = 64) -> str:
+    """Random text for position ZERO of the rendered prompt. A prefix cache matches an exact
+    prefix, so only text before every other token shifts the whole sequence. Noise on the
+    NEW USER MESSAGE does nothing: the history renders first and still matches (incident 45)."""
     return "".join(random.choices(string.ascii_lowercase + " ", k=n))
+
+
+async def prefix_stats(client, metrics_url: str) -> tuple[float, float] | None:
+    """vLLM's cumulative prefix-cache counters. This version does not report
+    usage.prompt_tokens_details.cached_tokens, so the counters are the only signal that
+    says whether the cold arm actually went cold."""
+    try:
+        r = await client.get(metrics_url.rstrip("/") + "/metrics", timeout=10)
+        q = h = None
+        for line in r.text.splitlines():
+            if line.startswith("#"):
+                continue
+            name = line.split("{")[0].split(" ")[0]
+            if name.endswith("prefix_cache_queries_total"):
+                q = float(line.rsplit(" ", 1)[1])
+            elif name.endswith("prefix_cache_hits_total"):
+                h = float(line.rsplit(" ", 1)[1])
+        return (q, h) if q is not None and h is not None else None
+    except Exception:
+        return None
 
 
 async def one_turn(client, url, model, messages, max_tokens, think) -> tuple[Turn, str]:
@@ -116,18 +138,22 @@ async def one_turn(client, url, model, messages, max_tokens, think) -> tuple[Tur
 
 
 async def run(a) -> int:
-    out = open(a.out, "a")
+    out = open(a.out, "w")   # truncate: appending pooled two runs in the 09-04 attempt
     messages: list[dict] = []
     rows: list[Turn] = []
     async with httpx.AsyncClient() as client:
         for i in range(1, a.turns + 1):
             q = PROMPTS[(i - 1) % len(PROMPTS)]
-            if a.cold:
-                # Front-loaded noise, so no turn shares a prefix with any other.
-                q = f"[{noise()}] {q}"
             messages.append({"role": "user", "content": q})
-            rec, reply = await one_turn(client, a.url, a.model, messages,
+            # A fresh system message per turn puts new text at position zero, which is the
+            # only placement that shifts every later token and defeats the cache.
+            send = ([{"role": "system", "content": noise()}] if a.cold else []) + messages
+            before = await prefix_stats(client, a.metrics_url)
+            rec, reply = await one_turn(client, a.url, a.model, send,
                                         a.max_tokens, a.think)
+            after = await prefix_stats(client, a.metrics_url)
+            if before and after and after[0] > before[0]:
+                rec.prefix_hit_rate = (after[1] - before[1]) / (after[0] - before[0])
             rec.turn = i
             rows.append(rec)
             out.write(json.dumps(asdict(rec)) + "\n")
@@ -140,9 +166,22 @@ async def run(a) -> int:
                 continue
             messages.append({"role": "assistant", "content": reply})
             pt = rec.usage_prompt_tokens or 0
-            ct = rec.usage_cached_tokens
-            print(f"  turn {i:>3}  prompt {pt:>6} tok  cached {str(ct):>6}  "
+            hr = rec.prefix_hit_rate
+            print(f"  turn {i:>3}  prompt {pt:>6} tok  hit {('%.2f'%hr) if hr is not None else '  n/a':>5}  "
                   f"ttft {rec.ttft_ms:>7.1f} ms  out {rec.usage_completion_tokens or 0:>4}")
+            # Incident 45: a control that does not perturb what it claims to perturb yields a
+            # null result that reads as a finding. Check the manipulation took, then continue.
+            if a.cold and i == a.verify_turn:
+                if hr is None:
+                    print("  CONTROL UNVERIFIABLE: no prefix-cache counters; aborting rather "
+                          "than collecting an arm that cannot be trusted")
+                    return 2
+                if hr > a.max_cold_hit:
+                    print(f"  CONTROL FAILED: prefix hit rate {hr:.2f} at turn {i} exceeds "
+                          f"{a.max_cold_hit}. The cache is still hitting, so this arm is not "
+                          f"cold. Aborting before spending the run.")
+                    return 2
+                print(f"  control verified: prefix hit rate {hr:.2f} at turn {i}")
     out.close()
     ok = [r for r in rows if r.status == "ok" and r.ttft_ms]
     if len(ok) >= 4:
@@ -161,6 +200,22 @@ def selftest() -> int:
         fails.append("  FAIL noise length")
     if noise(24) == a:
         fails.append("  FAIL noise is not random")
+    # Incident 45: the cold arm must change position ZERO of what is sent, not the tail.
+    hist = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"}]
+    cold_a = [{"role": "system", "content": noise()}] + hist
+    cold_b = [{"role": "system", "content": noise()}] + hist
+    warm = hist
+    if cold_a[0]["role"] != "system":
+        fails.append("  FAIL cold arm does not put anything at position 0")
+    if cold_a[0]["content"] == cold_b[0]["content"]:
+        fails.append("  FAIL consecutive cold turns share position 0; the cache would still hit")
+    if warm and warm[0].get("role") == "system":
+        fails.append("  FAIL warm arm gained a system message; the arms would not be matched")
+    # the shared history must be IDENTICAL in both arms -- only the prefix may differ
+    if cold_a[1:] != warm or cold_b[1:] != warm:
+        fails.append("  FAIL cold arm altered the history instead of only prefixing it")
+
     t = Turn(turn=1, t_wall=0.0, prompt_chars=10)
     d = asdict(t)
     for k in ("usage_cached_tokens", "usage_prompt_tokens", "ttft_ms"):
@@ -182,6 +237,12 @@ def main() -> int:
     ap.add_argument("--think", action="store_true")
     ap.add_argument("--stop-on-error", action="store_true")
     ap.add_argument("--out", default="results/convo.jsonl")
+    ap.add_argument("--metrics-url", default="http://localhost:8000",
+                    help="engine base url for prefix-cache counters")
+    ap.add_argument("--verify-turn", type=int, default=3,
+                    help="turn at which --cold must prove the cache is not hitting")
+    ap.add_argument("--max-cold-hit", type=float, default=0.35,
+                    help="abort --cold if the per-turn prefix hit rate exceeds this")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
