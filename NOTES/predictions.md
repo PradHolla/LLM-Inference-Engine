@@ -3987,3 +3987,46 @@ cheap and decisive experiment rather than a speculative one.
 Caveat: this is derived from batch-1 ITL only, and attributes the entire gap to
 dequantization. Confirming that attribution needs a profiler on a single decode step, which
 would also say whether the cost is ALU, occupancy or memory coalescing.
+
+---
+
+## P6K  Does fp8 KV remove the speculation crossover? Test 1 of 2, 2026-09-04, before the run
+
+The P6B follow-up established that speculation's crossover is **cache starvation, not
+verification overhead**: at 6 req/s, fp8+spec sat at 95.7% KV occupancy with 26 requests
+queued while int4+spec sat at 18.6% and queued none, at the same batch size. If that reading
+is right, giving fp8+spec more cache should remove the crossover without touching the draft,
+the batch, or the kernel.
+
+`--kv-cache-dtype fp8` halves KV bytes per token, 144 KiB to 72 KiB.
+
+Four cells, **all run fresh in one session**: fp8 weights x {fp16 KV, fp8 KV} x {spec off,
+spec on}. The two fp16-KV cells duplicate P6B deliberately, because identical launch commands
+have produced KV budgets 10.8% apart and a matched comparison cannot span sessions.
+
+Qwen3-8B, vLLM 0.27.1, `--max-model-len 16384`, A10G, 650 real arithmetic prompts, 128 max
+output, EAGLE3 k=2. Script `infra/kv-sweep.sh`.
+
+| # | Prediction | Value |
+|---|---|---|
+| P6K-1 | KV budget, spec off, fp8 KV | **~149,000 tokens**, near 2.0x of 74,880 |
+| P6K-2 | KV budget, spec on, fp8 KV | **~102,000 tokens**, near 2.0x of 51,232 |
+| P6K-3 | ITL p50 at batch 1 | **essentially unchanged**, within 2%. At 512-token prompts the KV read is tiny beside 8.19 GB of weights, so halving it should not move batch-1 decode |
+| P6K-4 | KV occupancy at 6 req/s, spec on | falls from **95.7% p90 to under 50%** |
+| P6K-5 | max requests waiting at 6 req/s, spec on | falls from **26 to 0 or near it** |
+| P6K-6 | **capacity at 6 req/s, spec on** | rises from 3.56 req/s to **above the fp16-KV control's 4.52**, i.e. the crossover disappears |
+| P6K-7 | capacity at 2 req/s, spec on | unchanged, ~2.4 req/s. There was no queue at 2 req/s to relieve |
+
+**P6K-6 is the whole test.** If capacity at 6 req/s rises above the control, the crossover
+was KV headroom and the mechanism is confirmed by intervention rather than by correlation.
+If it stays below, the KV-starvation reading is wrong and verification overhead is back on
+the table, which would also retract the claim already written into the P6B follow-up.
+
+**Not being tested here.** Whether fp8 KV costs accuracy. Every quality result in this
+project so far is about quantized *weights*; nothing has touched the cache, and the failure
+modes differ -- weight quantization adds noise to a multiply, KV quantization corrupts what
+the model remembers about earlier tokens, which should bite hardest on long context and
+multi-step reasoning. That is test 2 and it gates shipping, not this one.
+
+Phase 3's 1.57x for fp8 KV is not the prediction above: it was measured at bf16 weights on a
+different workload, so it indicates the shape and not the number.

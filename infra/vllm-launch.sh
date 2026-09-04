@@ -20,20 +20,42 @@ sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   $VENV/bin/python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 --port 8000 "$@" >/dev/null 2>&1
 
+# Read THIS invocation only. `journalctl -u vllm` spans every launch, so in a sweep a
+# failure can print a previous run's traceback and a success can scrape its KV numbers.
+invlog() {
+    local inv
+    inv=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
+    if [ -n "$inv" ]; then
+        sudo journalctl "_SYSTEMD_INVOCATION_ID=$inv" --no-pager -o cat 2>/dev/null
+    else
+        sudo journalctl -u vllm --no-pager -o cat 2>/dev/null
+    fi
+}
+
 ok=0
 for i in $(seq 1 120); do
     if curl -sf -m 3 http://localhost:8000/health >/dev/null 2>&1; then ok=1; break; fi
     st=$(systemctl is-active vllm)
     if [ "$st" = "failed" ] || [ "$st" = "inactive" ]; then
         echo "LAUNCH_FAILED $LABEL (unit $st after ${i}s)"
-        sudo journalctl -u vllm --no-pager -o cat | tail -30
+        FULL="/tmp/vllm-fail-$LABEL.log"
+        invlog > "$FULL"
+        echo "  full log: $FULL ($(wc -l < "$FULL") lines)"
+        # vLLM ends its traceback with "See root cause above", so a tail keeps the wrong
+        # end. Grep the signatures the real cause actually uses.
+        echo "  --- root cause candidates:"
+        grep -nEi "ValueError|RuntimeError: [^E]|out of memory|free memory|KV cache|To serve at least|is larger than|decrease|No available memory" \
+            "$FULL" | grep -viE "See root cause|Engine core initialization failed" \
+            | head -12 | sed 's/^/    /'
+        echo "  --- last 12 lines:"
+        tail -12 "$FULL" | sed 's/^/    /'
         exit 1
     fi
     sleep 5
 done
-[ "$ok" = 1 ] || { echo "LAUNCH_TIMEOUT $LABEL"; exit 1; }
+[ "$ok" = 1 ] || { echo "LAUNCH_TIMEOUT $LABEL"; invlog | tail -20 | sed 's/^/    /'; exit 1; }
 
-L=$(sudo journalctl -u vllm --no-pager -o cat)
+L=$(invlog)
 echo "### $LABEL READY"
 echo "  args: $*"
 echo "$L" | grep -oE 'GPU KV cache size: [0-9,]+ tokens'                  | tail -1 | sed 's/^/  /'
