@@ -12,6 +12,20 @@ for i in $(seq 1 30); do
     ss -ltn 2>/dev/null | grep -q ':8000 ' || break
     sleep 1
 done
+# The port closing and the driver reclaiming VRAM are DIFFERENT moments. Launching in the
+# gap makes vLLM profile against memory the previous server still holds, and it then OOMs
+# during graph capture. Same guard as labbench/backends.py; this script never had it.
+gpufree=0
+for i in $(seq 1 60); do
+    used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [ -z "$used" ] && { gpufree=1; break; }
+    [ "$used" -lt 1024 ] && { gpufree=1; break; }
+    sleep 2
+done
+if [ "$gpufree" != 1 ]; then
+    echo "LAUNCH_ABORT $LABEL: GPU still holds ${used} MiB after 120s; refusing to profile against it"
+    exit 1
+fi
 
 sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 --setenv=PYTHONUNBUFFERED=1 \
@@ -19,12 +33,13 @@ sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   --setenv=PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin \
   $VENV/bin/python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 --port 8000 "$@" >/dev/null 2>&1
+INVID=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
 
 # Read THIS invocation only. `journalctl -u vllm` spans every launch, so in a sweep a
 # failure can print a previous run's traceback and a success can scrape its KV numbers.
 invlog() {
-    local inv
-    inv=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
+    local inv="$INVID"
+    [ -n "$inv" ] || inv=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
     if [ -n "$inv" ]; then
         sudo journalctl "_SYSTEMD_INVOCATION_ID=$inv" --no-pager -o cat 2>/dev/null
     else

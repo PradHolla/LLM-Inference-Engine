@@ -8,7 +8,10 @@ UV=/home/ubuntu/.local/bin/uv
 SLICES="math,gsm8k,longctx"
 [ -x "$UV" ] || { echo "ABORT: uv missing"; exit 1; }
 
-for arm in kvfp16 kvfp8; do
+# Optional arg: run one arm only, so a failed arm can be redone without repeating the
+# hour the other one already cost.
+ARMS="${1:-kvfp16 kvfp8}"
+for arm in $ARMS; do
     kflag=""; [ "$arm" = kvfp8 ] && kflag="--kv-cache-dtype fp8"
     echo "########## arm $arm"
     if ! ./infra/vllm-launch.sh "qual-$arm" --model Qwen/Qwen3-8B --max-model-len 16384 \
