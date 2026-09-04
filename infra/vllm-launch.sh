@@ -91,5 +91,8 @@ REC=$(echo "$L" | grep -oE '\-\-kv-cache-memory=[0-9]+' | head -1 | cut -d= -f2)
 if [ -n "$REC" ]; then
     echo "  kv pin recommended by the engine: --kv-cache-memory $REC ($(awk -v b="$REC" 'BEGIN{printf "%.2f", b/1073741824}') GiB)"
     mkdir -p results && echo "$REC" > "results/kv-pin-$LABEL.txt"
-    [ -n "${KV_PIN:-}" ] && echo "  (this run was pinned at $KV_PIN)"
+    if [ -n "${KV_PIN:-}" ]; then echo "  (this run was pinned at $KV_PIN)"; fi
 fi
+# A trailing `test && echo` sets the script's exit status when the test is false, so a
+# perfectly healthy launch exited 1 and the caller aborted. Be explicit.
+exit 0
