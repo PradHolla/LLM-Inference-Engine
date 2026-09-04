@@ -1,0 +1,80 @@
+=== fp8w-kvauto-specoff
+  GPU KV cache size: 74,880 tokens
+  Available KV cache memory: 10.28 GiB
+  speculative_config=None
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    0.00    12     0    0.41       52 │       48m     n/a     n/a │      19m      19m │      n/a  [33m← n=12, need 20 for p95[0m
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                48 ms  (p50)
+  ITL               18.9 ms  (p50)   per STREAMED CHUNK
+  decode            53.4 tok/s   (1536 tokens / 28.75s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    92     0    1.95      249 │       86m     126m     n/a │      19m      20m │     3029m
+    6.00   263     0    5.12      655 │      318m    1656m    1818m │      51m     359m │    21158m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (126ms) at ~6.0 req/s → [1m655 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== fp8w-kvauto-specon
+  GPU KV cache size: 58,816 tokens
+  Available KV cache memory: 8.3 GiB
+  speculative_config=SpeculativeConfig
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                57 ms  (p50)
+  ITL               22.5 ms  (p50)   per STREAMED CHUNK
+  tokens/chunk      2.16        1536 tokens in 711 chunks
+  per token         10.4 ms  (derived)
+  decode            97.9 tok/s   (1536 tokens / 15.69s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    89     0    1.92      246 │       94m     137m     n/a │      23m      25m │     1696m
+    6.00   264     0    4.97      636 │      547m    2436m    3452m │     140m     540m │    21269m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (137ms) at ~6.0 req/s → [1m636 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== fp8w-kvfp8-specoff
+  GPU KV cache size: 135,152 tokens
+  Available KV cache memory: 9.28 GiB
+  speculative_config=None
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    0.00    12     0    0.40       52 │       50m     n/a     n/a │      19m      19m │      n/a  [33m← n=12, need 20 for p95[0m
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                50 ms  (p50)
+  ITL               19.1 ms  (p50)   per STREAMED CHUNK
+  decode            52.7 tok/s   (1536 tokens / 29.17s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00   106     0    2.25      288 │       96m     134m     153m │      20m      28m │     2983m
+    6.00   276     0    4.42      566 │      349m    5407m   10870m │      52m     553m │    31783m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (134ms) at ~6.0 req/s → [1m566 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+
+=== fp8w-kvfp8-specon
+  GPU KV cache size: 102,464 tokens
+  Available KV cache memory: 7.23 GiB
+  speculative_config=SpeculativeConfig
+
+[1mSINGLE STREAM[0m  (12 measured, 1 warmup discarded)
+  TTFT                76 ms  (p50)
+  ITL               24.2 ms  (p50)   per STREAMED CHUNK
+  tokens/chunk      2.13        1536 tokens in 721 chunks
+  per token         11.4 ms  (derived)
+  decode            90.0 tok/s   (1536 tokens / 17.07s decode)
+
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+    2.00    80     0    1.69      216 │       98m     137m     n/a │      25m      26m │     1853m
+    6.00   267     0    5.29      677 │      402m    2267m    2559m │      94m     551m │    17467m
+
+[1mTHE KNEE[0m
+  p95 TTFT departs baseline (137ms) at ~6.0 req/s → [1m677 tok/s[0m sustained
+  Capacity is the load point BEFORE this one.
+

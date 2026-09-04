@@ -4141,3 +4141,72 @@ that matters.
 carried over from Phase 4's bf16-vs-bf16 measurement at a different precision. If the
 measured disagreement lands near that floor the result will be ambiguous, and the honest
 response is to run the control rather than to round in the convenient direction.
+
+### P6Q actuals, 2026-09-04
+
+Qwen3-8B, vLLM 0.27.1, fp8 weights, `--max-model-len 16384`, speculation off in both arms,
+A10G. 1,210 paired items, zero dropped from either side. Arm B pinned at
+`--kv-cache-memory 9959978415` after the profiler OOMed twice; KV budgets were 74,880 (fp16)
+and 135,088 (fp8) tokens. Raw: `results/phase6-qual-kvfp16.jsonl`,
+`results/phase6-qual-kvfp8.jsonl`, `results/phase6-qual-compare.txt`.
+
+| slice | n | fp16 KV | fp8 KV | ansdiff | McNemar p |
+|---|---|---|---|---|---|
+| gsm8k / think | 200 | 57.0% | 57.0% | 15.0% | 1.0000 |
+| gsm8k / nothink | 200 | 76.0% | 74.0% | 8.0% | 0.3438 |
+| **longctx / nothink** | 90 | **100.0%** | **100.0%** | **0.0%** | 1.0000 |
+| math / think / k4 | 45 | 95.6% | 95.6% | 4.4% | 1.0000 |
+| math / think / k8 | 75 | 93.3% | 93.3% | 8.0% | 1.0000 |
+| math / think / k16 | 105 | 65.7% | **72.4%** | 33.3% | 0.3105 |
+| math / think / k32 | 135 | 34.8% | 30.4% | 32.6% | 0.4514 |
+| math / nothink / k4 | 45 | 93.3% | 88.9% | 4.4% | 0.5000 |
+| math / nothink / k8 | 75 | 12.0% | 17.3% | 9.3% | 0.2188 |
+| math / nothink / k16 | 105 | 0.0% | 0.0% | 0.0% | 1.0000 |
+| math / nothink / k32 | 135 | 0.0% | 0.0% | 0.0% | 1.0000 |
+| **ALL** | **1210** | **52.6%** | **52.5%** | **11.7%** | **1.0000** |
+
+**VERDICT: PASS** on the rule fixed before the data. Overall delta 0.1 points against a
+1.5 limit; pooled McNemar p = 1.0000 against a 0.05 limit; worst single slice -4.4 points
+against a 5 limit. Discordance is symmetric, 68 against 67.
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6Q-1 | delta within 1.5 points | **0.1** | correct |
+| P6Q-2 | pooled McNemar p > 0.05 | **1.0000** | correct |
+| P6Q-3 | longctx is the most damaged slice | **the LEAST -- 100/100, the only slice with 0.0% ansdiff** | **wrong** |
+| P6Q-4 | longctx drops 2-8 points | **0.0** | **wrong** |
+| P6Q-5 | damage rises with chain length | k16 **improved 6.7 points**, k32 fell 4.4. No trend | wrong |
+| P6Q-6 | ansdiff 3-6% | **11.7%** | wrong, 2x high |
+
+#### The reasoning was wrong even though the verdict was right
+
+P6Q-3 was the prediction I said I cared most about: KV quantization corrupts what the model
+stored about earlier tokens, so retrieval -- which reads furthest back -- should suffer most.
+**It was the only slice completely untouched.** 90/90 both arms, not one differing answer.
+
+The likely reason, offered as a hypothesis and not a finding: longctx asks the model to
+locate and repeat a short literal string. A coarser numeric representation of a key still
+matches the right position, because the task needs the *argmax* of attention to be right, not
+the values to be precise. Multi-step arithmetic needs precise intermediate quantities, and
+that is where answers churned -- 33% ansdiff at k16 and k32.
+
+So the mechanism is closer to "fp8 KV perturbs magnitudes, not addresses". Testable: a
+retrieval task requiring synthesis across several needles rather than verbatim recall of one
+should behave like arithmetic. `PROJECT.md` already carries that exact open question from
+Phase 4 -- "does the retrieval result survive a harder long-context task?" -- and it now has
+a second reason to be asked.
+
+#### The ansdiff is 11.7% against a 1.8% floor, and that is not resolved
+
+Answers changed six times more often than Phase 4's bf16-vs-bf16 control changed. They
+changed **symmetrically** -- 68 one way, 67 the other -- which is why McNemar sees nothing.
+That is the signature of nondeterminism, not damage.
+
+But the 1.8% floor comes from a different precision on different slices, and **no same-config
+control was run here**, which was named as this test's known weakness before it started. The
+churn concentrates exactly where Phase 4 predicted it would: slices where the model sits near
+its competence limit (gsm8k/think at 57%, math/think/k16 at 66-72%). Slices where it is
+confident or hopeless show 0.0% -- longctx at 100%, math/nothink/k16 and k32 at 0%.
+
+Consistent with harmless nondeterminism, not proof of it. Resolving it costs one more arm:
+fp16 KV against itself.

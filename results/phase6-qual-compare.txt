@@ -1,0 +1,23 @@
+A = results/phase6-qual-kvfp16.jsonl  (1210 ok)
+B = results/phase6-qual-kvfp8.jsonl  (1210 ok)
+paired on 1210 items
+
+  group                        n    accA    accB    b    c   disc  ansdiff  McNemar p
+  gsm8k/think                200  57.0%  57.0%   15   15 15.0%   15.0%     1.0000
+  gsm8k/nothink              200  76.0%  74.0%    7    3  5.0%    8.0%     0.3438
+  longctx/nothink             90 100.0% 100.0%    0    0  0.0%    0.0%     1.0000
+  math/think/k4               45  95.6%  95.6%    1    1  4.4%    4.4%     1.0000
+  math/think/k8               75  93.3%  93.3%    3    3  8.0%    8.0%     1.0000
+  math/think/k16             105  65.7%  72.4%   14   21 33.3%   33.3%     0.3105
+  math/think/k32             135  34.8%  30.4%   25   19 32.6%   32.6%     0.4514
+  math/nothink/k4             45  93.3%  88.9%    2    0  4.4%    4.4%     0.5000
+  math/nothink/k8             75  12.0%  17.3%    1    5  8.0%    9.3%     0.2188
+  math/nothink/k16           105   0.0%   0.0%    0    0  0.0%    0.0%     1.0000
+  math/nothink/k32           135   0.0%   0.0%    0    0  0.0%    0.0%     1.0000
+  ALL                       1210  52.6%  52.5%   68   67 11.2%   11.7%     1.0000
+
+  b = A right, B wrong.  c = A wrong, B right.  disc = (b+c)/n.
+  ansdiff = extracted answers differ at all -- compare THIS against the
+  bf16-vs-bf16 control's ansdiff, which is the noise floor d0.
+  McNemar tests whether B is LESS ACCURATE; it is unbiased under symmetric
+  nondeterminism, so it does not need d0. See design section 2b.
