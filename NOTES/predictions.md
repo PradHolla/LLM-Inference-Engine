@@ -4097,3 +4097,47 @@ relieve.**
 Batch-1 throughput fell 97.9 -> 90.0 tok/s with fp8 KV, 8%, which nobody predicted and which
 the +7.6% ITL explains arithmetically but not mechanically. And nothing here touches accuracy:
 test 2 still gates shipping.
+
+---
+
+## P6Q  Does fp8 KV cost accuracy? Test 2 of 2, 2026-09-04, before the run
+
+Test 1 showed `--kv-cache-dtype fp8` removes the speculation crossover (P6K-6 confirmed) and
+costs 14% of capacity where KV was not binding. Neither says anything about whether the
+answers are still right. **This gates shipping; test 1 did not.**
+
+Protocol is Phase 4's, unchanged: `tools/qualeval.py`, paired on identical items in identical
+order, temperature 0, McNemar exact on discordant pairs. Two arms, same box, same session:
+
+    A: fp8 weights, fp16 KV   (the current default)
+    B: fp8 weights, fp8  KV   (the treatment)
+
+650 items: 200 gsm8k, 90 long-context retrieval, 360 synthetic arithmetic at chain lengths
+4/8/16/32. Speculation OFF in both arms, so this measures the KV dtype alone.
+
+**Why this is not just Phase 4 again.** Every quality result in this project concerns
+quantized *weights*. Weight quantization adds noise to a multiply. KV quantization corrupts
+**what the model stored about earlier tokens**, so the damage should concentrate where the
+model must attend far back: long chains and retrieval. Phase 4 found long-context retrieval
+was 270/270 across bf16, fp8 and int4 weights and called it robust -- but that robustness was
+never tested against a degraded *cache*, which is the thing retrieval actually reads.
+
+| # | Prediction | Value |
+|---|---|---|
+| P6Q-1 | overall accuracy delta, A to B | **within 1.5 points**, either direction |
+| P6Q-2 | McNemar p, all items pooled | **> 0.05**, no detectable overall effect |
+| P6Q-3 | the slice most damaged | **longctx retrieval**, because it reads the cache furthest back |
+| P6Q-4 | longctx accuracy drop | **2 - 8 points**. This is the prediction I hold most weakly and care about most |
+| P6Q-5 | math k=32 versus k=4 | damage **rises with chain length**, if there is damage at all |
+| P6Q-6 | answer-level disagreement, pooled | **3 - 6%** against Phase 4's 1.8% same-config noise floor |
+
+**Decision rule, fixed now.** fp8 KV is adopted only if: overall accuracy delta is within
+1.5 points, pooled McNemar p > 0.05, AND no individual slice loses more than 5 points.
+A pooled pass with a longctx failure is a **fail** -- the app is retrieval-shaped, so
+averaging retrieval damage into arithmetic that does not care would hide exactly the harm
+that matters.
+
+**Known weakness.** No same-config control arm is being run, so the 1.8% noise floor is
+carried over from Phase 4's bf16-vs-bf16 measurement at a different precision. If the
+measured disagreement lands near that floor the result will be ambiguous, and the honest
+response is to run the control rather than to round in the convenient direction.
