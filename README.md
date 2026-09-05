@@ -26,8 +26,9 @@ answers in a third of a second.
 - **Systems engineering** — manual KV cache management, continuous batching with
   admission control and mid-flight batch mutation, an OpenAI-compatible streaming server
 - **Measurement design** — open-loop Poisson load generation, p50/p95/p99 rather than
-  means, paired significance testing against a measured noise floor, and instruments
-  validated against known ground truth before they are believed
+  means, paired significance testing against a measured noise floor, instruments
+  validated against known ground truth before they are believed, and controls that
+  read the engine's own counters to prove they are controlling before collecting data
 - **Engineering judgement** — a paged block allocator designed, costed, and deliberately
   **not built**, because the cost it was meant to recover was measured to live somewhere
   an allocator cannot reach
@@ -36,7 +37,7 @@ Every claim above links to a number in `NOTES/predictions.md`, which records the
 prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
 third of the predictions were wrong; those are the entries worth reading.
 
-## Status: phases 0-5 of 7 complete
+## Status: phases 0-5 of 7 complete, phase 6 in progress
 
 ### How each step moved the number
 
@@ -135,7 +136,8 @@ which is Phase 4's result arriving from the opposite direction.
 **And it stops working under load.** Sweeping arrival rate on the small workload,
 speculation is 1.88x ahead at 2 req/s and **2.8x behind at 6** -- the sign flips between 4
 and 6. On the long-context workload it never flips. Two workloads, opposite answers about
-whether to enable the feature.
+whether to enable the feature. Phase 6 measured *why*, and the cause named here is not
+the right one.
 
 Three ways to guess were compared, and the best guesser is not the fastest configuration:
 
@@ -178,6 +180,95 @@ Three whole categories reproduced identical answers on every item; all disagreem
 in the one slice where the model scores 44% and is barely above guessing. That is the
 signature of ordinary nondeterminism, not of a technique changing the answer.
 
+### Phase 6: the crossover was never a property of speculation
+
+Phase 5 watched speculation go 1.88x ahead at 2 req/s and 2.8x behind at 6, and read the
+flip as verification overhead ceasing to hide at high batch. That is the textbook
+explanation. It is not what is happening here.
+
+Run as a matrix instead, quantization against speculation, identical real prompts in an
+identical order, and the flip happens for one configuration and not the other:
+
+| weights | spec | KV budget | batch-1 | cap @2 req/s | cap @6 req/s |
+|---|---|---|---|---|---|
+| bf16 | off | 33,312 | 29.5 tok/s | 1.72 req/s | 3.58 req/s |
+| bf16 | on | **would not start** | -- | -- | -- |
+| fp8 | off | 74,880 | 53.4 | 1.65 | 4.52 |
+| fp8 | on | 51,232 | **97.9** | 2.37 | 3.56 |
+| int4 | off | 101,920 | 84.6 | 1.65 | 4.73 |
+| int4 | on | 77,280 | **143.1** | 1.96 | **5.30** |
+
+*Qwen3-8B, vLLM 0.27.1, fp16 KV, 16k context, EAGLE3 k=2, 650 real arithmetic prompts.*
+
+Speculation charges both configurations almost exactly the same KV: 23,648 tokens and
+24,640. What differs is what is left afterwards. The engine had been logging the answer
+every ten seconds the whole time -- **fp8+spec ran at 95.7% KV occupancy with 26 requests
+queued, int4+spec at 18.6% with none**, at near-identical batch sizes of 90 and 88. Same
+draft head, same batch, opposite outcome. That is queueing, not overhead.
+
+Confirmed by intervention rather than left as a reading: halving KV bytes per token with
+`--kv-cache-dtype fp8` and changing nothing else took fp8+spec from **86.1% occupancy and
+26 queued to 12.0% and zero**, and its capacity at 6 req/s from 0.97x of control to
+**1.20x**. The crossover disappears. **Quantization does not merely make speculation
+affordable, it decides whether the crossover exists in the range you care about.**
+
+**But fp8 KV is not a free win, and the control is what says so.** With speculation off,
+where 74,880 tokens were already sufficient, it made capacity 14% *worse* (5.12 -> 4.42
+req/s) while holding 135,152 tokens. It helps exactly where KV is the binding constraint
+and hurts where it is not -- the same lesson as Phase 3's prefix caching and Phase 4's
+quantization, arriving for the third time.
+
+An accident said it louder than the designed comparison. The same command profiled 51,232
+KV tokens on one day and 58,816 on another, pure startup variance, and capacity at 6 req/s
+tracked it monotonically: 3.56, then 4.97, then 5.29 req/s at 102,464 tokens. **A 14.8%
+difference in KV budget from noise alone moved capacity 40%** -- which is why every KV
+allocation in this project is now pinned rather than profiled.
+
+**Prefix caching is worth 13.8x, and the control had to prove itself first.** One
+conversation grown to 25 turns against the same conversation with a fresh random prefix at
+position zero each turn:
+
+| turn | context | warm TTFT | cold TTFT | ratio |
+|---|---|---|---|---|
+| 1 | 62 | 28.4 ms | 32.4 ms | 1.1x |
+| 10 | 2,947 | 128.5 ms | 820.2 ms | 6.4x |
+| **25** | **7,761** | **165.7 ms** | **2,290.8 ms** | **13.8x** |
+
+*fp8 weights, fp16 KV, 16k context, no speculation, 300 output tokens per turn.*
+
+A cached token costs **29x** less than an uncached one (0.0100 against 0.2912 ms per prompt
+token) but it does not cost nothing: caching removes recomputation, and each turn's new
+tokens must still attend over the whole cached history. That residual is the warm slope.
+
+The first two attempts at this measurement produced a null result that read as a finding.
+The cold arm prefixed its noise to the new user message, where the conversation history
+still renders first, so the cache hit exactly as in the warm arm and the two curves landed
+1.0x apart against a predicted 21x. **The control now verifies itself and aborts**: it reads
+the engine's own prefix-cache hit rate at turn 3 and refuses to collect data unless it is
+near zero. It measured 0.000 at all 25 turns.
+
+Two results fell out of data already collected. Dividing measured ITL into weight bytes per
+token gives achieved bandwidth, and **it falls as quantization deepens** -- 79.8% of the
+A10G's 600 GB/s at bf16, 72.2% at fp8, 57.4% at int4. That is the Marlin dequantization
+penalty made visible on a card with no native fp8, and it is why fp8 is worth 1.81x rather
+than the 2.0x that halving the weight bytes implies. Prefill shows the same tax
+independently, at 14%.
+
+And the noise floor moved. Phase 4 measured `d0` = 1.8% and Phase 5 tested against it
+legitimately, on the same item mix. Re-running an identical configuration against itself on
+a **harder** mix gives **7.8%**, concentrated exactly where the model is near its competence
+limit (25.7% churn on the slice it half-solves, 0.0% where it scores 100% and 0.0% where it
+scores 0%). **A noise floor is a property of the item mix, not of the model**, and carrying
+one between experiments is invalid. That correction retired a claim this project had already
+made.
+
+The measurement surface itself is `labbench/`: a byte-faithful OpenAI-streaming proxy, a
+radio-button backend switcher, live probes over vLLM's Prometheus endpoint and journal, and
+a React UI that renders every stage of a request. Building it produced its own instrument
+bug, in the family this project keeps meeting -- the metric binder summed Prometheus
+`_created` series, which are unix timestamps of counter creation, into counter roles and
+reported a **prefix cache hit rate of 0.9999998** computed from two clocks.
+
 ## What is here
 
 ```
@@ -191,12 +282,18 @@ tools/mkitems.py      generates the quality-eval item set; --selftest re-derives
 tools/qualeval.py     paired quality harness: run, offline regrade, exact McNemar
 tools/specmon.py      reads speculative-decoding acceptance off vLLM's metrics;
                       reports acceptance BY DRAFT POSITION, not just the scalar
+tools/convo.py        stateful multi-turn conversation driver; measures prefix-cache
+                      behaviour, which an open-loop load generator cannot see
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock
 engine/               Phase 2: manual KV cache, static then continuous batching,
                       scheduler with admission control, OpenAI-streaming server
-infra/                provisioning, cost guardrails, spot interruption handling
+labbench/             Phase 6a: the instrument surface -- byte-faithful streaming
+                      proxy, backend switcher, live Prometheus and journal probes,
+                      React UI showing every stage of a request
+infra/                provisioning, cost guardrails, spot interruption handling,
+                      one-command session lifecycle, pinned-KV vLLM launcher
 NOTES/predictions.md  the prediction log
 ```
 
@@ -244,8 +341,8 @@ is true forever and would disable the guardrail entirely.
 | 3 | vLLM as an object of study; ablate every flag | done |
 | 4 | Quantization: throughput, capacity, and quality | done |
 | 5 | Speculative decoding | done |
-| 6 | The chat app and web search | next |
-| 7 | Thinking budget as a scheduling policy | |
+| 6 | The chat app and web search | in progress |
+| 7 | Thinking budget as a scheduling policy | next |
 
 Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth
 as much as the positive ones: a paged block allocator was **designed, costed, and not
