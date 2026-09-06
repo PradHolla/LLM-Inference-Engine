@@ -247,6 +247,19 @@ still renders first, so the cache hit exactly as in the warm arm and the two cur
 the engine's own prefix-cache hit rate at turn 3 and refuses to collect data unless it is
 near zero. It measured 0.000 at all 25 turns.
 
+That still left the warm arm proving nothing -- it recorded no cache figures, so "the cache
+was working" was an inference from its flat slope. Both arms were rerun on one server with
+both reporting: **warm goes 0.000 to 0.957, cold holds 0.000, and the separation reproduced
+at 13.76x against 13.83x.** The cold curve hit the same 2,290.8 ms at turn 25 both times.
+
+**The rerun then showed what the first run could not.** Tokens recognised at turn N equal
+turn N-1's *prompt*, floored to vLLM's 16-token block, on 24 of 24 turns -- so **the model's
+own reply is never cached and is re-prefilled every turn**, ~300 tokens of work already done.
+The break lands exactly where the previous reply begins, which fits the chat template
+rewrapping the assistant turn in markers that were never in the generated stream. That is a
+gateway-layout question, it is not settled, and `phase6-app-design.md` section 4a did not
+anticipate it.
+
 Two results fell out of data already collected. Dividing measured ITL into weight bytes per
 token gives achieved bandwidth, and **it falls as quantization deepens** -- 79.8% of the
 A10G's 600 GB/s at bf16, 72.2% at fp8, 57.4% at int4. That is the Marlin dequantization

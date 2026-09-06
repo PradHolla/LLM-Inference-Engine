@@ -4385,3 +4385,98 @@ which vLLM warns "may degrade performance for compute-heavy workloads". **P6L-9 
 as the prediction most likely to be wrong, for this exact reason, and it was wrong in that
 exact direction.** The dequantization tax now has a second independent measurement: 7.6
 points of decode bandwidth efficiency, and 14% of prefill throughput.
+
+## P6L-2R  Warm-arm reproduction, 2026-09-06, written after launch and before results
+
+The original P6L-2 warm arm recorded `prefix_hit_rate` as null on all 25 turns: it ran before
+the probe fix in `da77147`. The cold arm, run after, recorded 0.000 on all 25 and so proved
+itself cold. **One arm self-verified and the other did not**, which is the asymmetry this run
+closes. Both arms are rerun so the pair comes from one server instance.
+
+Honest note on process: this entry is written after `convo.service` was launched and before any
+result was read. The prime directive wants it written before launch. It was not.
+
+Config is byte-identical to the original: fp8 weights, fp16 KV, 16,384 ctx, no speculation,
+**74,880 KV tokens / 10.28 GiB** read from this launch's own startup log -- the same budget the
+original run reported, so the profiler happened to land on the same value.
+
+| # | Prediction | Reasoning |
+|---|---|---|
+| P6L-2R1 | warm `prefix_hit_rate` **0.0 at turn 1, then > 0.90 from turn 5 on** | hit rate is cached/prompt tokens. Turn 1 has nothing cached. By turn 5 history is ~1,300 of ~1,350 tokens |
+| P6L-2R2 | cold `prefix_hit_rate` **0.000 at all 25 turns** | reproduces the verified control; anything else means the noise placement regressed |
+| P6L-2R3 | warm TTFT at turn 25 **150-185 ms** | original 165.7 ms; allow run-to-run spread |
+| P6L-2R4 | cold TTFT at turn 25 **2,100-2,500 ms** | original 2,290.8 ms |
+| P6L-2R5 | separation at turn 25 **12-15x** | original 13.83x |
+| P6L-2R6 | `usage_cached_tokens` **still null on both arms** | it was null on the cold arm too, which ran after the probe fix, so this is a `convo.py` gap rather than a probe gap and nothing in this run changes it |
+
+**What would falsify what.** If R1 fails while R3 passes, the warm arm is fast for a reason
+other than caching and the whole P6L-2 reading is wrong. If R5 lands outside 12-15x the
+published 13.8x was not reproducible and the artifact needs correcting, not confirming.
+
+### P6L-2R actuals, 2026-09-06: the warm arm now proves it was warm
+
+Qwen3-8B, vLLM 0.27.1, fp8 weights, fp16 KV, 16,384 ctx, no speculation, A10G.
+**74,880 KV tokens / 10.28 GiB**, read from this launch's own startup log -- the same budget
+the original run reported. Both arms rerun in one server instance, `convo.service` invocation
+`377d0c9b702e4f86a0ed34bb33381cdd`, single invocation confirmed in the journal.
+Raw: `results/convo-warm.jsonl`, `results/convo-cold.jsonl` (the originals remain in git history).
+
+**The asymmetry is closed.** Warm `prefix_hit_rate` populated 25/25 where it was 0/25, rising
+0.000 -> 0.957. Cold stayed 0.000 at every turn. Both arms now carry their own evidence.
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6L-2R1 | warm hit 0.0 at turn 1, > 0.90 from turn 5 | 0.000 at turn 1; **0.747 at turn 5**, 0.90 not reached until turn 13 | **half wrong** -- see below |
+| P6L-2R2 | cold 0.000 at all 25 turns | **0.000**, max across all turns | correct |
+| P6L-2R3 | warm TTFT turn 25 in 150-185 ms | **166.4 ms** (orig 165.7) | correct |
+| P6L-2R4 | cold TTFT turn 25 in 2,100-2,500 ms | **2,290.8 ms** (orig 2,290.8) | correct |
+| P6L-2R5 | separation 12-15x | **13.76x** (orig 13.83x) | correct |
+| P6L-2R6 | `usage_cached_tokens` still null | null on both arms | correct |
+
+### The reproduction is tighter than the instrument deserves
+
+| | new | original |
+|---|---|---|
+| warm TTFT, turn 25 | 166.4 ms | 165.7 ms |
+| cold TTFT, turn 25 | 2,290.8 ms | 2,290.8 ms |
+| warm slope | 0.0095 ms/token | 0.0100 |
+| cold slope | 0.2915 ms/token | 0.2912 |
+| separation | 13.76x | 13.83x |
+
+The cold arm landed on **2,290.8 ms twice**, on prompts of 7,759 and 7,761 tokens. Two tokens
+of difference and no difference in time is consistent with chunked prefill quantizing work to
+chunk boundaries, so both lengths cost the same number of chunks. Recorded because an exact
+repeat is the shape a stale file also has: checked, and it is not one -- the files were rewritten
+today and the token counts differ.
+
+### Why R1 was wrong, and it is arithmetic I did not do
+
+I assumed history dominates the prompt by turn 5. It does not, because each turn adds the
+model's own **300-token reply plus the next question, 321 tokens measured**. The hit rate is
+therefore `prev_prompt / current_prompt`, which approaches 1 only as the history outgrows that
+fixed 321. At turn 5 that is 987/1307 = 0.755 against 0.747 measured.
+
+### The finding the original run could not have produced
+
+Cached tokens equal the **previous turn's prompt**, floored to vLLM's 16-token block, on
+**24 of 24 turns**:
+
+    turn  prompt  cached   prev prompt   floor16(prev)
+       3     668     336           345             336
+      10   2,912   2,576         2,590           2,576
+      25   7,724   7,392         7,403           7,392
+
+**The model's own reply is not in the cache.** Every turn re-prefills the ~300 tokens it just
+generated. That is what the 0.0095 ms/token warm slope is partly buying, and it is a cost the
+gateway may be able to remove.
+
+Two candidate causes, not distinguished by this data and **not to be asserted until they are**:
+
+- **A.** vLLM does not retain blocks for generated tokens in the prefix cache once a request ends.
+- **B.** The re-rendered assistant turn does not byte-match what was generated -- Qwen3's template
+  wraps it in `<|im_start|>assistant ... <|im_end|>`, tokens that were never in the output stream --
+  so the match breaks exactly where the reply begins.
+
+B predicts the break lands at precisely the end of the previous prompt, which is what all 24
+rows show, and is the leading candidate for that reason. It is also the one the gateway controls.
+**This is a Phase 6 prompt-layout question, and section 4a of the design doc did not anticipate it.**
