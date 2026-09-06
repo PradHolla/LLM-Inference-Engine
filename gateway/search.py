@@ -23,7 +23,11 @@ FETCH_TIMEOUT_S = float(os.environ.get("GW_FETCH_TIMEOUT_S", "2.0"))
 CHARS_PER_SOURCE = int(os.environ.get("GW_CHARS_PER_SOURCE", "6000"))
 CHARS_PER_TOKEN = float(os.environ.get("GW_CHARS_PER_TOKEN", "4.0"))
 
-_DROP = {"script", "style", "noscript", "template", "svg", "head"}
+_DROP = {"script", "style", "noscript", "template", "svg", "head",
+         "nav", "header", "footer", "aside", "form", "button", "select"}
+_MAIN = {"main", "article"}
+# Below this many chars, a <main> is a stub and the whole page is the better source.
+MAIN_MIN_CHARS = int(os.environ.get("GW_MAIN_MIN_CHARS", "500"))
 
 
 @dataclass
@@ -51,24 +55,36 @@ class SearchOutcome:
 
 
 class _Text(HTMLParser):
-    """Collects visible text, dropping the tags whose contents are never prose."""
+    """Collects visible text twice: everything, and only what sits inside main/article."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        self.main: list[str] = []
         self.skip = 0
+        self.depth = 0
 
     def handle_starttag(self, tag, attrs):
         if tag in _DROP:
             self.skip += 1
+        elif tag in _MAIN:
+            self.depth += 1
 
     def handle_endtag(self, tag):
         if tag in _DROP and self.skip:
             self.skip -= 1
+        elif tag in _MAIN and self.depth:
+            self.depth -= 1
 
     def handle_data(self, data):
-        if not self.skip and data.strip():
-            self.parts.append(data.strip())
+        if self.skip:
+            return
+        d = data.strip()
+        if not d:
+            return
+        self.parts.append(d)
+        if self.depth:
+            self.main.append(d)
 
 
 def extract(html: str, cap_chars: int = CHARS_PER_SOURCE) -> str:
@@ -78,7 +94,11 @@ def extract(html: str, cap_chars: int = CHARS_PER_SOURCE) -> str:
         p.feed(html)
     except Exception:
         pass
-    text = re.sub(r"\s+", " ", " ".join(p.parts)).strip()
+    # The cap is binding on nearly every real page, so what fills it decides what the
+    # model sees. Prefer the article body; falling back to the whole page spends the
+    # window on navigation, measured on 2 of 3 sources before this existed.
+    chosen = p.main if len(" ".join(p.main)) > MAIN_MIN_CHARS else p.parts
+    text = re.sub(r"\s+", " ", " ".join(chosen)).strip()
     return text[:cap_chars]
 
 
@@ -193,6 +213,14 @@ def selftest() -> int:
 
     if extract("<p>unclosed <b>bold</p>") == "":
         fails.append("malformed html produced nothing")
+
+    body = "Real article content. " * 40
+    nav = "<nav>Home Docs API Community</nav><header>Skip to content</header>"
+    if "Home Docs API" in extract(f"<html><body>{nav}<main><p>{body}</p></main></body></html>"):
+        fails.append("navigation survived when an article body was present")
+    stub = extract(f"<html><body>{nav}<main>tiny</main><p>{body}</p></body></html>")
+    if "Real article content" not in stub:
+        fails.append("a stub <main> should fall back to the whole page")
 
     empty = SearchOutcome(query="q")
     if render_block(empty) != "":
