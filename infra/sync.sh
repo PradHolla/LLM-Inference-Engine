@@ -16,7 +16,7 @@ RS=(rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache_
 
 case "${1:-}" in
   push)
-    for d in labbench tools infra; do
+    for d in labbench gateway tools infra; do
         "${RS[@]}" "$d/" "ubuntu@$IP:/opt/llm/$d/" || exit 1
     done
     # Record which commit the box is running, so a result can be traced to a source state.
