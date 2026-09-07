@@ -21,12 +21,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
 from labbench.proxy import StreamAccounting, Trace, pct
+from gateway.load import LoadSensor
 from gateway.search import CHARS_PER_TOKEN, render_block, run_search
 
 UPSTREAM = os.environ.get("GW_UPSTREAM", "http://localhost:8000")
 TIMEOUT = float(os.environ.get("GW_TIMEOUT", "600"))
 BUDGET_TOKENS = int(os.environ.get("GW_BUDGET_TOKENS", "12000"))
 DEFAULT_CONTEXT_STRATEGY = os.environ.get("GW_CONTEXT", "none")
+# Orchestration order is a Phase 7 parameter. Only retrieve-then-generate is buildable in
+# 6a; generate-then-retrieve needs mid-stream injection, so it is recorded and not honoured.
+ORDER_DEFAULT = os.environ.get("GW_ORDER", "retrieve_then_generate")
+ORDERS = ("retrieve_then_generate", "generate_then_retrieve")
+METRICS_URL_ENV = os.environ.get("GW_METRICS", "http://localhost:8000")
 ALWAYS_SEARCH = os.environ.get("GW_ALWAYS_SEARCH") == "1"
 
 # The gateway owns its own trace file. Reusing labbench.proxy's writer meant setting
@@ -55,6 +61,14 @@ class GatewayTrace(Trace):
     dropped_turns: int = 0
     injected_tokens_est: int = 0
     upstream_ms: float | None = None
+    load_running: float | None = None
+    load_waiting: float | None = None
+    load_kv_usage: float | None = None
+    load_stale: bool = False
+    priority: int | None = None
+    order: str = ORDER_DEFAULT
+    order_honoured: bool = True
+    thinking_budget: int | None = None
 
 
 @dataclass
@@ -90,6 +104,17 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
+def apply_thinking_budget(body: dict, budget: int | None) -> dict:
+    """The single point where a thinking budget lands on the outgoing request.
+    Phase 7 decides the number; 6a only applies whatever it is given."""
+    if budget is None:
+        return body
+    kw = dict(body.get("chat_template_kwargs") or {})
+    kw["enable_thinking"] = budget > 0
+    body["chat_template_kwargs"] = kw
+    return body
+
+
 async def _trim(messages: list[dict], budget_tokens: int, strategy: str):
     """Delegate to gateway.context if present; otherwise a no-op passthrough."""
     try:
@@ -114,6 +139,7 @@ async def _do_search(messages: list[dict], tr: GatewayTrace) -> str:
 
 CLIENT: httpx.AsyncClient | None = None
 RECENT: list[GatewayTrace] = []
+SENSOR = LoadSensor(METRICS_URL_ENV)
 INFLIGHT: dict[str, StreamAccounting] = {}
 
 
@@ -146,8 +172,24 @@ async def chat(req: Request):
     messages = body.get("messages") or []
     do_search = bool(body.get("gw_search")) or ALWAYS_SEARCH
     strategy = body.get("gw_context", DEFAULT_CONTEXT_STRATEGY)
+    order = body.get("gw_order", ORDER_DEFAULT)
+    priority = body.get("gw_priority")
+    budget = body.get("gw_thinking_budget")
     for k in [k for k in body if k.startswith("gw_")]:
         body.pop(k, None)
+
+    tr.order = order if order in ORDERS else ORDER_DEFAULT
+    tr.order_honoured = tr.order == "retrieve_then_generate"
+    tr.thinking_budget = budget
+    if priority is not None:
+        try:
+            tr.priority = int(priority)
+            body["priority"] = tr.priority
+        except (TypeError, ValueError):
+            tr.priority = None
+    s = await SENSOR.sample(CLIENT)
+    tr.load_running, tr.load_waiting = s.running, s.waiting
+    tr.load_kv_usage, tr.load_stale = s.kv_usage, s.stale
 
     retrieved_block = await _do_search(messages, tr) if do_search and messages else ""
 
@@ -158,6 +200,7 @@ async def chat(req: Request):
     final_messages = assemble_messages(trimmed.messages, retrieved_block)
     tr.injected_tokens_est = int(len(retrieved_block) / CHARS_PER_TOKEN) if retrieved_block else 0
     body["messages"] = final_messages
+    apply_thinking_budget(body, budget)
     new_body = json.dumps(body).encode()
 
     if not body.get("stream"):
@@ -206,6 +249,13 @@ def _record(tr: GatewayTrace) -> None:
     RECENT.append(tr)
     del RECENT[:-200]
     write_trace(tr)
+
+
+@app.get("/gateway/load")
+async def load():
+    """The live engine load a Phase 7 policy would key off. Reads, decides nothing."""
+    s = await SENSOR.sample(CLIENT)
+    return asdict(s)
 
 
 @app.get("/v1/models")
@@ -308,6 +358,14 @@ def selftest() -> int:
     chk("assemble: no-op with empty block", assemble_messages(convo, "") == convo)
     chk("assemble: no-op with empty messages", assemble_messages([], "DOCS") == [])
 
+    b = apply_thinking_budget({"messages": []}, None)
+    chk("budget None leaves the body untouched", "chat_template_kwargs" not in b)
+    b = apply_thinking_budget({"messages": []}, 0)
+    chk("budget 0 disables thinking", b["chat_template_kwargs"]["enable_thinking"] is False)
+    b = apply_thinking_budget({"chat_template_kwargs": {"keep": 1}}, 512)
+    chk("budget >0 enables thinking", b["chat_template_kwargs"]["enable_thinking"] is True)
+    chk("budget preserves other template kwargs", b["chat_template_kwargs"]["keep"] == 1)
+
     global TRACE_PATH
     with tempfile.TemporaryDirectory() as tmp:
         TRACE_PATH = os.path.join(tmp, "gateway-traces.jsonl")
@@ -323,6 +381,8 @@ def selftest() -> int:
             r = client.post("/v1/chat/completions", json=body)
             chk("non-streaming 200", r.status_code == 200)
             fwd = json.loads(CLIENT.last_body)
+            _t0 = len(RECENT)
+
             chk("gw_* stripped from forwarded body", all(not k.startswith("gw_") for k in fwd))
             chk("no search leaves messages unchanged", fwd["messages"] == body["messages"])
 
@@ -338,6 +398,37 @@ def selftest() -> int:
             t = RECENT[-1]
             chk("search failure gives n_sources 0", t.n_sources == 0)
             run_search = _orig_run_search
+
+            r = client.post("/v1/chat/completions", json={
+                "model": "m", "messages": [{"role": "user", "content": "hi"}],
+                "gw_priority": 3, "gw_order": "generate_then_retrieve",
+                "gw_thinking_budget": 0})
+            fwd = json.loads(CLIENT.last_body)
+            t = RECENT[-1]
+            chk("gw_priority reaches upstream as priority", fwd.get("priority") == 3)
+            chk("gw_priority itself is stripped", "gw_priority" not in fwd)
+            chk("priority recorded on the trace", t.priority == 3)
+            chk("thinking budget applied to the forwarded body",
+                fwd.get("chat_template_kwargs", {}).get("enable_thinking") is False)
+            chk("thinking budget recorded", t.thinking_budget == 0)
+            chk("order recorded", t.order == "generate_then_retrieve")
+            chk("unbuildable order marked not honoured", t.order_honoured is False)
+
+            r = client.post("/v1/chat/completions", json={
+                "model": "m", "messages": [{"role": "user", "content": "hi"}],
+                "gw_priority": "not-an-int", "gw_order": "nonsense"})
+            fwd = json.loads(CLIENT.last_body)
+            t = RECENT[-1]
+            chk("a bad priority is dropped, not forwarded", "priority" not in fwd)
+            chk("a bad priority is not recorded", t.priority is None)
+            chk("an unknown order falls back to the default", t.order == ORDER_DEFAULT)
+            chk("the default order is honoured", t.order_honoured is True)
+            chk("load recorded on the trace", t.load_stale in (True, False))
+
+            r = client.get("/gateway/load")
+            chk("load endpoint 200", r.status_code == 200)
+            chk("load endpoint shape", set(("running", "waiting", "kv_usage", "stale"))
+                <= set(r.json()))
 
             chunks = [b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
                      b'data: {"choices":[{"delta":{"content":" there"}}],'
