@@ -243,7 +243,12 @@ CONFIG_A_OK=0
 echo
 echo "########## CONFIG A: fp8 weights, fp16 KV, max-model-len 16384, spec off"
 if [ "$NEED_A" = 1 ]; then
-    build_template || echo "[$(ts)] WARNING: patched template not built"
+    if build_template && [ "$DRY_RUN" = 1 -o -s "$TEMPLATE" ]; then
+        echo "[$(ts)] patched template present: $TEMPLATE"
+    else
+        echo "[$(ts)] ABORT: patched template missing; every config would fail to launch"
+        CONFIG_A_OK=0
+    fi
     if launch_server A --model "$MODEL" --quantization fp8 --max-model-len 16384 \
            --chat-template "$TEMPLATE"; then
         CONFIG_A_OK=1
