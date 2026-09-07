@@ -14,14 +14,13 @@ import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
-import labbench.proxy as _proxy
-from labbench.proxy import StreamAccounting, Trace, pct, write_trace
+from labbench.proxy import StreamAccounting, Trace, pct
 from gateway.search import CHARS_PER_TOKEN, render_block, run_search
 
 UPSTREAM = os.environ.get("GW_UPSTREAM", "http://localhost:8000")
@@ -30,9 +29,18 @@ BUDGET_TOKENS = int(os.environ.get("GW_BUDGET_TOKENS", "12000"))
 DEFAULT_CONTEXT_STRATEGY = os.environ.get("GW_CONTEXT", "none")
 ALWAYS_SEARCH = os.environ.get("GW_ALWAYS_SEARCH") == "1"
 
-# write_trace reads this as a module global in labbench.proxy, not a parameter --
-# override it here so GW_TRACE actually routes the file, see code-notes.md.
-_proxy.TRACE_PATH = os.environ.get("GW_TRACE", "results/gateway-traces.jsonl")
+# The gateway owns its own trace file. Reusing labbench.proxy's writer meant setting
+# its module global, which silently redirected the lab bench's traces here too.
+TRACE_PATH = os.environ.get("GW_TRACE", "results/gateway-traces.jsonl")
+
+
+def write_trace(tr: GatewayTrace, path: str | None = None) -> None:
+    """Flush per request. A run that writes at the end loses everything to a crash."""
+    path = path or TRACE_PATH
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(asdict(tr)) + "\n")
+        f.flush()
 
 
 @dataclass
@@ -300,8 +308,9 @@ def selftest() -> int:
     chk("assemble: no-op with empty block", assemble_messages(convo, "") == convo)
     chk("assemble: no-op with empty messages", assemble_messages([], "DOCS") == [])
 
+    global TRACE_PATH
     with tempfile.TemporaryDirectory() as tmp:
-        _proxy.TRACE_PATH = os.path.join(tmp, "gateway-traces.jsonl")
+        TRACE_PATH = os.path.join(tmp, "gateway-traces.jsonl")
         with TestClient(app) as client:
             CLIENT = _FakeUpstream()
 
