@@ -3,18 +3,18 @@ B = results/phase6-qual-kvfp8.jsonl  (1210 ok)
 paired on 1210 items
 
   group                        n    accA    accB    b    c   disc  ansdiff  McNemar p
-  gsm8k/think                200  57.0%  57.0%   15   15 15.0%   15.0%     1.0000
-  gsm8k/nothink              200  76.0%  74.0%    7    3  5.0%    8.0%     0.3438
+  gsm8k/think                200  56.5%  52.5%   22   14 18.0%   19.0%     0.2430
+  gsm8k/nothink              200  75.5%  75.0%    5    4  4.5%    6.5%     1.0000
   longctx/nothink             90 100.0% 100.0%    0    0  0.0%    0.0%     1.0000
-  math/think/k4               45  95.6%  95.6%    1    1  4.4%    4.4%     1.0000
-  math/think/k8               75  93.3%  93.3%    3    3  8.0%    8.0%     1.0000
-  math/think/k16             105  65.7%  72.4%   14   21 33.3%   33.3%     0.3105
-  math/think/k32             135  34.8%  30.4%   25   19 32.6%   32.6%     0.4514
-  math/nothink/k4             45  93.3%  88.9%    2    0  4.4%    4.4%     0.5000
-  math/nothink/k8             75  12.0%  17.3%    1    5  8.0%    9.3%     0.2188
+  math/think/k4               45  91.1% 100.0%    0    4  8.9%    8.9%     0.1250
+  math/think/k8               75  93.3%  89.3%    6    3 12.0%   12.0%     0.5078
+  math/think/k16             105  61.0%  69.5%   13   22 33.3%   33.3%     0.1755
+  math/think/k32             135  37.8%  28.9%   24   12 26.7%   26.7%     0.0652
+  math/nothink/k4             45  93.3%  91.1%    1    0  2.2%    2.2%     1.0000
+  math/nothink/k8             75  12.0%  18.7%    1    6  9.3%   10.7%     0.1250
   math/nothink/k16           105   0.0%   0.0%    0    0  0.0%    0.0%     1.0000
   math/nothink/k32           135   0.0%   0.0%    0    0  0.0%    0.0%     1.0000
-  ALL                       1210  52.6%  52.5%   68   67 11.2%   11.7%     1.0000
+  ALL                       1210  52.1%  51.6%   72   65 11.3%   11.9%     0.6084
 
   b = A right, B wrong.  c = A wrong, B right.  disc = (b+c)/n.
   ansdiff = extracted answers differ at all -- compare THIS against the

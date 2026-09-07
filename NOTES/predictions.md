@@ -4780,3 +4780,78 @@ Everything at ONE code version and one pinned KV budget (69,264 tokens), with Qw
 not being applied and the whole patch is inert -- check the hit rate first, it should be
 ~0.997. If P6-M2R-d holds again at 2.1x, the thrashing prediction is dead rather than
 under-tested and P6-A7 should be retired.
+
+## P6-M2R ACTUALS, 2026-09-07. Full re-run, template patched, one code version.
+
+fp8 weights, 16,384 ctx, KV pinned 10,213,733,807 bytes -> **69,264 tokens**, Qwen3 issue
+1826 fixed at the server via `--chat-template`. All fifteen runs ok.
+
+### The patch is worth 2.3x, and every prediction about it held
+
+| # | Prediction | Measured | |
+|---|---|---|---|
+| P6-M2R-a | M2 warm TTFT turn 30, 75-95 ms | **81.7 ms** (was 188) | correct |
+| P6-M2R-b | warm slope ~0.005 ms/token | **0.0049** (was 0.0102) | correct |
+| P6-M2R-c | separation rises above 15.2x | **35.4x** | correct |
+| P6-M2R-f | strip and think converge | **0.0051 vs 0.0050**, both 74.3 ms | correct |
+| P6-M2R-g | not saturated at 0.5 req/s, p95 under 2 s | **1,310 ms** | correct |
+| P6-M2R-d | M3 hit rate falls at 12-16 chats | **0.993 -> 0.985** at 2.1x | directionally right, hugely overstated |
+| P6-M2R-e | M4 cold open 4,400-5,300 ms | **run failed** | see below |
+
+**M5 is the proof.** Strip and think now differ by 0.0001 ms/token and land on the identical
+74.3 ms. Before the patch they differed 2.4x. **The whole strip-vs-keep effect was the
+template artifact**, not thinking's cost. Section 4c of the design doc treated it as a
+product decision; it was a bug.
+
+### M9: the criterion now passes to 4 req/s, double what it was
+
+| rate | p50 | p95 | 250 ms |
+|---|---|---|---|
+| 1 | 80 ms | 97 ms | pass |
+| 2 | 67 ms | 115 ms | pass |
+| **4** | **71 ms** | **218 ms** | **pass** |
+| 6 | 71 ms | 532 ms | fail |
+| 8 | 284 ms | 12,155 ms | fail |
+
+Monotonic, with no repeat of the rate-6 collapse -- the per-rate prompt-cursor reset removed
+that artifact, confirming it was the instrument and not the engine.
+
+### M7/M8 on app traffic, now measured below saturation
+
+| config | 0.5 req/s TTFT p50 | 1.0 req/s TTFT p50 | ITL per token |
+|---|---|---|---|
+| control | 698 ms | 1,462 ms | 19.9 ms |
+| EAGLE3 k=2 | 413 ms | 2,088 ms | **13.4 ms** |
+| **fp8 KV** | **49 ms** | **64 ms** | 19.8 ms |
+
+Control saturates between 1 and 2 req/s, as the 1.2 s/request prefill arithmetic predicted.
+
+**fp8 KV is the result of the phase for app traffic: 23x lower TTFT at 1 req/s** (64 ms
+against 1,462). Long prompts are exactly the case where KV is binding, and doubling the
+budget removes the queueing entirely. EAGLE3 buys **1.49x per token** and costs TTFT at
+1 req/s, the same headroom tradeoff as P6B.
+
+### Two failures, both mine, both the same class
+
+**M4 failed: `status: empty`.** Recalibrating the seed to 5.82 chars/token produced 97,230
+chars = **~16,700 tokens against a 16,384 limit**. I converted a 26% undershoot into a hard
+overflow by not leaving headroom for the question and the answer. Needs ~14,000.
+
+**M6 is inconclusive: it never overflowed.** Both arms peak at ~9,650 prompt tokens against
+a 16,384 window, so neither sliding-window nor summarize ever triggered, and both read 82 ms.
+**The 14.9x gap reported from the earlier run was the template break, not the strategies** --
+that comparison is withdrawn. mchat's overflow mode grows ~161 tokens/turn, so it needs ~110
+turns, not 60.
+
+### The pattern, stated plainly
+
+Four range failures this phase: M3 twice, M7/M8, M6, M4. All the same shape -- **the
+experiment never entered the regime where the effect exists**, producing a confident null that
+reads as a finding. The prediction protocol asks what the number will be and never asks
+whether the configuration reaches the regime where the number exists. That gap did not matter
+for Phases 1-5, which measured properties present at any operating point; Phase 6 measures
+thresholds.
+
+**Fix: make the operating point executable.** Each threshold measurement declares its
+threshold and its configuration's value, and the battery refuses to run when it does not
+cross. That would have caught three of the four before the box came up.
