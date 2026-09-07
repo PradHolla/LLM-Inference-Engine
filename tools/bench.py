@@ -103,8 +103,8 @@ def load_prompts(path: str) -> list[str]:
 def make_prompt(target_tokens: int, unique: bool) -> str:
     global _pool_i
     if POOL:
-        # Cycled in a fixed order, so every configuration in a sweep sees the same
-        # prompts in the same sequence and the comparison stays matched.
+        # Fixed order, and the cursor is reset per rate by the sweep loop, so every
+        # rate AND every configuration sees the same prompts in the same sequence.
         body = POOL[_pool_i % len(POOL)]
         _pool_i += 1
     else:
@@ -373,6 +373,12 @@ async def main() -> None:
         for i, rate in enumerate(rates):
             if i:
                 await asyncio.sleep(args.settle)
+            # Restart the pool at every rate. Without this the cursor carries over, so
+            # each rate draws a DIFFERENT slice of a heterogeneous pool -- one window
+            # took all 90 long-context items and read as a capacity cliff that vanished
+            # at the next rate up.
+            global _pool_i
+            _pool_i = 0
             recs = await run_point(args, rate, out, lock)
             s = summarize(rate, recs, args.duration)
             summaries.append(s)
