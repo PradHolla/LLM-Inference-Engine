@@ -10,6 +10,20 @@ UV=/home/ubuntu/.local/bin/uv
 LAUNCH=/opt/llm/infra/vllm-launch.sh
 RESULTS=/opt/llm/results
 PROMPTS=/opt/llm/results/phase4-items.jsonl
+# M7 and M8 ask about APP traffic: long retrieved context in, short grounded answer
+# out. phase4-items is short arithmetic, the opposite shape.
+PROMPTS_APP=/opt/llm/results/longctx-prompts.jsonl
+
+# Built on the box: sync carries code, not results, so shipping this file would mean
+# a manual copy that silently goes stale. Regenerated from the item set every run.
+build_app_prompts() {
+    if [ "$DRY_RUN" = 1 ]; then
+        echo "  [prompts] $UV run tools/mkprompts.py --slice longctx --out $PROMPTS_APP --min 50"
+        return 0
+    fi
+    "$UV" run tools/mkprompts.py --items /opt/llm/results/phase4-items.jsonl \
+        --slice longctx --out "$PROMPTS_APP" --min 50
+}
 MODEL=Qwen/Qwen3-8B
 EAGLE='{"model":"RedHatAI/Qwen3-8B-speculator.eagle3","method":"eagle3","num_speculative_tokens":2}'
 
@@ -266,7 +280,7 @@ if want M3; then
     if [ "$CONFIG_A_OK" = 1 ] && ensure_default_gateway; then
         run_tool M3 "$RESULTS/m3-thrash.jsonl" \
             $UV run tools/mchat.py --url http://localhost:8080 --mode thrash \
-            --chats 1,2,4,6,8 --turns 12 --out "$RESULTS/m3-thrash.jsonl"
+            --chats 1,2,4,6,8 --turns 29 --out "$RESULTS/m3-thrash.jsonl"
     else
         record_skip M3 "$RESULTS/m3-thrash.jsonl" "config A or gateway unavailable"
     fi
@@ -353,10 +367,11 @@ fi
 # ---------- not change between M7's and M8's control need, so a second identical ----------
 # ---------- sweep would just double GPU time for no new number.                  ----------
 if want M7 || want M8; then
+        build_app_prompts || echo "[$(ts)] WARNING: app prompts not built"
     if [ "$CONFIG_A_OK" = 1 ]; then
         run_tool M7-M8-control "$RESULTS/m7-m8-control.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS" --max-tokens 128 \
+            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m7-m8-control.jsonl"
     else
         record_skip M7-M8-control "$RESULTS/m7-m8-control.jsonl" "config A failed to launch"
@@ -384,7 +399,7 @@ if want M7; then
     if [ "$CONFIG_B_OK" = 1 ]; then
         run_tool M7-eagle "$RESULTS/m7-eagle.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS" --max-tokens 128 \
+            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m7-eagle.jsonl"
     else
         record_skip M7-eagle "$RESULTS/m7-eagle.jsonl" "config B failed to launch"
@@ -409,7 +424,7 @@ if want M8; then
     if [ "$CONFIG_C_OK" = 1 ]; then
         run_tool M8-fp8kv "$RESULTS/m8-fp8kv.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS" --max-tokens 128 \
+            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m8-fp8kv.jsonl"
     else
         record_skip M8-fp8kv "$RESULTS/m8-fp8kv.jsonl" "config C failed to launch"
