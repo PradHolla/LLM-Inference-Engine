@@ -18,6 +18,50 @@ PROMPTS_APP=/opt/llm/results/longctx-prompts.jsonl
 # a manual copy that silently goes stale. Regenerated from the item set every run.
 TEMPLATE=/opt/llm/qwen3-patched.jinja
 
+# ---------- regime gate ----------
+# Four measurements in this phase produced confident nulls because the configuration never
+# entered the regime where the effect exists: M3 at 1.04x of the KV budget, M6 at 0.6x of
+# the context window, M7/M8 past saturation, M4 over the context limit. A prediction says
+# what the number will be; it never asked whether the run reaches the regime the number
+# lives in. This does, and REFUSES rather than measuring a null.
+KV_TOKENS=69264          # config A's pinned budget, from its own startup log
+CTX=16384                # --max-model-len
+TOK_PER_TURN=321         # convo.py, measured
+MCHAT_TOK_PER_TURN=161   # mchat overflow mode, measured over 60 turns
+REGIME_BLOCKED=""
+
+# name, what it needs to cross, what this config produces, and the rule
+check_regime() {
+    local name="$1" need="$2" got="$3" rule="$4"
+    local ratio
+    ratio=$(awk -v g="$got" -v n="$need" 'BEGIN{printf "%.2f", g/n}')
+    local ok=1
+    case "$rule" in
+        exceed) awk -v g="$got" -v n="$need" 'BEGIN{exit !(g > n*1.5)}' || ok=0 ;;
+        under)  awk -v g="$got" -v n="$need" 'BEGIN{exit !(g < n*0.92)}' || ok=0 ;;
+    esac
+    if [ "$ok" = 1 ]; then
+        printf "  %-14s needs %-7s %8s   this config %8s  %5sx  OK
+" "$name" "$rule" "$need" "$got" "$ratio"
+    else
+        printf "  %-14s needs %-7s %8s   this config %8s  %5sx  REFUSED
+" "$name" "$rule" "$need" "$got" "$ratio"
+        REGIME_BLOCKED="$REGIME_BLOCKED $name"
+    fi
+}
+
+regime_ok() {
+    case " $REGIME_BLOCKED " in *" $1 "*) return 1 ;; esac
+    return 0
+}
+
+echo "########## regime gate: does each configuration reach the regime it measures?"
+check_regime M3 "$KV_TOKENS" "$(( 16 * 29 * 321 ))" exceed
+check_regime M4 "$CTX"       "$(( 15000 + 64 ))"    under
+check_regime M6 "$CTX"       "$(( 160 * MCHAT_TOK_PER_TURN ))" exceed
+[ -n "$REGIME_BLOCKED" ] && echo "  BLOCKED:$REGIME_BLOCKED"
+echo
+
 # Qwen3 issue 1826: with thinking off the stock template adds an empty think block to the
 # generation prompt but not to history, so turn N is not a prefix of turn N+1 and the cache
 # dies. Patched at the server so it applies to every client, not per request.
@@ -296,7 +340,7 @@ else
 fi
 
 # ---------- M3: mchat.py thrash, several live chats ----------
-if want M3; then
+if want M3 && regime_ok M3; then
     if [ "$CONFIG_A_OK" = 1 ] && ensure_default_gateway; then
         run_tool M3 "$RESULTS/m3-thrash.jsonl" \
             $UV run tools/mchat.py --url http://localhost:8080 --mode thrash \
@@ -304,22 +348,26 @@ if want M3; then
     else
         record_skip M3 "$RESULTS/m3-thrash.jsonl" "config A or gateway unavailable"
     fi
+elif ! regime_ok M3; then
+    record_skip M3 "$RESULTS/m3-thrash.jsonl" "REGIME: config does not reach the measured regime"
 else
     record_skip M3 "$RESULTS/m3-thrash.jsonl" "not selected"
 fi
 
 # ---------- M4: cold-open cost of a persisted ~16k-token chat ----------
-if want M4; then
+if want M4 && regime_ok M4; then
     if [ "$CONFIG_A_OK" = 1 ] && ensure_default_gateway; then
         # --seed-tokens pre-loads a synthetic ~16k history so turn 1 measures REOPENING
         # a persisted chat. Without it this measured a short first turn: a plausible
         # number two orders of magnitude off, and no error.
         run_tool M4 "$RESULTS/m4-coldopen.jsonl" \
             $UV run tools/convo.py --url http://localhost:8080 --cold --turns 1 \
-            --seed-tokens 16384 --max-tokens 64 --out "$RESULTS/m4-coldopen.jsonl"
+            --seed-tokens 15000 --max-tokens 64 --out "$RESULTS/m4-coldopen.jsonl"
     else
         record_skip M4 "$RESULTS/m4-coldopen.jsonl" "config A or gateway unavailable"
     fi
+elif ! regime_ok M4; then
+    record_skip M4 "$RESULTS/m4-coldopen.jsonl" "REGIME: config does not reach the measured regime"
 else
     record_skip M4 "$RESULTS/m4-coldopen.jsonl" "not selected"
 fi
@@ -342,19 +390,22 @@ else
     record_skip M5-think "$RESULTS/m5-think.jsonl" "not selected"
 fi
 
-# ---------- M6: overflow at turn 60, sliding window vs summarize-and-restart ----------
-if want M6; then
+# ---------- M6: 160 turns so the conversation actually crosses the context window,
+# sliding window vs summarize-and-restart ----------
+if want M6 && regime_ok M6; then
     if [ "$CONFIG_A_OK" = 1 ] && ensure_default_gateway; then
         run_tool M6-window "$RESULTS/m6-window.jsonl" \
             $UV run tools/mchat.py --url http://localhost:8080 --mode overflow \
-            --turns 60 --strategy window --out "$RESULTS/m6-window.jsonl"
+            --turns 160 --strategy window --out "$RESULTS/m6-window.jsonl"
         run_tool M6-summarize "$RESULTS/m6-summarize.jsonl" \
             $UV run tools/mchat.py --url http://localhost:8080 --mode overflow \
-            --turns 60 --strategy summarize --out "$RESULTS/m6-summarize.jsonl"
+            --turns 160 --strategy summarize --out "$RESULTS/m6-summarize.jsonl"
     else
         record_skip M6-window "$RESULTS/m6-window.jsonl" "config A or gateway unavailable"
         record_skip M6-summarize "$RESULTS/m6-summarize.jsonl" "config A or gateway unavailable"
     fi
+elif ! regime_ok M6; then
+    record_skip M6-window "$RESULTS/m6-window.jsonl" "REGIME: config does not reach the measured regime"
 else
     record_skip M6-window "$RESULTS/m6-window.jsonl" "not selected"
     record_skip M6-summarize "$RESULTS/m6-summarize.jsonl" "not selected"
