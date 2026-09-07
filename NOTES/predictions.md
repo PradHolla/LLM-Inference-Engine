@@ -4710,3 +4710,46 @@ journald survives a stop, so **the first action next session is to read the vLLM
 that window**. Until then M9's capacity number stands only up to rate 4.
 
 **The criterion: TTFT p95 under 250 ms holds to 2 req/s and fails by 4.**
+
+### P6-M rerun, 2026-09-07: M3 refuted, M7/M8 under-ranged in the other direction
+
+KV **pinned** 10,213,733,807 bytes -> **69,264 tokens** (the first battery profiled 74,880
+unpinned, which is why those cross-config numbers were shakier than they looked).
+
+**M3, now reaching its threshold and refuting the prediction.** 29 turns, 9,004 tokens per chat:
+
+| chats | summed live | vs 69,264 budget | median hit | median TTFT |
+|---|---|---|---|---|
+| 1 | 9,004 | under | 0.993 | 57.3 ms |
+| 4 | 36,016 | under | 0.993 | 104.9 ms |
+| 8 | **72,032** | **past** | **0.993** | 174.0 ms |
+
+**P6-M3 is refuted, not confirmed.** Past the budget the hit rate does not move. The likely
+reason is that interleaved chats re-touch their own blocks every turn, so LRU never has a
+cold victim to evict. Caveat: 72,032 is only **4% over** budget, so this refutes thrashing
+*at this margin*, not in general. Finding a cliff needs 2-3x overcommit, not 1.04x.
+TTFT rising 57 -> 174 ms is batching, not eviction.
+
+**M7/M8 on app traffic (90 longctx prompts, ~4,100 tok in, 32 out).**
+
+| config | rate | TTFT p50 | TTFT p95 | ITL/token |
+|---|---|---|---|---|
+| control | 2 | 723 ms | **20,455 ms** | 19.5 ms |
+| EAGLE3 | 2 | 3,654 ms | 23,902 ms | **11.4 ms** |
+| fp8 KV | 2 | **132 ms** | **11,837 ms** | 19.7 ms |
+| control | 6 | 2,311 ms | 140,923 ms | 60.9 ms |
+| EAGLE3 | 6 | 3,935 ms | 142,309 ms | 53.1 ms |
+| fp8 KV | 6 | 7,263 ms | 135,453 ms | 46.2 ms |
+
+**All three are saturated at both rates.** A p95 of 20-140 seconds is an unbounded queue, so
+these rates are past capacity for 4,100-token prompts and the comparison is between three
+configurations that are all failing. **The sweep is under-ranged in the opposite direction
+from M3** -- it needed 0.25, 0.5, 1 req/s, not 2 and 6.
+
+What survives: EAGLE3 is **1.71x faster per token** at 2 req/s (19.5 -> 11.4 ms) and costs
+TTFT badly (723 -> 3,654 ms), which is the KV-headroom tradeoff from P6B on a workload that
+makes it hurt. fp8 KV cuts TTFT p50 5.5x at 2 req/s. Neither claim is safe until re-run below
+saturation.
+
+**The lesson, twice in one battery: a sweep's range is the measurement.** M3 was too narrow
+and M7/M8 too wide, and both produced numbers that looked like results.
