@@ -4587,3 +4587,126 @@ already measured (P6Q: 52.6% -> 52.5%, McNemar p = 1.0000) against its own contr
 result. **M8 therefore runs its capacity half only**, and the quality half cites P6Q.
 P6-A11's capacity prediction is also already answered: 74,880 -> 135,152 tokens is **1.80x**,
 the top of the predicted 1.5-1.8x range.
+
+## P6-M ACTUALS, 2026-09-07. The app battery, 14 runs, zero failures.
+
+Qwen3-8B, vLLM 0.27.1, fp8 weights, `--max-model-len 16384`, A10G. Three server configs,
+KV **pinned** at 10,213,733,807 bytes for A and C so M8 compares dtype and nothing else.
+Budgets read from each launch's own log: **A 74,880 tokens**, B (EAGLE3) 58,816,
+C (fp8 KV) **138,528**. Gateway in front except where noted. Raw: `results/m*.jsonl`.
+
+### Scoreboard
+
+| # | Prediction | Measured | Verdict |
+|---|---|---|---|
+| P6-M1a | search+fetch+extract 400-900 ms | **1,406 ms** | **missed high, 1.6x** |
+| P6-M1b | inference under 40% of the wait | **81%** of the turn, **46%** of time-to-first-token | **wrong as stated** -- see below |
+| P6-M2a | warm TTFT turn 30, 150-210 ms | **188 ms** | correct |
+| P6-M2b | cold TTFT turn 30, 2,400-3,100 ms | **2,859 ms** | correct |
+| P6-M2c | warm curve NOT flat, rises ~1.6x | **1.63x** | correct, and it corrected the design doc |
+| P6-M3 | thrashing past 74,880 tokens | **not reached** | **inconclusive, my sweep was under-ranged** |
+| P6-M4 | cold open 4,300-5,300 ms | **3,531 ms** | **missed low, and the cause is my own tool** |
+| P6-M5a | thinking kept overflows by turn ~8 | prompts **identical** to stripped | **wrong, and for an interesting reason** |
+| P6-M6a/b | window reverts and stays; summarize recovers | window **1,211 ms** median vs summarize **81 ms** | correct, 14.9x apart |
+| P6-M7 | spec net negative or neutral | **1.79x faster** at 2 req/s, **1.29x** at 6 | **wrong** |
+| P6-M9 | passes 250 ms without search | passes to **2 req/s**, fails at 4 | half correct |
+
+### M5 is the result of the day: P6L-3a confirmed, and it is worth 2.4x
+
+| turn | stripped hit | stripped TTFT | thinking hit | thinking TTFT |
+|---|---|---|---|---|
+| 5 | 0.747 | 123.8 ms | **0.982** | **42.5 ms** |
+| 15 | 0.925 | 150.8 ms | **0.993** | **58.0 ms** |
+| 25 | 0.957 | 175.0 ms | **0.997** | **73.3 ms** |
+
+    TTFT slope   stripped 0.0102 ms/token     thinking 0.0049 ms/token     2.08x flatter
+
+This is the template break from P6L-3, now measured on a live server. With
+`enable_thinking=False` the template appends an empty think block to the generation prompt
+and strips it from history, so the prefix diverges 4 tokens before the reply and the cache
+match stops there. With it on, the prefix holds and the hit rate reaches **0.997**.
+
+**P6L-3b predicted warm TTFT at turn 25 would fall from 166 ms to 80-110 ms. Measured 73.3 ms**
+-- better than the prediction. The reply IS cacheable; nothing about the engine prevented it.
+Hypothesis A is dead, hypothesis B is confirmed and fixed.
+
+P6-M5a is wrong because the same mechanism defeats it: the template strips think blocks from
+history either way, so "kept" never grows the prompt. Stripped ended at 7,724 tokens, thinking
+at 7,720. **Strip-vs-keep is not selectable through the messages API at all**, which the design
+doc's section 4c assumed it was.
+
+### M1: the honest answer depends on how long the answer is
+
+    search        626 ms
+    fetch         741 ms
+    extract        39 ms
+                 --------
+    before GPU  1,406 ms      predicted 400-900
+    TTFT        1,178 ms
+    whole turn  7,293 ms      at 300 output tokens
+
+Inference is **81%** of the turn but only **46%** of the wait before the first token. Section
+0c derived "under 40%" against a *1.5-2 s total*, which is a short answer. At 300 tokens decode
+dominates everything. **Both numbers are true and the framing decides which one you quote** --
+the same request-shape lesson this project keeps meeting, now applied to its own headline.
+
+The fetch miss has a cause: a slow site holds the connection to the 2 s timeout. Two of twelve
+turns retrieved **zero** sources and were answered anyway, which is the degradation path working.
+
+### M4: the prediction was right and my seeding was wrong
+
+Predicted 4,776 ms from 16,384 x 0.2915. Measured 3,531 ms, 26% low. **The seeded history was
+11,261 tokens, not 16,384** -- `seed_history` assumes 4 chars per token and the tokenizer is
+more efficient than that on repetitive text. Against what was actually prefilled,
+11,261 x 0.2915 = **3,283 ms** against 3,531 measured, **7% high and inside the range**.
+The model of the machine is fine; the constant in my instrument was not.
+
+### M3 is inconclusive, and the sweep is why
+
+Hit rate sat at 0.986-0.988 across 1, 2, 4, 6 and 8 chats. That is not evidence against
+thrashing: 8 chats x 12 turns peaked at **28,400 tokens of summed live context against a
+74,880-token budget**. The experiment never approached the threshold it was designed to find.
+Incident 12 again -- a sweep's range is the measurement's range. Reaching it needs ~29 turns
+at 8 chats. TTFT did rise 44.6 -> 128.2 ms with concurrency, but that is batching, not eviction.
+
+### M7 and M8, and the ITL trap that nearly caught this table
+
+| config | KV | ITL p50 per CHUNK | tokens/chunk | ITL per TOKEN |
+|---|---|---|---|---|
+| control, 2 req/s | 74,880 | 19.4 ms | 1.00 | 19.4 ms |
+| EAGLE3, 2 req/s | 58,816 | 23.2 ms | **2.14** | **10.8 ms** |
+| control, 6 req/s | 74,880 | 56.9 ms | 1.00 | 56.9 ms |
+| EAGLE3, 6 req/s | 58,816 | 94.4 ms | **2.14** | **44.1 ms** |
+
+Read per chunk, speculation looks **worse at both rates**. Per token it is **1.79x and 1.29x
+faster**. This is incident 32's exact shape and the table would have reported the technique
+backwards for the second time in this project if `tokens/chunk` were not carried alongside.
+
+P6-M7 is wrong: speculation is net positive here. **Caveat stated rather than buried**: this
+ran `phase4-items` arithmetic prompts, not search-shaped app traffic, so it does not yet
+answer the question the design doc asked.
+
+**M8**: the same pinned bytes gave fp8 KV **138,528 tokens against 74,880**, 1.85x. At 6 req/s
+TTFT p95 **853 ms against 1,588**, ITL p50 **29.7 against 56.9**. A clear win -- and the
+opposite of P6K, where fp8 KV cost 14% of capacity. The difference is that this pair was
+pinned to identical memory and P6K's was not.
+
+### M9, and an anomaly I cannot attribute
+
+| rate | TTFT p50 | TTFT p95 | completion throughput | 250 ms p95 |
+|---|---|---|---|---|
+| 1 | 80 ms | 105 ms | 1.0 req/s | pass |
+| 2 | 106 ms | 171 ms | 2.0 | **pass** |
+| 4 | 220 ms | 593 ms | 4.10 | fail |
+| **6** | **48,111 ms** | **61,969 ms** | **2.60** | collapsed |
+| 8 | 211 ms | 2,560 ms | 6.67 | fail |
+
+**Rate 6 is not on the curve.** Throughput fell to 2.60 req/s and recovered to 6.67 at rate 8;
+TTFT climbed monotonically 0.16 s to 42 s across that window and was still growing when it
+closed. A capacity wall does not un-hit itself one rate later. **No cause is offered here** --
+the client-side data cannot distinguish a preemption cascade from an external stall, and
+stating one would repeat incident 26. The engine logs KV usage and preemption every 10 s and
+journald survives a stop, so **the first action next session is to read the vLLM journal for
+that window**. Until then M9's capacity number stands only up to rate 4.
+
+**The criterion: TTFT p95 under 250 ms holds to 2 req/s and fails by 4.**
