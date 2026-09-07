@@ -26,12 +26,28 @@ def tok():
     return _TOK
 
 
+_HIST_ASSISTANT = "{{- '<|im_start|>' + message.role + '\\n' + content }}"
+_HIST_FIXED = ("{%- if enable_thinking is defined and not enable_thinking %}"
+               "{{- '<|im_start|>' + message.role + '\\n<think>\\n\\n</think>\\n\\n' + content }}"
+               "{%- else %}" + _HIST_ASSISTANT + "{%- endif %}")
+
+
+def patched_template() -> str:
+    """Qwen3 issue 1826: with thinking off the template adds an empty think block to the
+    generation prompt but not to history, so turn N is not a prefix of turn N+1."""
+    t = tok().chat_template
+    if t.count(_HIST_ASSISTANT) < 1:
+        raise RuntimeError("template shape changed; the 1826 patch no longer applies")
+    return t.replace(_HIST_ASSISTANT, _HIST_FIXED)
+
+
 def render(messages: list[dict], enable_thinking: bool = False,
-           add_generation_prompt: bool = True) -> str:
+           add_generation_prompt: bool = True, patch: bool = False) -> str:
     """The exact string the engine prefills, rendered here rather than asked for."""
+    kw = {"chat_template": patched_template()} if patch else {}
     return tok().apply_chat_template(messages, tokenize=False,
                                      add_generation_prompt=add_generation_prompt,
-                                     enable_thinking=enable_thinking)
+                                     enable_thinking=enable_thinking, **kw)
 
 
 def n_tokens(text: str) -> int:
@@ -150,6 +166,20 @@ def selftest() -> int:
     m = conversation(3)
     if [x["role"] for x in m] != ["user", "assistant", "user", "assistant", "user"]:
         fails.append(f"conversation shape wrong: {[x['role'] for x in m]}")
+
+    try:
+        broke_stock = sum(not check_prefix(render(conversation(n - 1), False),
+                                           render(conversation(n), False)).holds
+                          for n in range(2, 7))
+        broke_fixed = sum(not check_prefix(render(conversation(n - 1), False, patch=True),
+                                           render(conversation(n), False, patch=True)).holds
+                          for n in range(2, 7))
+        if broke_stock == 0:
+            fails.append("stock template no longer breaks; upstream may have fixed 1826")
+        if broke_fixed != 0:
+            fails.append(f"the 1826 patch does not restore the prefix: {broke_fixed}/5 break")
+    except Exception as e:
+        fails.append(f"patched_template raised: {type(e).__name__}: {e}")
 
     try:
         r = render([{"role": "user", "content": "hi"}])
