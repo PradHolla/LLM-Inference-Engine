@@ -4533,3 +4533,57 @@ break present.** It is a lower bound on what prefix caching is worth in a conver
 
 Either outcome is worth the five minutes: P6L-3b would nearly halve warm TTFT and is the
 difference between hitting and missing the 250 ms budget in section 0a of the design doc.
+
+# PHASE 6 -- M1-M9, the app battery
+
+## P6-M  Predictions, 2026-09-06, written before the box came up
+
+Config for every measurement unless a row says otherwise: Qwen3-8B, vLLM 0.27.1, **fp8
+weights, fp16 KV, `--max-model-len 16384`, no speculation**, A10G, KV pinned and read from
+the launch's own log. The gateway (`gateway/app.py`) sits in front; the lab bench points at
+it or at raw vLLM as a control.
+
+### The constants these are built from, all measured this week
+
+    cold prefill      0.2915 ms per prompt token     P6L-2R, fp8 + vLLM, 16k
+    warm TTFT         94.4 + 0.0095 x prompt tokens  P6L-2R fit
+    growth per turn   321 tokens                     300 reply + question, measured
+    KV budget         74,880 tokens / 10.28 GiB      this config's own startup log
+    search+fetch+extract  1,066 ms and 458 ms        gateway/search.py, twice, from a laptop
+
+**Three of the design doc's original predictions are revised here, and one is already
+known wrong.** The originals stay in `phase6-app-design.md`; these supersede them.
+
+| # | Prediction | Derivation, and what changed |
+|---|---|---|
+| P6-M1a | search+fetch+extract on the box **400-900 ms** | design said 550-1,300. Two laptop runs gave 1,066 and 458; the box is in us-east-1 and closer to Brave, so revised down |
+| P6-M1b | inference is **under 40%** of a search turn's wall time | unchanged from P6-A9. This is the phase headline |
+| P6-M2a | warm TTFT at turn 30 = **176 ms** (range 150-210) | 94.4 + 0.0095 x 9,330 tokens |
+| P6-M2b | cold TTFT at turn 30 = **2,720 ms** (range 2,400-3,100) | 0.2915 x 9,330 |
+| **P6-M2c** | **the warm curve is NOT flat**, it rises ~1.6x from turn 2 to 30 | **P6-A4 said "flat with caching" and is already known wrong**: the measured warm slope is 0.0095 ms/token, because each new token still attends over the whole cached history. Corrected before the run rather than after |
+| P6-M3 | hit rate falls once summed live context passes **74,880 tokens**, about **4.6 full 16k chats** | this config's real budget, not the design doc's 68,592 |
+| P6-M4 | cold-open of a 16k chat = **4,776 ms** (range 4,300-5,300) | 16,384 x 0.2915. **Design said 4.2 s by dividing by a 1.21 vLLM factor, but 0.2915 is already measured on vLLM+fp8, so that was double-counting** |
+| P6-M5a | thinking KEPT overflows 16,384 tokens by turn **~8** | ~1,900 tokens/turn kept vs 321 stripped |
+| P6-M5b | so strip-vs-keep is not a latency comparison, it is an **overflow-onset** comparison | falls out of M5a; the design framed it as the former |
+| P6-M6a | sliding window: the first post-overflow turn reverts to **cold-open cost and stays there** | unchanged. Dropping from the front shifts every position, no block matches |
+| P6-M6b | summarize: **one** expensive turn, then back to the warm slope | a new stable prefix is re-cacheable |
+| P6-M7 | spec decoding on mixed app traffic: **net negative or neutral** | Phase 5 measured 1.19x on the search shape, costing ~24,000 of 74,880 KV tokens |
+| P6-M9 | TTFT p95 **passes** 250 ms without search, **fails** 1.2 s with | M1a alone spends most of the 1.2 s before the GPU is touched |
+
+### What would falsify what
+
+- If P6-M2c is wrong and the warm curve IS flat, the P6L-2R slope fit was measuring
+  something other than attention over history, and M2/M4 both need rebuilding.
+- If P6-M4 lands near 4.2 s rather than 4.8, the 1.21 factor was not double-counted and the
+  cold slope is config-dependent in a way P6L-2R did not expose.
+- If P6-M1b comes in **over** 40%, search is cheaper than section 0c assumed and Phase 7's
+  "overlap thinking with retrieval" question loses most of its value.
+
+### Scope, stated as a reuse rather than left implied
+
+**M8's quality arm is not being re-run.** The paired 1,210-item fp8-KV comparison was
+already measured (P6Q: 52.6% -> 52.5%, McNemar p = 1.0000) against its own control arm
+(P6Q-C: floor 7.8%). Repeating it would cost ~70 minutes of GPU to reproduce a settled
+result. **M8 therefore runs its capacity half only**, and the quality half cites P6Q.
+P6-A11's capacity prediction is also already answered: 74,880 -> 135,152 tokens is **1.80x**,
+the top of the predicted 1.5-1.8x range.
