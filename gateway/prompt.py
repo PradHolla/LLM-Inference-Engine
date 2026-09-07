@@ -199,6 +199,13 @@ def selftest() -> int:
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         raise SystemExit(selftest())
+    if "--write-template" in sys.argv:
+        dest = sys.argv[sys.argv.index("--write-template") + 1]
+        body = patched_template()
+        with open(dest, "w") as fh:
+            fh.write(body)
+        print(f"wrote patched template to {dest}, {len(body)} chars")
+        raise SystemExit(0)
     if "--diagnose" in sys.argv:
         think = "--think" in sys.argv
         raise SystemExit(0 if diagnose(enable_thinking=think) == 0 else 2)

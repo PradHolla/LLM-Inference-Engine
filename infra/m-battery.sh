@@ -16,6 +16,19 @@ PROMPTS_APP=/opt/llm/results/longctx-prompts.jsonl
 
 # Built on the box: sync carries code, not results, so shipping this file would mean
 # a manual copy that silently goes stale. Regenerated from the item set every run.
+TEMPLATE=/opt/llm/qwen3-patched.jinja
+
+# Qwen3 issue 1826: with thinking off the stock template adds an empty think block to the
+# generation prompt but not to history, so turn N is not a prefix of turn N+1 and the cache
+# dies. Patched at the server so it applies to every client, not per request.
+build_template() {
+    if [ "$DRY_RUN" = 1 ]; then
+        echo "  [template] $UV run python -m gateway.prompt --write-template $TEMPLATE"
+        return 0
+    fi
+    "$UV" run python -m gateway.prompt --write-template "$TEMPLATE"
+}
+
 build_app_prompts() {
     if [ "$DRY_RUN" = 1 ]; then
         echo "  [prompts] $UV run tools/mkprompts.py --slice longctx --out $PROMPTS_APP --min 50"
@@ -230,7 +243,9 @@ CONFIG_A_OK=0
 echo
 echo "########## CONFIG A: fp8 weights, fp16 KV, max-model-len 16384, spec off"
 if [ "$NEED_A" = 1 ]; then
-    if launch_server A --model "$MODEL" --quantization fp8 --max-model-len 16384; then
+    build_template || echo "[$(ts)] WARNING: patched template not built"
+    if launch_server A --model "$MODEL" --quantization fp8 --max-model-len 16384 \
+           --chat-template "$TEMPLATE"; then
         CONFIG_A_OK=1
     else
         echo "[$(ts)] CONFIG A FAILED -- skipping M1 M2 M3 M4 M5 M6 M9 and the M7/M8 control arm"
@@ -280,7 +295,7 @@ if want M3; then
     if [ "$CONFIG_A_OK" = 1 ] && ensure_default_gateway; then
         run_tool M3 "$RESULTS/m3-thrash.jsonl" \
             $UV run tools/mchat.py --url http://localhost:8080 --mode thrash \
-            --chats 1,2,4,6,8 --turns 29 --out "$RESULTS/m3-thrash.jsonl"
+            --chats 2,4,8,12,16 --turns 29 --out "$RESULTS/m3-thrash.jsonl"
     else
         record_skip M3 "$RESULTS/m3-thrash.jsonl" "config A or gateway unavailable"
     fi
@@ -371,7 +386,7 @@ if want M7 || want M8; then
     if [ "$CONFIG_A_OK" = 1 ]; then
         run_tool M7-M8-control "$RESULTS/m7-m8-control.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
+            --sweep 0.25,0.5,1,2 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m7-m8-control.jsonl"
     else
         record_skip M7-M8-control "$RESULTS/m7-m8-control.jsonl" "config A failed to launch"
@@ -391,6 +406,7 @@ if want M7; then
     echo
     echo "########## CONFIG B: config A plus EAGLE3 speculative decoding (k=2)"
     if launch_server B --model "$MODEL" --quantization fp8 --max-model-len 16384 \
+           --chat-template "$TEMPLATE" \
             --speculative-config "$EAGLE"; then
         CONFIG_B_OK=1
     else
@@ -399,7 +415,7 @@ if want M7; then
     if [ "$CONFIG_B_OK" = 1 ]; then
         run_tool M7-eagle "$RESULTS/m7-eagle.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
+            --sweep 0.25,0.5,1,2 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m7-eagle.jsonl"
     else
         record_skip M7-eagle "$RESULTS/m7-eagle.jsonl" "config B failed to launch"
@@ -416,6 +432,7 @@ if want M8; then
     echo
     echo "########## CONFIG C: config A, --kv-cache-dtype fp8"
     if launch_server C --model "$MODEL" --quantization fp8 --max-model-len 16384 \
+           --chat-template "$TEMPLATE" \
             --kv-cache-dtype fp8; then
         CONFIG_C_OK=1
     else
@@ -424,7 +441,7 @@ if want M8; then
     if [ "$CONFIG_C_OK" = 1 ]; then
         run_tool M8-fp8kv "$RESULTS/m8-fp8kv.jsonl" \
             $UV run tools/bench.py --url http://localhost:8000 --model "$MODEL" \
-            --sweep 2,6 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
+            --sweep 0.25,0.5,1,2 --duration 45 --prompts-file "$PROMPTS_APP" --max-tokens 32 \
             --out "$RESULTS/m8-fp8kv.jsonl"
     else
         record_skip M8-fp8kv "$RESULTS/m8-fp8kv.jsonl" "config C failed to launch"
@@ -443,5 +460,20 @@ printf '%s\n' "${SUMMARY[@]}" | sort | while IFS='|' read -r label status dur ro
 done
 
 echo
+# M8 quality: paired 1,210-item eval, fp16 KV vs fp8 KV. Runs LAST because
+# kvquality-run.sh launches and tears down its own two servers.
+if want M8-quality; then
+    echo "[$(ts)] START M8-quality (two arms, ~70 min)"
+    if [ "$DRY_RUN" = 1 ]; then
+        echo "  [M8-quality] /opt/llm/infra/kvquality-run.sh"
+    else
+        sudo systemctl stop gateway 2>/dev/null
+        /opt/llm/infra/kvquality-run.sh && echo "[$(ts)] END M8-quality status=ok" \
+            || echo "[$(ts)] END M8-quality status=failed"
+    fi
+else
+    echo "[$(ts)] SKIP M8-quality: not selected"
+fi
+
 echo M_BATTERY_DONE
 exit 0

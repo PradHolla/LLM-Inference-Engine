@@ -142,6 +142,11 @@ async def one_turn(client, url, model, messages, max_tokens, think) -> tuple[Tur
     return rec, "".join(text)
 
 
+# Measured, not assumed: a 16,384-token target seeded 11,261 real tokens at 4.0,
+# so this text runs 5.82 chars per token. M4 was 26% low because of the old value.
+SEED_CHARS_PER_TOKEN = 5.82
+
+
 def seed_history(target_tokens: int) -> list[dict]:
     """A synthetic prior conversation of about `target_tokens`, so turn 1 measures
     reopening a persisted chat rather than opening an empty one."""
@@ -154,7 +159,7 @@ def seed_history(target_tokens: int) -> list[dict]:
         a_txt = f"Answer {i}. " + ("Prior conversation text. " * 60)
         msgs.append({"role": "user", "content": q})
         msgs.append({"role": "assistant", "content": a_txt})
-        approx += int((len(q) + len(a_txt)) / 4.0)
+        approx += int((len(q) + len(a_txt)) / SEED_CHARS_PER_TOKEN)
     return msgs
 
 

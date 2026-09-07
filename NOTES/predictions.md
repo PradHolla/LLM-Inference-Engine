@@ -4753,3 +4753,30 @@ saturation.
 
 **The lesson, twice in one battery: a sweep's range is the measurement.** M3 was too narrow
 and M7/M8 too wide, and both produced numbers that looked like results.
+
+## P6-M2R  Predictions for the full re-run, 2026-09-07, template patched
+
+Everything at ONE code version and one pinned KV budget (69,264 tokens), with Qwen3 issue
+1826 fixed at the server via `--chat-template`. Today's numbers become the "before".
+
+### Sweep ranges, derived from the workload this time rather than inherited
+
+    M3   16 chats x 29 turns x ~9,000 tok = 144,000 live vs 69,264 budget = 2.1x overcommit
+         (the last run reached 1.04x and found nothing, which proves nothing)
+    M7/8 4,100-token prompts x 0.2915 ms/token = 1.2 s prefill each -> one GPU saturates
+         BELOW 1 req/s, so 0.25/0.5/1/2 brackets it. The last run used 2 and 6, both past it.
+
+| # | Prediction | Derivation |
+|---|---|---|
+| P6-M2R-a | M2 warm TTFT at turn 30 **75-95 ms**, was 188 | M5's thinking arm fit: 35.5 + 0.0049 x 9,329 = 81 ms |
+| P6-M2R-b | M2 warm slope **~0.005 ms/token**, was 0.0102 | the patch should reproduce the thinking arm exactly |
+| P6-M2R-c | M2 separation at turn 30 **rises above 15.2x** | cold is unchanged, warm halves |
+| P6-M2R-d | M3 hit rate **falls at 12 or 16 chats** | first run at 2.1x overcommit; if it holds again, LRU genuinely never evicts a live chat |
+| P6-M2R-e | M4 cold open **4,400-5,300 ms** | seed now 16,686 tok x 0.2915 = 4,864 |
+| P6-M2R-f | M5 strip and think **converge on TTFT** | the patch removes the artifact that separated them, leaving only thinking's own cost |
+| P6-M2R-g | M7/M8 **not saturated at 0.5 req/s**, p95 under 2 s | 1.2 s prefill at 0.5 req/s is 60% utilisation |
+
+**What would falsify what.** If P6-M2R-a misses high, the server-level `--chat-template` is
+not being applied and the whole patch is inert -- check the hit rate first, it should be
+~0.997. If P6-M2R-d holds again at 2.1x, the thrashing prediction is dead rather than
+under-tested and P6-A7 should be retired.
