@@ -65,12 +65,18 @@ done
 echo "  ssh ok"
 
 say "deploying code"
-for d in labbench tools infra; do
+# gateway was missing here long after sync.sh gained it, so this deployed stale code
+# while sync.sh's DEPLOYED_SHA marker still read correct. Keep the two lists identical.
+for d in labbench gateway tools infra; do
     rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache__' \
         "$d/" "ubuntu@$IP:/opt/llm/$d/" || die "rsync $d"
 done
 sshbox 'chmod +x /opt/llm/infra/*.sh; touch /opt/llm/.no-autoshutdown' || die "chmod/hold"
-echo "  code deployed, hold placed"
+# Record what was deployed. Without this the marker keeps whatever the last sync.sh push
+# wrote, so a stale-deploy check reads a SHA that has nothing to do with these files.
+SHA="$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)"
+sshbox "mkdir -p /opt/llm/results && echo '$SHA' > /opt/llm/results/DEPLOYED_SHA" || die "sha"
+echo "  code deployed at $SHA, hold placed"
 
 say "engine: $QUANT at $CTX ctx"
 if sshbox "curl -sf -m 3 http://localhost:8000/health >/dev/null 2>&1"; then
