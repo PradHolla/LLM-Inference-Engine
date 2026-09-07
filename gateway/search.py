@@ -158,6 +158,8 @@ async def _fetch_one(src: Source, client: httpx.AsyncClient, timeout: float) -> 
             return
         src.text = r.text
         src.ok = True
+    except httpx.HTTPStatusError as e:
+        src.error = f"HTTP {e.response.status_code}"
     except Exception as e:
         src.error = f"{type(e).__name__}"
 
