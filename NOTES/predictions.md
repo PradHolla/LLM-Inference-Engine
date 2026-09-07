@@ -4480,3 +4480,56 @@ Two candidate causes, not distinguished by this data and **not to be asserted un
 B predicts the break lands at precisely the end of the previous prompt, which is what all 24
 rows show, and is the leading candidate for that reason. It is also the one the gateway controls.
 **This is a Phase 6 prompt-layout question, and section 4a of the design doc did not anticipate it.**
+
+## P6L-3  Why the previous reply is not cached, answered off-box with the tokenizer alone
+
+`gateway/prompt.py --diagnose`. No GPU, no weights, just `Qwen/Qwen3-8B`'s tokenizer and
+its chat template. This **corrects the reading recorded in P6L-2R**, which offered two
+candidate causes and declined to choose. The data now chooses.
+
+### With thinking disabled, our own rendering breaks the prefix every turn
+
+Qwen3's template appends `<think>\n\n</think>\n\n` -- **4 tokens** -- to the *generation
+prompt* when `enable_thinking=False`, and **strips it** when that same turn is later
+re-rendered as history. So turn N's prompt is not an extension of turn N-1's:
+
+| turn | prev prompt | prefix matches | lost | floor16(prev) | floor16(matched) | |
+|---|---|---|---|---|---|---|
+| 5 | 679 tok | 675 | 4 | 672 | 672 | masked |
+| 15 | 2,888 | 2,884 | 4 | 2,880 | 2,880 | masked |
+| 25 | 5,108 | 5,104 | 4 | 5,104 | 5,104 | masked |
+
+With `enable_thinking=True` the property holds exactly at every turn, 1 through 6, with
+zero loss. Prepending the empty block to the stored assistant message does **not** fix it:
+the template strips think blocks from history, so it cannot round-trip.
+
+### Why the measurement could not have seen this
+
+vLLM allocates cache in 16-token blocks and reports whole blocks. A 4-token divergence
+floors to the same block boundary as no divergence at all, at every turn checked. The
+P6L-2R data was therefore **equally consistent with both hypotheses**, which is exactly
+why it was recorded as two candidates rather than one conclusion. It took a different
+instrument -- the tokenizer, not the engine -- to separate them.
+
+### What this changes
+
+The break sits 4 tokens **before** the reply begins. A prefix match stops at the first
+differing token, so it forfeits the reply and everything after it. **With thinking off,
+the reply can never be cached, regardless of what the engine does with decode blocks.**
+
+So the corrected statement of the P6L-2R finding: it is not that generated tokens are
+uncacheable. It is that we render a prompt the cache cannot follow, and the reply is
+collateral. Whether the reply *would* cache once the prefix is clean is still open, and
+`enable_thinking=True` is the condition under which it can be asked at all.
+
+**Note the P6L-2 numbers were all taken with `--think` off, so 13.8x is measured with this
+break present.** It is a lower bound on what prefix caching is worth in a conversation.
+
+| # | Prediction, to test on the box | Reasoning |
+|---|---|---|
+| P6L-3a | warm arm with `--think`: `prefix_hit_rate` **exceeds** `prev_prompt/cur_prompt` | if the engine reuses decode blocks, the match now runs past the reply |
+| P6L-3b | if P6L-3a holds, warm TTFT at turn 25 falls **166 -> 80-110 ms** | ~300 reply tokens no longer re-prefilled at the 0.2915 ms/token cold rate is ~87 ms of the measured 166 |
+| P6L-3c | if P6L-3a fails, cached tokens stay at `floor16(prev_prompt)` | the engine drops decode blocks, hypothesis A, and the gateway cannot fix it |
+
+Either outcome is worth the five minutes: P6L-3b would nearly halve warm TTFT and is the
+difference between hitting and missing the 250 ms budget in section 0a of the design doc.
