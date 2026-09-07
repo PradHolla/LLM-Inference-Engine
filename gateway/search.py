@@ -22,6 +22,11 @@ N_RESULTS = int(os.environ.get("GW_SEARCH_N", "3"))
 FETCH_TIMEOUT_S = float(os.environ.get("GW_FETCH_TIMEOUT_S", "2.0"))
 CHARS_PER_SOURCE = int(os.environ.get("GW_CHARS_PER_SOURCE", "6000"))
 CHARS_PER_TOKEN = float(os.environ.get("GW_CHARS_PER_TOKEN", "4.0"))
+# Most sites reject an unrecognised client outright, so the default UA measured
+# rejections rather than page fetches: 2 of 3 sources 403d from the box.
+USER_AGENT = os.environ.get("GW_USER_AGENT",
+                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 _DROP = {"script", "style", "noscript", "template", "svg", "head",
          "nav", "header", "footer", "aside", "form", "button", "select"}
@@ -144,7 +149,9 @@ async def _fetch_one(src: Source, client: httpx.AsyncClient, timeout: float) -> 
     try:
         r = await client.get(src.url, timeout=timeout,
                              follow_redirects=True,
-                             headers={"User-Agent": "llm-inference-engine/0.1"})
+                             headers={"User-Agent": USER_AGENT,
+                                      "Accept": "text/html,application/xhtml+xml",
+                                      "Accept-Language": "en-US,en;q=0.9"})
         r.raise_for_status()
         if "html" not in r.headers.get("content-type", "").lower():
             src.error = "not html"
