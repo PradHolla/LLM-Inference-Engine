@@ -121,9 +121,12 @@ launch_server() {
 
 stop_gateway() {
     if [ "$DRY_RUN" = 1 ]; then
-        echo "  [gateway] sudo systemctl stop gateway"
+        echo "  [gateway] sudo systemctl stop labbench gateway"
         return 0
     fi
+    # session-up.sh leaves the lab bench on :8080 and it answers /health too, so
+    # without this the gateway fails to bind and the battery measures the wrong service.
+    sudo systemctl stop labbench 2>/dev/null
     sudo systemctl stop gateway 2>/dev/null
     return 0
 }
@@ -134,17 +137,17 @@ wait_gateway() {
     local i ok
     ok=0
     for i in $(seq 1 30); do
-        if curl -sf -m 3 http://localhost:8080/health >/dev/null 2>&1; then
+        if curl -sf -m 3 http://localhost:8080/gateway/load >/dev/null 2>&1; then
             ok=1
             break
         fi
         sleep 2
     done
     if [ "$ok" = 1 ]; then
-        echo "[$(ts)] gateway healthy on :8080"
+        echo "[$(ts)] gateway confirmed on :8080 (answered /gateway/load, which the lab bench does not serve)"
         return 0
     fi
-    echo "[$(ts)] gateway did not answer /health after 60s"
+    echo "[$(ts)] gateway did not answer /gateway/load after 60s"
     return 1
 }
 
