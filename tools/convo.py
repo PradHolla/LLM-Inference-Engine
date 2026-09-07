@@ -142,9 +142,25 @@ async def one_turn(client, url, model, messages, max_tokens, think) -> tuple[Tur
     return rec, "".join(text)
 
 
+def seed_history(target_tokens: int) -> list[dict]:
+    """A synthetic prior conversation of about `target_tokens`, so turn 1 measures
+    reopening a persisted chat rather than opening an empty one."""
+    msgs: list[dict] = []
+    approx = 0
+    i = 0
+    while approx < target_tokens:
+        i += 1
+        q = PROMPTS[(i - 1) % len(PROMPTS)]
+        a_txt = f"Answer {i}. " + ("Prior conversation text. " * 60)
+        msgs.append({"role": "user", "content": q})
+        msgs.append({"role": "assistant", "content": a_txt})
+        approx += int((len(q) + len(a_txt)) / 4.0)
+    return msgs
+
+
 async def run(a) -> int:
     out = open(a.out, "w")   # truncate: appending pooled two runs in the 09-04 attempt
-    messages: list[dict] = []
+    messages: list[dict] = seed_history(a.seed_tokens) if a.seed_tokens else []
     rows: list[Turn] = []
     async with httpx.AsyncClient() as client:
         for i in range(1, a.turns + 1):
@@ -238,6 +254,8 @@ def main() -> int:
     ap.add_argument("--url", default="http://localhost:8080")
     ap.add_argument("--model", default=None, help="served id; discovered if omitted")
     ap.add_argument("--turns", type=int, default=25)
+    ap.add_argument("--seed-tokens", type=int, default=0,
+                    help="pre-seed a synthetic history of ~N tokens; M4 reopens a 16k chat")
     ap.add_argument("--max-tokens", type=int, default=300)
     ap.add_argument("--cold", action="store_true",
                     help="unique front-loaded noise per turn, defeating the prefix cache")
