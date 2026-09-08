@@ -37,7 +37,7 @@ Every claim above links to a number in `NOTES/predictions.md`, which records the
 prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
 third of the predictions were wrong; those are the entries worth reading.
 
-## Status: phases 0-5 of 7 complete, phase 6 in progress
+## Status: phases 0-5 of 7 complete, phase 6a measured
 
 ### How each step moved the number
 
@@ -255,10 +255,20 @@ at 13.76x against 13.83x.** The cold curve hit the same 2,290.8 ms at turn 25 bo
 **The rerun then showed what the first run could not.** Tokens recognised at turn N equal
 turn N-1's *prompt*, floored to vLLM's 16-token block, on 24 of 24 turns -- so **the model's
 own reply is never cached and is re-prefilled every turn**, ~300 tokens of work already done.
-The break lands exactly where the previous reply begins, which fits the chat template
-rewrapping the assistant turn in markers that were never in the generated stream. That is a
-gateway-layout question, it is not settled, and `phase6-app-design.md` section 4a did not
-anticipate it.
+**That turned out to be a known upstream bug**, [Qwen3 issue 1826](https://github.com/QwenLM/Qwen3/issues/1826).
+With thinking disabled, Qwen3's chat template writes an empty `<think></think>` block into
+the prompt it asks the model to continue, but strips it when re-rendering that same turn as
+history. Four tokens. So turn N's prompt is not a prefix of turn N-1's, the match stops
+there, and the reply plus everything after it is recomputed.
+
+The fix is the one the issue proposes -- apply the block to history too -- and it is applied
+at the server with `--chat-template`. Rendering the prompts locally showed the stock template
+breaking at **5 of 5** turn transitions and the patched one at **0 of 5**. On the box it is
+worth **2.3x**: warm TTFT at turn 30 goes 188 ms to 81.7 ms, and the hit rate reaches 1.00.
+
+Worth noting how long that took to find by measurement alone. The bug was already written up
+with its fix; a web search would have replaced an afternoon. The rule since: **measure what
+is specific to this setup, look up what belongs to a library.**
 
 Two results fell out of data already collected. Dividing measured ITL into weight bytes per
 token gives achieved bandwidth, and **it falls as quantization deepens** -- 79.8% of the
@@ -281,6 +291,71 @@ a React UI that renders every stage of a request. Building it produced its own i
 bug, in the family this project keeps meeting -- the metric binder summed Prometheus
 `_created` series, which are unix timestamps of counter creation, into counter roles and
 reported a **prefix cache hit rate of 0.9999998** computed from two clocks.
+
+### Phase 6: the app battery, and what a user actually waits for
+
+Nine measurements against a chat app with web search, on one GPU, all at one code version
+with the KV budget pinned. The engine phases measured the engine; this measures the product.
+
+**Where the wait goes.** Search 626 ms, fetching pages 741 ms, extracting text 39 ms --
+**1.4 seconds before the GPU is touched**. Inference is then 81% of a 300-token turn but
+only 46% of the time to the first word. Both are true, and which one is the headline depends
+entirely on how long the answer is. That is this project's recurring lesson turned on its
+own phase.
+
+**A conversation is the workload prefix caching was built for.**
+
+| turn | cache working | cache defeated | ratio |
+|---|---|---|---|
+| 10 | 51.7 ms | 830.8 ms | 16.1x |
+| **30** | **81.7 ms** | **2,895.7 ms** | **35.4x** |
+
+*fp8 weights, fp16 KV, 16,384 context, KV pinned to 69,264 tokens, template patched.*
+
+**Reopening a cold chat costs 5.1 seconds**, because nothing is cached and the whole history
+is recomputed. It is the worst latency the app can produce and no ordinary benchmark sees it,
+having no yesterday. The residual also says prefill is **not linear**: predicted 4,436 ms
+from a slope fitted over short prompts, measured 5,098. Attention is quadratic in sequence
+length while the weight read is linear, so every cold-open estimate in this phase is a lower
+bound rather than an estimate.
+
+**Compressing the KV cache is the biggest single configuration win for this workload.** From
+identical pinned memory, fp8 KV holds 138,528 tokens against 74,880, and on long retrieved
+prompts cuts time-to-first-token from **1,462 ms to 64 ms at 1 req/s -- 23x**. Long prompts
+are exactly where cache space is the binding constraint. Speculative decoding, by contrast,
+generates **1.49x faster per token** and makes the first token *slower*, because the draft
+model takes cache the prompts need.
+
+**Two measurements came back as bugs rather than findings, which is the better outcome.**
+
+Thinking kept in history versus stripped performed **identically** (74.3 ms both) once the
+template was patched. The 2.4x difference measured beforehand was the formatting bug, not a
+product tradeoff. `phase6-app-design.md` section 4c treated it as a decision to make; it was
+a defect to fix.
+
+Context overflow was supposed to separate two strategies: drop the oldest turns, or compress
+them into a summary. **Both came back at a hit rate of 0.000 and within 5 ms of each other.**
+Dropping from the front shifts every position, as predicted. But our summary embedded a
+count of dropped messages that ticked up each turn, so the text changed on every request and
+broke the prefix just as thoroughly. **Summarize-and-restart is worth nothing unless the
+summary is byte-identical turn to turn** -- a real constraint for the app layer, invisible
+until both strategies ran past the boundary.
+
+**Against the targets:** TTFT p95 under 250 ms holds to **4 req/s**, double what it managed
+before the template fix.
+
+**Four measurements in this phase produced confident nulls** because the configuration never
+entered the regime the effect lives in -- a sweep 4% past a threshold, a conversation that
+never overflowed, arrival rates already past saturation. The prediction protocol asks what a
+number will be and never asked whether the run reaches the regime where the number exists.
+The battery now refuses to run a measurement whose configuration does not cross its own
+threshold, and prints the arithmetic first:
+
+```
+M3   needs exceed   69,264   this config  148,944   2.15x  OK
+M4   needs under    16,384   this config   15,064   0.92x  OK
+M6   needs exceed   16,384   this config   25,760   1.57x  OK
+```
 
 ## What is here
 
