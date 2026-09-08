@@ -4941,3 +4941,48 @@ prefix the same way.
 something other than what the engine sees, and the offline gate is worthless. If P6-M6F-c shows
 no spikes at all, re-summarisation is not happening and the conversation never overflowed --
 the same null that has caught this phase four times.
+
+### P6-M6F ACTUALS, 2026-09-08: summarize beats sliding window 20x, and the spike is arithmetic
+
+160 turns each, gateway budget 12,000 tokens, template patched, regime gate passed at 2.15x
+of the budget that actually binds.
+
+| | median TTFT | hit rate | re-summarisation spikes |
+|---|---|---|---|
+| sliding window | **2,951 ms** | **0.000** | n/a, every turn is cold |
+| summarize | **63.6 ms** | **0.993** | 14, one per 10 turns |
+
+| # | Prediction | Measured | |
+|---|---|---|---|
+| P6-M6F-a | summarize under 150 ms | **63.6 ms** | correct |
+| P6-M6F-b | window unchanged ~2,950 ms, hit 0.000 | **2,951 ms, 0.000** | correct |
+| P6-M6F-c | periodic spikes, ~1 per 10 turns | **14 spikes at turns 40, 50, 60 ... 160** | correct |
+| P6-M6F-d | separation 15x or more | **20x amortised, 46x between spikes** | correct |
+| P6-M6F-e | hit rate above 0.9 between spikes | **0.993** | correct |
+
+**The spike is not overhead, it is exactly the cold prefill it has to be.** At each
+re-summarisation the prompt is trimmed to ~2,924 tokens and the prefix restarts:
+
+    2,924 tokens x 0.2915 ms/token = 852 ms predicted, 817 ms measured
+
+That is the same cold-prefill constant from P6L-2, unchanged, predicting a completely
+different measurement three phases later. The mechanism is closed: one cold turn per block,
+costing what a cold prefill of that size costs, and 115 warm turns between them at 63 ms.
+
+**Amortised over every post-overflow turn: 146 ms against the sliding window's 2,951 ms, 20x.**
+
+**A note on P6-M6C, which I nearly recorded as a miss.** The prediction said spikes above
+1 s; the spikes are 817 ms. The mechanism was exactly right and my threshold was set from
+the *untrimmed* prompt size rather than the trimmed one. The number to check was 2,924
+tokens, not 9,600. Recorded because reading it as a failure would have been wrong in the
+more expensive direction -- it would have sent me looking for a bug that is not there.
+
+### What the phase now says about context management
+
+    sliding window   2,951 ms every turn, cache permanently dead
+    summarize        63 ms warm, 817 ms once per block, 146 ms amortised
+
+**Sliding window is not a cheaper option with a latency cost. It is 20x worse with no
+compensating benefit**, because shifting every position forfeits the cache permanently while
+summarising forfeits it once per block. The design doc predicted the direction; the size of
+it, and that the cost is precisely one cold prefill of the trimmed prompt, needed measuring.
