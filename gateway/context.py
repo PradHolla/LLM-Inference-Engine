@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -70,6 +71,25 @@ def _window_drop(messages: list[dict[str, Any]], budget: int) -> tuple[list[dict
     return head + body, dropped
 
 
+# Summarising down to the budget means the next turn is over budget again, so the summary
+# is regenerated and its text changes every turn. Measured: hit rate 0.000, identical to
+# the sliding window it is supposed to beat. Trim to a LOW-WATER MARK instead, so the
+# covered set holds for many turns and the summary stays byte-identical between them.
+LOW_WATER = float(os.environ.get("GW_SUMMARY_LOW_WATER", "0.6"))
+# apply() is stateless: it re-derives what to drop from the whole conversation each turn,
+# so a drop count computed "until it fits" grows by one pair per turn and the summary text
+# changes every request. Quantising the boundary to a block makes it advance in JUMPS, so
+# the covered set -- and the summary -- is byte-identical for BLOCK/2 turns at a stretch.
+SUMMARY_BLOCK = int(os.environ.get("GW_SUMMARY_BLOCK", "20"))
+# Never summarise away the whole recent tail; sitting a little over target is
+# far cheaper than a prompt whose opening changes every turn.
+MIN_KEEP = int(os.environ.get("GW_SUMMARY_MIN_KEEP", "6"))
+# Reserve room for the summary in the ONE boundary calculation, rather than inserting it
+# and trimming again afterwards. Two loops deciding the same boundary fought each other:
+# the second took every remaining message whenever fewer than a block were left.
+SUMMARY_RESERVE = int(os.environ.get("GW_SUMMARY_RESERVE", "64"))
+
+
 def _synth_summary(n: int) -> str:
     return f"[Earlier conversation summarised: {n} messages omitted.]"
 
@@ -100,9 +120,22 @@ async def apply(messages: list[dict[str, Any]],
 
         dropped_msgs: list[dict[str, Any]] = []
         remaining = list(body)
-        while remaining and estimate_tokens(head + remaining) > budget_tokens:
-            dropped_msgs.append(remaining[0])
-            remaining = remaining[1:]
+        target = int(budget_tokens * LOW_WATER)
+        need = 0
+        while (need < len(remaining)
+               and estimate_tokens(head + remaining[need:]) + SUMMARY_RESERVE > target):
+            need += 1
+        # Round the boundary UP to a whole block so it advances in jumps, not one pair per
+        # turn. Between jumps the dropped set is identical, so the summary text is too.
+        # Two ceilings: what fitting requires, rounded UP to a block; and what is available,
+        # rounded DOWN to a block while always keeping a recent tail. Clamping to the exact
+        # remaining length instead made k track the conversation one pair at a time -- which
+        # is the drift this quantisation exists to remove, reintroduced by the clamp.
+        want = ((need + SUMMARY_BLOCK - 1) // SUMMARY_BLOCK) * SUMMARY_BLOCK
+        avail = max(0, (len(remaining) - MIN_KEEP) // SUMMARY_BLOCK) * SUMMARY_BLOCK
+        k = min(want, avail)
+        dropped_msgs = remaining[:k]
+        remaining = remaining[k:]
 
         if summarizer is not None and dropped_msgs:
             try:
@@ -117,10 +150,14 @@ async def apply(messages: list[dict[str, Any]],
         else:
             summary_msg = {"role": "system", "content": summary}
             result = head + [summary_msg] + remaining
+            # MIN_KEEP protects cache stability, but a prompt that does not fit fails
+            # outright while one that breaks the cache is merely slow. So when the budget
+            # genuinely cannot hold the tail, fit wins and stability is given up knowingly.
             while remaining and estimate_tokens(result) > budget_tokens:
-                dropped_msgs.append(remaining[0])
+                dropped_msgs = dropped_msgs + remaining[:1]
                 remaining = remaining[1:]
-                summary = _synth_summary(len(dropped_msgs)) if summarizer is None else summary
+                if summarizer is None:
+                    summary = _synth_summary(len(dropped_msgs))
                 summary_msg = {"role": "system", "content": summary}
                 result = head + [summary_msg] + remaining
 
@@ -201,6 +238,28 @@ def selftest() -> int:
     check(r.est_tokens_before is not None and r.est_tokens_after is not None,
          "token estimates not populated")
     check(r.est_tokens_after <= r.est_tokens_before, "est_tokens_after exceeds before")
+
+    # THE GATE. Summarize is only worth anything if the summary is byte-identical from
+    # one turn to the next: it sits near position zero, so any change breaks the prefix
+    # for the whole prompt. Measured before this existed: the text changed every turn and
+    # summarize performed within 5 ms of the sliding window it is meant to beat.
+    convo: list[dict[str, Any]] = [{"role": "system", "content": "sys"}]
+    seen: list[str] = []
+    for turn in range(1, 61):
+        convo = convo + [{"role": "user", "content": f"q{turn} " + "x" * 300},
+                         {"role": "assistant", "content": f"a{turn} " + "y" * 300}]
+        r = asyncio.run(apply(convo, 2000, strategy="summarize"))
+        if r.summary_text is not None:
+            seen.append(r.summary_text)
+    if not seen:
+        fails.append("summarize never triggered; the stability gate tested nothing")
+    else:
+        changes = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
+        if changes == 0:
+            fails.append("summary never changed at all; the conversation never re-summarised")
+        if changes > len(seen) / 4:
+            fails.append(f"summary text changed on {changes} of {len(seen)-1} consecutive turns; "
+                         "it must hold for many turns or the prefix breaks every request")
 
     for f in fails:
         print(f"  FAIL {f}")

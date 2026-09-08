@@ -26,6 +26,9 @@ TEMPLATE=/opt/llm/qwen3-patched.jinja
 # lives in. This does, and REFUSES rather than measuring a null.
 KV_TOKENS=69264          # config A's pinned budget, from its own startup log
 CTX=16384                # --max-model-len
+# What actually triggers trimming is the GATEWAY budget, not the model window. The gate
+# checked CTX and passed for the wrong reason: a gate is only as good as its threshold.
+GW_BUDGET=12000
 TOK_PER_TURN=321         # convo.py, measured
 MCHAT_TOK_PER_TURN=161   # mchat overflow mode, measured over 60 turns
 REGIME_BLOCKED=""
@@ -58,7 +61,7 @@ regime_ok() {
 echo "########## regime gate: does each configuration reach the regime it measures?"
 check_regime M3 "$KV_TOKENS" "$(( 16 * 29 * 321 ))" exceed
 check_regime M4 "$CTX"       "$(( 15000 + 64 ))"    under
-check_regime M6 "$CTX"       "$(( 160 * MCHAT_TOK_PER_TURN ))" exceed
+check_regime M6 "$GW_BUDGET" "$(( 160 * MCHAT_TOK_PER_TURN ))" exceed
 [ -n "$REGIME_BLOCKED" ] && echo "  BLOCKED:$REGIME_BLOCKED"
 echo
 
