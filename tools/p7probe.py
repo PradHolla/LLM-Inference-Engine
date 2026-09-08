@@ -16,6 +16,7 @@ import asyncio
 import json
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 
 import httpx
@@ -130,7 +131,12 @@ async def probe_priority(client, url, model) -> Probe:
 
     # Enough concurrent work that requests genuinely queue. 24 all ran at once, so the
     # earlier verdict was untested rather than negative.
-    bg = [timed({**filler, "priority": 100}, "low") for _ in range(N_BG)]
+    def unique(body, i):
+        msgs = [{"role": "user", "content": f"[ref {uuid.uuid4().hex}] " + LONG
+                                            + "\n\n" + QUESTION}]
+        return {**body, "messages": msgs}
+
+    bg = [timed({**unique(filler, i), "priority": 100}, "low") for i in range(N_BG)]
     task_bg = [asyncio.create_task(t) for t in bg]
     waited = 0.0
     for _ in range(30):
