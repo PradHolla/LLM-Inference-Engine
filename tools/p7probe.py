@@ -20,7 +20,8 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 
-N_BG = 24    # with LONG prompts. 192 short ones never queued: too few tokens each
+N_BG = 48    # ~192,000 tokens against a 69,264 budget, so a deep queue is forced
+MIN_QUEUE = 5  # "waiting > 0" passed with ONE queued, which reorders nothing
 LONG = "Background material that must be read in full. " * 700   # ~4,000 tokens
 QUESTION = ("A tank holds 47 litres. It leaks 3 litres an hour for 5 hours, then is "
             "refilled by 12 litres. How many litres are in it? Reason it through.")
@@ -132,17 +133,17 @@ async def probe_priority(client, url, model) -> Probe:
     bg = [timed({**filler, "priority": 100}, "low") for _ in range(N_BG)]
     task_bg = [asyncio.create_task(t) for t in bg]
     waited = 0.0
-    for _ in range(10):
+    for _ in range(30):
         await asyncio.sleep(0.5)
         waited = max(waited, await queue_depth())
-        if waited > 0:
+        if waited >= MIN_QUEUE:
             break
     hi = await timed({**filler, "priority": 0}, "high")
     lows = await asyncio.gather(*task_bg)
-    if waited <= 0:
+    if waited < MIN_QUEUE:
         p.verdict = "UNTESTED"
-        p.detail = (f"no queue ever formed with {N_BG} concurrent requests, so priority had "
-                    "nothing to reorder; this is not evidence either way")
+        p.detail = (f"peak queue was {waited:.0f} with {N_BG} concurrent requests, under the "
+                    f"{MIN_QUEUE} needed for reordering to be observable; not evidence either way")
         p.rows = [{"max_waiting": waited, "n_bg": N_BG}]
         return p
     if hi["error"]:
