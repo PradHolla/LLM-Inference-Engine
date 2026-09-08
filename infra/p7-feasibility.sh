@@ -18,6 +18,20 @@ HELP=$(mktemp)
 
 has_flag() { grep -q -- "$1" "$HELP"; }
 
+# POSITIVE CONTROL. Reading `--help` instead of `--help=all` reported every actuator
+# ABSENT while the server itself demanded them. A detector that cannot find flags known
+# to exist must declare ITSELF broken, not declare the features missing -- absence of
+# evidence from a broken instrument is not evidence of absence.
+for known in --model --max-model-len --quantization; do
+    if ! has_flag "$known"; then
+        echo "ABORT: flag detection is broken -- cannot find $known, which certainly exists."
+        echo "  The help output is $(wc -l < "$HELP") lines; it is probably a summary."
+        rm -f "$HELP"
+        exit 1
+    fi
+done
+echo "  detector positive control: found --model, --max-model-len, --quantization"
+
 echo
 echo "### which actuator flags does this build offer?"
 ARGS=""
