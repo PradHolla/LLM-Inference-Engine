@@ -1,0 +1,3 @@
+{"name": "thinking_budget", "verdict": "FAIL", "detail": "unbounded 4502 chars; budget 64 -> 4502, budget 256 -> 4502", "rows": [{"budget": null, "reasoning_chars": 4502, "content_chars": 0, "completion_tokens": 1200}, {"budget": 64, "reasoning_chars": 4502, "content_chars": 0, "completion_tokens": 1200}, {"budget": 256, "reasoning_chars": 4502, "content_chars": 0, "completion_tokens": 1200}]}
+{"name": "priority", "verdict": "UNTESTED", "detail": "no queue ever formed with 192 concurrent requests, so priority had nothing to reorder; this is not evidence either way", "rows": [{"max_waiting": 0.0, "n_bg": 192}]}
+{"name": "tool_calling", "verdict": "PASS", "detail": "emitted 1 tool call(s)", "rows": [{"n_tool_calls": 1, "first": "web_search", "content_head": ""}]}
