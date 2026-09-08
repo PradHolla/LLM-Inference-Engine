@@ -4896,3 +4896,48 @@ The gate checked M6 against `CTX` = 16,384, the model's window. The binding thre
 never approached 16,384. The gate did its job -- the run reached the regime -- but it did so
 despite my threshold being wrong. **A gate is only as good as the threshold declared to it**,
 which is a weaker guarantee than it felt like when I built it three hours ago.
+
+## P6-M6F  Summarize fixed, prediction before the re-run, 2026-09-08
+
+The bug was not the counter in the placeholder. `apply()` is **stateless**: it re-derives the
+boundary from the whole conversation every turn, so "drop until it fits" advances one pair per
+turn, the covered set changes every request, and the summary text with it.
+
+Three things were wrong and the first two fixes were mine, caught by a gate rather than by the
+box. Recorded because the sequence is the point:
+
+1. A low-water mark (trim to 60% rather than 100%) changed nothing -- stateless recomputation
+   still advanced the boundary every turn.
+2. Quantising the boundary to 20-message blocks helped (46 of 46 changes down to 15) but a
+   `min(len(remaining), ...)` clamp collapsed k to the exact remaining length whenever fewer
+   than a block were left, reintroducing per-turn drift for three turns out of every ten.
+3. A **second** trim loop after inserting the summary re-decided the same boundary and took
+   every remaining message when fewer than a block were left. Two loops deciding one boundary.
+
+Fixed: one boundary computation, quantised up to a whole block, floored to leave `MIN_KEEP`
+recent messages, with the summary's size reserved in that single calculation. A hard-budget
+fallback drops below MIN_KEEP when the budget genuinely cannot hold the tail, because **a
+prompt that does not fit fails while one that breaks the cache is only slow.**
+
+    before   summary text changed on 46 of 46 turns
+    after    changed on 6 of 67, at turns 22, 32, 42, 52, 62, 72 -- one per block
+             worst prompt 1972 of a 2000 budget, never over
+
+Confirmed against published practice ([Modular's inference handbook](https://handbook.modular.com/inference-optimization/prefix-caching/),
+[llm-d](https://llm-d.ai/blog/kvcache-wins-you-can-see)): keep a stable prefix, do not
+re-summarise unless deliberately flushing, and keep serialisation deterministic. The last of
+those is a hazard we have not tested -- key ordering in any structured content would break the
+prefix the same way.
+
+| # | Prediction for the M6 re-run | Reasoning |
+|---|---|---|
+| P6-M6F-a | summarize median TTFT **under 150 ms**, against 2,960 ms | the prefix now holds between re-summarisations |
+| P6-M6F-b | sliding window **unchanged at ~2,950 ms**, hit rate 0.000 | nothing about it changed and nothing should |
+| P6-M6F-c | summarize shows **periodic spikes**, roughly one per 10 turns | each re-summarisation is one cold turn by design |
+| P6-M6F-d | separation between the two strategies **15x or more** | 2,950 against under 150 |
+| P6-M6F-e | summarize hit rate **above 0.9 between spikes** | the prefix is stable except at a boundary jump |
+
+**What would falsify what.** If P6-M6F-a lands near 2,950 the stability gate is measuring
+something other than what the engine sees, and the offline gate is worthless. If P6-M6F-c shows
+no spikes at all, re-summarisation is not happening and the conversation never overflowed --
+the same null that has caught this phase four times.
