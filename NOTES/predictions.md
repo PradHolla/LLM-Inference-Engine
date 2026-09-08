@@ -4855,3 +4855,44 @@ thresholds.
 **Fix: make the operating point executable.** Each threshold measurement declares its
 threshold and its configuration's value, and the battery refuses to run when it does not
 cross. That would have caught three of the four before the box came up.
+
+### M6 ACTUALS, 2026-09-07: summarize fails for a reason the design did not anticipate
+
+160 turns, both strategies, template patched. **The overflow regime WAS entered** -- the
+gateway reports `trim_strategy=summarize, dropped_turns=158` and rising from ~turn 40 on.
+
+| | pre-overflow median | post-overflow median | hit rate | prompt tokens |
+|---|---|---|---|---|
+| sliding window | 2,951.6 ms | 2,956.0 ms (1.00x) | **0.000** | pinned ~9,645 |
+| summarize | 2,954.7 ms | 2,960.8 ms (1.00x) | **0.000** | pinned ~9,663 |
+
+**P6-M6a correct**: sliding window sits at a hit rate of zero forever. Dropping from the
+front shifts every position and no block matches, exactly as predicted.
+
+**P6-M6b REFUTED, and the cause is our own implementation.** Summarize was predicted to cost
+one expensive turn and then return to the warm slope, because it creates a new *stable*
+prefix. Ours never stabilises: the placeholder summary embeds the number of dropped messages,
+
+    [Earlier conversation summarised: N messages omitted.]
+
+and N increments every turn (158, 160, 162...). So the text at position ~1 changes on every
+request, the prefix breaks immediately, and **summarize is exactly as cache-hostile as the
+sliding window it was supposed to beat.** 2,960 ms against 2,956 ms.
+
+**The finding generalises past this bug: summarize-and-restart is only worth anything if the
+summary is byte-stable across turns.** A summary regenerated per turn -- by an LLM call with
+any nondeterminism, by a counter, by a timestamp -- gives up the entire benefit while still
+paying to produce it. That is a real design constraint for Phase 6b and it was invisible
+until the strategies were measured past the boundary.
+
+**And the earlier 14.9x window-vs-summarize gap stays withdrawn.** It was the template break
+appearing in one arm. Measured properly, with the template fixed, the two are identical
+and both broken.
+
+### The regime gate passed for the wrong reason
+
+The gate checked M6 against `CTX` = 16,384, the model's window. The binding threshold is the
+**gateway's** `GW_BUDGET_TOKENS` = 12,000, which is why prompt tokens plateaued at ~9,645 and
+never approached 16,384. The gate did its job -- the run reached the regime -- but it did so
+despite my threshold being wrong. **A gate is only as good as the threshold declared to it**,
+which is a weaker guarantee than it felt like when I built it three hours ago.
