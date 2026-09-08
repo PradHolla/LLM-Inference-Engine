@@ -25,3 +25,9 @@ baseline/serve.jsonl
 
 # Third-party datasets, refetchable in one line (GSM8K test split)
 data/
+
+# Raw per-event gateway/labbench traces: one line per SSE event, tens of MB per battery.
+# These are a byproduct, not a result -- the per-measurement m*.jsonl files carry the
+# numbers. gateway-traces-A.jsonl reached 32 MB and each battery would add another.
+results/gateway-traces-A.jsonl
+results/labbench-traces.jsonl
