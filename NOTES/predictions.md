@@ -5045,3 +5045,49 @@ in the phase now has a valid number and a stated caveat.
 Roughly a third of this item set is measuring nothing about the treatment -- it is either
 too easy or too hard to move. The comparison is sound, but its effective sample is smaller
 than 1,210 and a future mix should be built around the band where the model is uncertain.
+
+## P7-F  Phase 7 actuator feasibility, 2026-09-08
+
+Before designing a phase around four hooks, check the corresponding actions are possible.
+6a built places for a decision to land; it never verified the decisions can be carried out.
+
+| actuator | verdict | evidence |
+|---|---|---|
+| tool calling | **PASS** | model emitted a `web_search` call with `--enable-auto-tool-choice --tool-call-parser hermes` |
+| `thinking_budget` | **NOT AVAILABLE** | `ReasoningConfig` in the installed vLLM 0.27.1 has **zero** occurrences of "budget". The `ThinkingBudgetStateHolder` machinery exists in the worker; no config path feeds it. The request field is silently ignored |
+| priority | **mechanism present, effect not demonstrated** | flag accepted, semantics documented (lower value first, with preemption). Six attempts failed to put the MEASURED requests into the queue |
+
+### Consequences for the design
+
+- **The budget actuator must be built in the gateway.** Stream, count reasoning tokens, and
+  at the limit force `</think>` and re-issue. Not a free capability; a prerequisite task.
+- **Tool calling is free**, so "think before or after retrieval" needs no two-call hand-rolling.
+- **Priority is question 4's own measurement**, not a feasibility check. Pre-validating it
+  meant building a worse copy of the experiment it was meant to de-risk.
+
+### Six attempts, and every failure was the instrument
+
+1. Read `vllm serve --help` -- an 80-line SUMMARY. Reported all four flags ABSENT while the
+   server demanded them. The real list is behind `--help=all`.
+2. Read `reasoning_content`; vLLM 0.27.1 returns `reasoning`. Reported the parser absent
+   while it was loaded and working.
+3. 24 requests: vLLM ran all 24 concurrently, `Waiting: 0`. Nothing to reorder.
+4. 192 short requests: ~46,000 tokens against a 69,264 budget. Still no queue.
+5. 48 IDENTICAL long prompts: **they shared one cached prefix**, so 48 requests cost one
+   prompt's KV. The mechanism this phase spent weeks measuring is what prevented the queue.
+   `bench.py` has `--unique-prefix` for exactly this, learned in Phase 3 and rebuilt wrong here.
+6. Unique long prompts, queue of 27 -- but the measured pairs were small and slipped in.
+   **1.23 s is the UNLOADED latency for 64 tokens.** The gate verified the SYSTEM was
+   congested, not that the MEASURED REQUESTS were.
+
+**The pattern: a regime gate is only as good as what it asserts about the thing being
+measured.** Checking "a queue exists" is not checking "my request waited in it". That is the
+same error as gating M6 on the model's context window when the gateway's budget was what bound.
+
+### The standing correction
+
+`vllm bench serve` ships with sharegpt, sonnet, random, hf and BFCL loaders and solves
+concurrency, arrival rates and prompt uniqueness already. Attempts 3 through 6 were spent
+reinventing it badly. **Phase 7 uses the standard harness for load and quality --
+`vllm bench serve` and `lm-evaluation-harness` -- and hand-rolls only what cannot be bought:
+the cross-engine ladder in `bench.py`, and the controlled cache experiments.**
