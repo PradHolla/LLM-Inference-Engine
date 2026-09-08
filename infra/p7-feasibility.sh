@@ -14,7 +14,7 @@ echo "### vLLM version"
 "$VLLM" --version 2>&1 | tail -1
 
 HELP=$(mktemp)
-"$VLLM" serve --help > "$HELP" 2>&1
+"$VLLM" serve --help=all > "$HELP" 2>&1
 
 has_flag() { grep -q -- "$1" "$HELP"; }
 
@@ -28,10 +28,10 @@ done
 # Read the parser name out of --help rather than guessing it. vLLM prints its valid
 # choices, and this build is the only authority on what it accepts -- the same reason the
 # lab bench reads /v1/models instead of being told a model id.
-RPARSER=$(grep -oE '\--reasoning-parser \{[^}]*\}' "$HELP" | head -1 \
-          | sed 's/.*{//; s/}//' | tr ',' '\n' | grep -i qwen | head -1)
-[ -z "$RPARSER" ] && RPARSER=$(grep -oE '\--reasoning-parser \{[^}]*\}' "$HELP" | head -1 \
-          | sed 's/.*{//; s/}//' | tr ',' '\n' | head -1)
+# --reasoning-parser takes a free-form value with no enumerated choices, so it cannot be
+# discovered. Try qwen3; a wrong value makes the launch fail, and the bare retry below
+# separates "this flag is wrong" from "the server is broken".
+RPARSER=qwen3
 TPARSER=$(grep -oE '\--tool-call-parser \{[^}]*\}' "$HELP" | head -1 \
           | sed 's/.*{//; s/}//' | tr ',' '\n' | grep -iE 'hermes|qwen' | head -1)
 [ -z "$TPARSER" ] && TPARSER=hermes
