@@ -20,7 +20,8 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 
-N_BG = 192   # 24 all ran concurrently on a 69,264-token budget; nothing queued
+N_BG = 24    # with LONG prompts. 192 short ones never queued: too few tokens each
+LONG = "Background material that must be read in full. " * 700   # ~4,000 tokens
 QUESTION = ("A tank holds 47 litres. It leaks 3 litres an hour for 5 hours, then is "
             "refilled by 12 litres. How many litres are in it? Reason it through.")
 
@@ -105,8 +106,8 @@ async def probe_budget(client, url, model) -> Probe:
 async def probe_priority(client, url, model) -> Probe:
     """Fill the queue with low-priority work, then jump one request ahead of it."""
     p = Probe("priority")
-    filler = {"messages": [{"role": "user", "content": QUESTION}],
-              "max_tokens": 400, "temperature": 0}
+    filler = {"messages": [{"role": "user", "content": LONG + "\n\n" + QUESTION}],
+              "max_tokens": 200, "temperature": 0}
 
     async def timed(body, tag):
         t0 = time.perf_counter()
