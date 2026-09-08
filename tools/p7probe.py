@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 
+N_BG = 192   # 24 all ran concurrently on a 69,264-token budget; nothing queued
 QUESTION = ("A tank holds 47 litres. It leaks 3 litres an hour for 5 hours, then is "
             "refilled by 12 litres. How many litres are in it? Reason it through.")
 
@@ -28,7 +29,7 @@ QUESTION = ("A tank holds 47 litres. It leaks 3 litres an hour for 5 hours, then
 class Probe:
     """One actuator's verdict, with the evidence that produced it."""
     name: str
-    verdict: str = "FAIL"          # PASS | FAIL | UNSUPPORTED | ERROR
+    verdict: str = "FAIL"   # PASS | FAIL | UNSUPPORTED | ERROR | UNTESTED
     detail: str = ""
     rows: list = field(default_factory=list)
 
@@ -72,7 +73,11 @@ async def probe_budget(client, url, model) -> Probe:
             p.verdict, p.detail = "ERROR", f"{type(e).__name__}: {e}"
             return p
         m = (d.get("choices") or [{}])[0].get("message") or {}
-        rc = m.get("reasoning_content")
+        rc = m.get("reasoning") or m.get("reasoning_content")
+        if rc is None and not m.get("content"):
+            p.verdict = "ERROR"
+            p.detail = f"neither reasoning nor content came back; keys were {sorted(m)}"
+            return p
         # No reasoning_content means the server has no reasoning parser loaded, so a
         # budget cannot be observed even if it were being applied.
         p.rows.append({"budget": budget,
@@ -81,7 +86,7 @@ async def probe_budget(client, url, model) -> Probe:
                        "completion_tokens": (d.get("usage") or {}).get("completion_tokens")})
     if all(r["reasoning_chars"] is None for r in p.rows):
         p.verdict = "UNSUPPORTED"
-        p.detail = "no reasoning_content in any response; server has no reasoning parser"
+        p.detail = "no reasoning field in any response; server has no reasoning parser"
         return p
     base = next((r for r in p.rows if r["budget"] is None), None)
     capped = [r for r in p.rows if r["budget"] is not None and r["reasoning_chars"] is not None]
@@ -111,12 +116,34 @@ async def probe_priority(client, url, model) -> Probe:
         except Exception as e:
             return {"tag": tag, "s": time.perf_counter() - t0, "error": f"{type(e).__name__}"}
 
-    # 24 background requests, then one marked urgent after they are all in flight.
-    bg = [timed({**filler, "priority": 100}, "low") for _ in range(24)]
+    async def queue_depth():
+        try:
+            r = await client.get(url.replace("/v1", "") + "/metrics", timeout=5)
+            for line in r.text.splitlines():
+                if line.startswith("vllm:num_requests_waiting") and "_by_reason" not in line:
+                    return float(line.rsplit(" ", 1)[1])
+        except Exception:
+            pass
+        return 0.0
+
+    # Enough concurrent work that requests genuinely queue. 24 all ran at once, so the
+    # earlier verdict was untested rather than negative.
+    bg = [timed({**filler, "priority": 100}, "low") for _ in range(N_BG)]
     task_bg = [asyncio.create_task(t) for t in bg]
-    await asyncio.sleep(1.5)
+    waited = 0.0
+    for _ in range(10):
+        await asyncio.sleep(0.5)
+        waited = max(waited, await queue_depth())
+        if waited > 0:
+            break
     hi = await timed({**filler, "priority": 0}, "high")
     lows = await asyncio.gather(*task_bg)
+    if waited <= 0:
+        p.verdict = "UNTESTED"
+        p.detail = (f"no queue ever formed with {N_BG} concurrent requests, so priority had "
+                    "nothing to reorder; this is not evidence either way")
+        p.rows = [{"max_waiting": waited, "n_bg": N_BG}]
+        return p
     if hi["error"]:
         p.verdict, p.detail = "UNSUPPORTED", f"priority request failed: {hi['error']}"
         return p
@@ -125,12 +152,13 @@ async def probe_priority(client, url, model) -> Probe:
         p.verdict, p.detail = "ERROR", "every background request failed"
         return p
     med = sorted(ok)[len(ok) // 2]
-    p.rows = [{"high_s": round(hi["s"], 2), "low_median_s": round(med, 2), "n_low": len(ok)}]
+    p.rows = [{"high_s": round(hi["s"], 2), "low_median_s": round(med, 2),
+               "n_low": len(ok), "max_waiting": waited}]
     # A priority policy should let the urgent request finish well before the median of
     # work queued ahead of it. Without one it simply joins the back of the queue.
     p.verdict = "PASS" if hi["s"] < med * 0.7 else "FAIL"
     p.detail = (f"urgent finished in {hi['s']:.2f}s against a {med:.2f}s median for "
-                f"{len(ok)} requests queued ahead of it")
+                f"{len(ok)} requests, with up to {waited:.0f} genuinely queued")
     return p
 
 
@@ -207,8 +235,11 @@ def selftest() -> int:
 
     for fn in (probe_budget, probe_priority, probe_tools):
         p = asyncio.run(fn(Boom(), "http://x", "m"))
-        if p.verdict not in ("UNSUPPORTED", "ERROR"):
-            fails.append(f"{fn.__name__} returned {p.verdict} against a 400, expected UNSUPPORTED")
+        # UNTESTED is legitimate for the priority probe here: a dead server forms no
+        # queue, and "the regime never happened" must not read as a negative result.
+        if p.verdict not in ("UNSUPPORTED", "ERROR", "UNTESTED"):
+            fails.append(f"{fn.__name__} returned {p.verdict} against a dead server; "
+                         "expected UNSUPPORTED, ERROR or UNTESTED, never PASS or FAIL")
         if not p.detail:
             fails.append(f"{fn.__name__} gave no detail")
 
