@@ -4986,3 +4986,62 @@ more expensive direction -- it would have sent me looking for a bug that is not 
 compensating benefit**, because shifting every position forfeits the cache permanently while
 summarising forfeits it once per block. The design doc predicted the direction; the size of
 it, and that the cost is precisely one cold prefill of the trimmed prompt, needed measuring.
+
+## P6-M8Q  fp8 KV quality, written before the comparison is run, 2026-09-08
+
+The arms exist on disk from the 2026-09-07 battery; the comparison has not been computed.
+Both are **1,210 items, math 720 / gsm8k 400 / longctx 90** -- the identical mix P6Q-C
+measured `d0` = **7.8%** on, so that floor is valid here and is not being carried across mixes.
+
+This is effectively P6Q re-run **with the patched chat template**, so it doubles as a check
+that the template fix did not perturb what the model says.
+
+| # | Prediction | Reasoning |
+|---|---|---|
+| P6-M8Q-1 | accuracy delta **within 1 point**, McNemar p > 0.05 | P6Q measured 52.6% -> 52.5%, p = 1.0000 on this same comparison |
+| P6-M8Q-2 | ansdiff **10-13%**, against the 7.8% floor | P6Q measured 11.7%; the patch changes caching, not numerics |
+| P6-M8Q-3 | absolute accuracy **within 2 points of P6Q's 52.6%** | if the patched template moved accuracy, it changed more than the cache |
+
+**What would falsify what.** If P6-M8Q-3 misses, the template patch is altering model output
+and not only its cacheability -- which would mean every latency number from the patched runs
+came from a subtly different model and the whole comparison needs revisiting. That is the one
+worth checking first.
+
+### P6-M8Q ACTUALS, 2026-09-08: fp8 KV costs no accuracy, reproduced under a changed template
+
+1,210 paired items, math 720 / gsm8k 400 / longctx 90. Floor `d0` = 7.8%, measured by
+P6Q-C on this exact mix.
+
+| | fp16 KV | fp8 KV | ansdiff | vs floor | McNemar p |
+|---|---|---|---|---|---|
+| **ALL** | **52.1%** | **51.6%** | **11.9%** | +4.1 | **0.6084** |
+| gsm8k/think | 56.5% | 52.5% | 19.0% | +11.2 | 0.2430 |
+| longctx | 100.0% | 100.0% | **0.0%** | 0.0 | 1.0000 |
+| math/think/k32 | 37.8% | 28.9% | 26.7% | +18.9 | 0.0652 |
+
+| # | Prediction | Measured | |
+|---|---|---|---|
+| P6-M8Q-1 | delta within 1 point, p > 0.05 | **0.5 points, p = 0.6084** | correct |
+| P6-M8Q-2 | ansdiff 10-13% | **11.9%** | correct |
+| P6-M8Q-3 | accuracy within 2 points of P6Q's 52.6% | **52.1%** | correct |
+
+**The template patch did not touch quality.** 52.1% here against P6Q's 52.6% -- 0.5 points,
+which is smaller than the 0.6 points P6Q-C measured from re-running an *identical*
+configuration. So the patched template changed cacheability and nothing else, and every
+latency number from the patched runs came from the same model. That was the prediction most
+worth checking and it held.
+
+**fp8 KV reproduces as unbiased but not inert**, independently: 11.9% answer churn against a
+7.8% floor, +4.1 points of excess, against P6Q's +3.9. Two runs, different templates, the
+same answer. It moves *which* answers come out and not *whether* they are right, and the
+movement is smaller than the run-to-run variance already in the system.
+
+**So M8's recommendation is safe on both axes.** 23x lower TTFT on app traffic, 1.85x the KV
+budget from the same pinned bytes, and no accuracy cost. That closes M1-M9: every measurement
+in the phase now has a valid number and a stated caveat.
+
+**One caveat kept rather than buried.** longctx scores 100% in both arms and contributes
+0.0% churn, while `math/nothink/k16` and `k32` score 0.0% in both and also contribute 0.0%.
+Roughly a third of this item set is measuring nothing about the treatment -- it is either
+too easy or too hard to move. The comparison is sound, but its effective sample is smaller
+than 1,210 and a future mix should be built around the band where the model is uncertain.
