@@ -334,15 +334,36 @@ product tradeoff. `phase6-app-design.md` section 4c treated it as a decision to 
 a defect to fix.
 
 Context overflow was supposed to separate two strategies: drop the oldest turns, or compress
-them into a summary. **Both came back at a hit rate of 0.000 and within 5 ms of each other.**
-Dropping from the front shifts every position, as predicted. But our summary embedded a
-count of dropped messages that ticked up each turn, so the text changed on every request and
-broke the prefix just as thoroughly. **Summarize-and-restart is worth nothing unless the
-summary is byte-identical turn to turn** -- a real constraint for the app layer, invisible
-until both strategies ran past the boundary.
+them into a summary. The first run had both at a hit rate of 0.000 and within 5 ms of each
+other -- because our summary embedded a count of dropped messages that ticked up every turn,
+so its text changed on every request and broke the prefix just as thoroughly as dropping from
+the front did.
+
+**Summarize-and-restart is worth nothing unless the summary is byte-identical turn to turn.**
+The fix is to advance the summarised boundary in blocks rather than one pair per turn, so it
+holds for many turns at a stretch. Measured after that:
+
+| strategy | median TTFT | hit rate | |
+|---|---|---|---|
+| sliding window | 2,951 ms | 0.000 | every turn is cold, forever |
+| **summarize** | **63.6 ms** | **0.993** | one cold turn per block |
+
+**20x amortised, 46x between the re-summarisation spikes.** And the spike is not overhead: at
+each one the prompt is trimmed to ~2,924 tokens and re-read, which at the 0.2915 ms/token cold
+rate measured three phases earlier predicts 852 ms against 817 measured. Sliding window is not
+a cheaper option with a latency cost -- it is 20x worse with no compensating benefit.
+
+Fixing it took four attempts, and the first three were caught by an offline gate that asserts
+the summary stays stable across turns, not by the GPU.
 
 **Against the targets:** TTFT p95 under 250 ms holds to **4 req/s**, double what it managed
 before the template fix.
+
+**And compressing the cache costs no accuracy.** 1,210 paired items against the fp16 control:
+52.1% against 51.6%, McNemar p = 0.6084, answer churn 11.9% against a measured 7.8% floor.
+So fp8 KV's 23x is safe on both axes. It also re-ran under the patched template and moved
+accuracy 0.5 points -- less than re-running an *identical* configuration moved it -- which is
+the evidence that the template fix changed cacheability and nothing else.
 
 **Four measurements in this phase produced confident nulls** because the configuration never
 entered the regime the effect lives in -- a sweep 4% past a threshold, a conversation that
