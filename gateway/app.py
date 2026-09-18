@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
 from labbench.proxy import StreamAccounting, Trace, pct
+from gateway import splice
 from gateway.load import LoadSensor
 from gateway.search import CHARS_PER_TOKEN, render_block, run_search
 
@@ -28,10 +29,11 @@ UPSTREAM = os.environ.get("GW_UPSTREAM", "http://localhost:8000")
 TIMEOUT = float(os.environ.get("GW_TIMEOUT", "600"))
 BUDGET_TOKENS = int(os.environ.get("GW_BUDGET_TOKENS", "12000"))
 DEFAULT_CONTEXT_STRATEGY = os.environ.get("GW_CONTEXT", "none")
-# Orchestration order is a Phase 7 parameter. Only retrieve-then-generate is buildable in
-# 6a; generate-then-retrieve needs mid-stream injection, so it is recorded and not honoured.
+# Orchestration order is a Phase 7 parameter. "overlap" generates while the search is in
+# flight and splices results in mid-stream; generate_then_retrieve is still a stub.
 ORDER_DEFAULT = os.environ.get("GW_ORDER", "retrieve_then_generate")
-ORDERS = ("retrieve_then_generate", "generate_then_retrieve")
+ORDERS = ("retrieve_then_generate", "generate_then_retrieve", "overlap")
+BUILDABLE_ORDERS = ("retrieve_then_generate", "overlap")
 METRICS_URL_ENV = os.environ.get("GW_METRICS", "http://localhost:8000")
 ALWAYS_SEARCH = os.environ.get("GW_ALWAYS_SEARCH") == "1"
 
@@ -69,6 +71,11 @@ class GatewayTrace(Trace):
     order: str = ORDER_DEFAULT
     order_honoured: bool = True
     thinking_budget: int | None = None
+    overlap_hidden_ms: float | None = None
+    overlap_pre_tokens: int = 0
+    splice_chars: int = 0
+    reissue_prompt_tokens: int | None = None
+    reissue_cached_tokens: int | None = None
 
 
 @dataclass
@@ -137,6 +144,133 @@ async def _do_search(messages: list[dict], tr: GatewayTrace) -> str:
     return render_block(outcome)
 
 
+def _render_prompt(messages: list[dict], enable_thinking: bool = True) -> str:
+    """Render locally. The overlap path needs the exact bytes, not a messages array."""
+    from gateway import prompt
+    return prompt.render(messages, enable_thinking=enable_thinking,
+                         add_generation_prompt=True, patch=True)
+
+
+RENDER = _render_prompt
+
+
+def _sse(obj: dict) -> bytes:
+    return b"data: " + json.dumps(obj).encode() + b"\n\n"
+
+
+def _chunk(cid: str, model: str, delta: dict, finish: str | None = None) -> bytes:
+    """One chat-shaped SSE chunk. The overlap path speaks completions upstream and
+    chat downstream, so every upstream token is retranslated on the way out."""
+    return _sse({"id": cid, "object": "chat.completion.chunk", "model": model,
+                 "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+
+
+def _completion_body(base: dict, prompt_text: str) -> dict:
+    """A /v1/completions body carrying over only what the engine accepts there."""
+    keep = ("model", "max_tokens", "temperature", "top_p", "top_k", "seed", "stop",
+            "priority", "thinking_token_budget", "repetition_penalty")
+    body = {k: base[k] for k in keep if k in base}
+    body["prompt"] = prompt_text
+    body["stream"] = True
+    body["stream_options"] = {"include_usage": True}
+    return body
+
+
+def _usage_from(line: bytes) -> dict | None:
+    """Pull a usage object out of one SSE line, if it carries one."""
+    if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
+        return None
+    try:
+        return json.loads(line[6:]).get("usage")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
+def _text_from(line: bytes) -> str:
+    """The generated text in one completions SSE line. Empty when there is none."""
+    if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
+        return ""
+    try:
+        ch = (json.loads(line[6:]).get("choices") or [{}])[0]
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    return ch.get("text") or ""
+
+
+async def _stream_completion(body: dict, on_text, stop_when=None) -> dict | None:
+    """Stream /v1/completions, feeding text to on_text. Returns the final usage.
+    stop_when() true ends the read early -- leaving the context closes the connection."""
+    usage = None
+    async with CLIENT.stream("POST", f"{UPSTREAM}/v1/completions",
+                             content=json.dumps(body).encode(),
+                             headers={"content-type": "application/json"}) as r:
+        if r.status_code != 200:
+            raise RuntimeError(f"upstream {r.status_code} on /v1/completions")
+        buf = b""
+        async for blob in r.aiter_bytes():
+            buf += blob
+            while b"\n\n" in buf:
+                line, buf = buf.split(b"\n\n", 1)
+                usage = _usage_from(line) or usage
+                t = _text_from(line)
+                if t:
+                    on_text(t)
+            if stop_when is not None and stop_when():
+                return usage
+    return usage
+
+
+async def _relay_overlap(base: dict, tr: GatewayTrace, messages: list[dict],
+                         search_task, enable_thinking: bool = True):
+    """Generate against the un-retrieved prompt while the search runs, then splice.
+    A separate path from _relay, whose byte-fidelity the protocol gate validated."""
+    t0 = time.perf_counter()
+    cid, model = f"chatcmpl-{tr.request_id}", base.get("model", "")
+    yield _chunk(cid, model, {"role": "assistant", "content": ""})
+
+    generated: list[str] = []
+
+    def collect(t: str) -> None:
+        generated.append(t)
+
+    try:
+        prompt_sent = RENDER(messages, enable_thinking=enable_thinking)
+        usage = await _stream_completion(_completion_body(base, prompt_sent), collect,
+                                         stop_when=search_task.done)
+        pre = "".join(generated)
+        tr.overlap_hidden_ms = (time.perf_counter() - t0) * 1e3
+        tr.overlap_pre_tokens = len(pre) // int(CHARS_PER_TOKEN) if pre else 0
+        if pre:
+            yield _chunk(cid, model, {"content": pre})
+
+        block = await search_task
+        if block:
+            cont = splice.build(prompt_sent, pre, block)
+            splice.verify(cont, prompt_sent, pre)
+            tr.splice_chars = cont.spliced_chars
+            tail: list[str] = []
+            usage = await _stream_completion(_completion_body(base, cont.prompt), tail.append)
+            if tail:
+                yield _chunk(cid, model, {"content": "".join(tail)})
+        if usage:
+            tr.reissue_prompt_tokens = usage.get("prompt_tokens")
+            det = usage.get("prompt_tokens_details") or {}
+            tr.reissue_cached_tokens = det.get("cached_tokens")
+        tr.http_status, tr.status = 200, "ok"
+    except Exception as e:
+        tr.status, tr.error = "exception", f"{type(e).__name__}: {e}"
+        yield _chunk(cid, model, {"content": ""}, finish="stop")
+        yield b"data: [DONE]\n\n"
+        tr.e2e_ms = (time.perf_counter() - t0) * 1e3
+        _record(tr)
+        return
+
+    yield _chunk(cid, model, {}, finish="stop")
+    yield b"data: [DONE]\n\n"
+    tr.e2e_ms = tr.upstream_ms = (time.perf_counter() - t0) * 1e3
+    _record(tr)
+
+
 CLIENT: httpx.AsyncClient | None = None
 RECENT: list[GatewayTrace] = []
 SENSOR = LoadSensor(METRICS_URL_ENV)
@@ -179,7 +313,7 @@ async def chat(req: Request):
         body.pop(k, None)
 
     tr.order = order if order in ORDERS else ORDER_DEFAULT
-    tr.order_honoured = tr.order == "retrieve_then_generate"
+    tr.order_honoured = tr.order in BUILDABLE_ORDERS
     tr.thinking_budget = budget
     if priority is not None:
         try:
@@ -190,6 +324,20 @@ async def chat(req: Request):
     s = await SENSOR.sample(CLIENT)
     tr.load_running, tr.load_waiting = s.running, s.waiting
     tr.load_kv_usage, tr.load_stale = s.kv_usage, s.stale
+
+    trimmed_first = None
+    if tr.order == "overlap" and do_search and messages and body.get("stream"):
+        # The whole point: the search runs as a task instead of blocking the turn.
+        import asyncio
+        task = asyncio.ensure_future(_do_search(messages, tr))
+        trimmed_first = await _trim(messages, BUDGET_TOKENS, strategy)
+        tr.trim_ms, tr.trim_strategy, tr.dropped_turns = (
+            trimmed_first.trim_ms, trimmed_first.strategy, trimmed_first.dropped_turns)
+        body.pop("stream_options", None)
+        return StreamingResponse(
+            _relay_overlap(body, tr, trimmed_first.messages, task,
+                           enable_thinking=(budget is None or budget > 0)),
+            media_type="text/event-stream")
 
     retrieved_block = await _do_search(messages, tr) if do_search and messages else ""
 
@@ -317,15 +465,18 @@ class _FakeUpstream:
 
     def __init__(self, json_reply: dict | None = None, stream_chunks: list[bytes] | None = None):
         self.last_body: bytes = b""
+        self.bodies: list[bytes] = []
         self._json_reply = json_reply or {"id": "x", "choices": []}
         self._stream_chunks = stream_chunks or []
 
     async def post(self, url, content=b"", headers=None):
         self.last_body = content
+        self.bodies.append(content)
         return _FakeResp(json.dumps(self._json_reply).encode())
 
     def stream(self, method, url, content=b"", headers=None):
         self.last_body = content
+        self.bodies.append(content)
         return _FakeStreamCtx(200, self._stream_chunks)
 
     async def get(self, url):
@@ -337,7 +488,7 @@ class _FakeUpstream:
 
 def selftest() -> int:
     """No network, no vLLM, no Brave: monkeypatches CLIENT and run_search."""
-    global CLIENT, run_search
+    global CLIENT, run_search, render_block
     from fastapi.testclient import TestClient
 
     fails: list[str] = []
@@ -439,6 +590,67 @@ def selftest() -> int:
             with client.stream("POST", "/v1/chat/completions", json=body3) as r:
                 got = b"".join(r.iter_bytes())
             chk("streaming byte-identical to upstream", got == b"".join(chunks))
+
+            # -- overlap path -----------------------------------------------------
+            global RENDER
+            _orig_render = RENDER
+            RENDER = lambda msgs, enable_thinking=True: "PROMPT<|im_start|>assistant\n"
+            comp = [b'data: {"choices":[{"text":"<think>\\nreason"}]}\n\n',
+                    b'data: {"choices":[{"text":" more"}],'
+                    b'"usage":{"prompt_tokens":9,"prompt_tokens_details":{"cached_tokens":8}}}\n\n',
+                    b"data: [DONE]\n\n"]
+            CLIENT = _FakeUpstream(stream_chunks=comp)
+
+            async def _fixed_search(*a, **kw):
+                class O:
+                    search_ms = fetch_ms = extract_ms = 1.0
+                    n_sources = 2
+                return O()
+            _orig_rs = run_search
+            run_search = _fixed_search
+            _orig_render_block = render_block
+            render_block = lambda o: "SOURCES"
+
+            with client.stream("POST", "/v1/chat/completions", json={
+                    "model": "m", "messages": [{"role": "user", "content": "who won"}],
+                    "gw_search": True, "gw_order": "overlap", "stream": True}) as r:
+                got = b"".join(r.iter_bytes())
+            t = RECENT[-1]
+            chk("overlap is a buildable order", t.order_honoured is True and t.order == "overlap")
+            chk("overlap emits chat-shaped SSE", b'"object": "chat.completion.chunk"' in got)
+            chk("overlap terminates the stream", got.rstrip().endswith(b"data: [DONE]"))
+            chk("overlap did not error", t.status == "ok")
+
+            sent = [json.loads(b) for b in CLIENT.bodies if b'"prompt"' in b]
+            chk("overlap made two upstream calls", len(sent) == 2)
+            if len(sent) == 2:
+                first, second = sent[0]["prompt"], sent[1]["prompt"]
+                # The property the whole design rests on, asserted end to end.
+                chk("re-issue extends the first prompt plus what was generated",
+                    second.startswith(first + "<think>\nreason"))
+                chk("re-issue carries the retrieved block", "SOURCES" in second)
+                chk("upstream is /v1/completions, not chat", "messages" not in sent[0])
+            chk("cached tokens recorded from usage", t.reissue_cached_tokens == 8)
+            chk("splice length recorded", t.splice_chars > 0)
+
+            # A failing search must not take the turn down; it just never splices.
+            async def _boom(*a, **kw):
+                raise RuntimeError("brave is down")
+            run_search = _boom
+            CLIENT = _FakeUpstream(stream_chunks=comp)
+            with client.stream("POST", "/v1/chat/completions", json={
+                    "model": "m", "messages": [{"role": "user", "content": "q"}],
+                    "gw_search": True, "gw_order": "overlap", "stream": True}) as r:
+                got2 = b"".join(r.iter_bytes())
+            t = RECENT[-1]
+            chk("overlap survives a dead search", t.status == "ok")
+            chk("a dead search splices nothing", t.splice_chars == 0)
+            chk("a dead search still answers", b'"object": "chat.completion.chunk"' in got2)
+            chk("a dead search makes one upstream call",
+                len([b for b in CLIENT.bodies if b'"prompt"' in b]) == 1)
+
+            run_search, render_block, RENDER = _orig_rs, _orig_render_block, _orig_render
+            CLIENT = _FakeUpstream(stream_chunks=chunks)
 
             r = client.get("/gateway/traces?n=5")
             rows = r.json()["traces"]
