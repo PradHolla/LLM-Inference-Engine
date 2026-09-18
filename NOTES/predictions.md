@@ -5595,3 +5595,34 @@ now poses is which workload makes the curve bend -- gsm8k solutions need about 2
 tokens and the model wants to spend 750 hidden ones on them, so the slice is simply too easy.
 The next measurement is the same ladder on a workload with real reasoning depth, and the
 cheapest honest candidate is the math slice already wired into qualeval.
+
+## P7-Q1m  the same budget ladder on the math slice, written 2026-09-18 before launch
+
+gsm8k turned out to be a workload the budget cannot hurt, so it cannot answer what a budget
+costs. The math slice is chosen because Phase 5 measured a real dependence on thinking there:
+math/think 99.4% against math/nothink 79.5%, both among untruncated responses, same model.
+A 20-point gap is a curve with room to bend; gsm8k's 0.4 points was not.
+
+Checked before choosing, because today's lesson is that anchors lie: Phase 6's math/think
+figure of 62.2% is a truncation rate -- 38% hit its 2048 cap and untruncated accuracy was
+100.0%. Phase 5's 98.6% at a 5120 cap is the usable anchor. Run config: 180 items per pass,
+max_tokens_think 6144 (p95 was 3531, so truncation should be near zero), max_tokens_nothink
+2048 (p95 was 1024 at a 1024 cap, which truncated 9%).
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-Q1m-1** | budget 0 scores **75-85%** | on gsm8k, budget 0 behaved like nothink rather than like thinking -- 204 output tokens against nothink's 178, not unbounded's 946. It did not relocate the hidden reasoning into the answer, it simply did not do it. Anchor is Phase 5 math/nothink untruncated, 79.5% |
+| **P7-Q1m-2** | unbounded scores **97-99.5%** | Phase 5 math/think untruncated was 99.4% at a cap generous enough to truncate 1% |
+| **P7-Q1m-3** | the curve does **NOT** saturate by 512: b512 is at least **5 points** below unbounded | median natural reasoning on math is ~1,800 tokens, so a 512 budget cuts roughly 70% of the thinking. This is the opposite of gsm8k, where saturation arrived at zero |
+| **P7-Q1m-4** | saturation arrives by 2048: b2048 within **2 points** of unbounded | 2048 exceeds the ~1,800 median, so the budget binds only on the tail, exactly as b2048 did on gsm8k |
+| **P7-Q1m-5** | the silence law holds at the **same 24.4 ms/token, +/-10%** | it is a property of the server, the batch shape and the concurrency, none of which change. If the slope moves with the workload, it was never a law |
+| **P7-Q1m-6** | the inline leak reproduces at **8-12%** on b128 and b256 | it reproduced at 10.5% and 10.0% across two gsm8k runs; it is the server's parser breaking on a forced `</think>` and should not care what the prompt was about |
+
+**What would falsify what.** P7-Q1m-3 is load-bearing and it is the one I most want to be
+right about for the wrong reason. If the math curve also turns out flat, then budget 0 is
+free everywhere, the hidden trace is never worth its latency on any workload measured so far,
+and Q1b is dead outright rather than merely postponed. If it bends, Q1b comes back and the
+knee location -- somewhere near 1,800 tokens if P7-Q1m-4 holds -- is the number an adaptive
+policy would be built around. P7-Q1m-1 and P7-Q1m-3 fail together or not at all: both rest on
+the claim that budget 0 does not relocate reasoning into the visible answer, which gsm8k's
+token counts imply but did not directly test.
