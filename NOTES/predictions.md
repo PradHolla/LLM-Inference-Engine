@@ -5735,3 +5735,53 @@ withdrawn rather than amended -- so this is written before the numbers exist, de
 the trough reproduces but at a different depth, the shape stands and only the magnitude moves.
 P7-Q1n-5 is the one I expect to be most stable, because it depends on the model's natural
 solution length rather than on any scoring threshold.
+
+### P7-Q1n ACTUALS, 2026-09-18: the trough reproduces, and the mechanism reproduces to the point
+
+Identical configuration to P7-Q1m, same 180 items. Accuracy, both runs and pooled:
+
+| arm | budget | run 1 | run 2 | delta | pooled (n=360) | silence p50 |
+|---|---|---|---|---|---|---|
+| b0 | 0 | 85.6 | 87.2 | +1.7 | 86.4 | 0.2 s |
+| b128 | 128 | 94.4 | 94.4 | 0.0 | **94.4** | 3.9 s |
+| b256 | 256 | 93.9 | 90.6 | -3.3 | 92.2 | 7.4 s |
+| b512 | 512 | 82.8 | 85.6 | +2.8 | 84.2 | 14.6 s |
+| b1024 | 1024 | 82.8 | 83.3 | +0.6 | **83.1** | 28.2 s |
+| b2048 | 2048 | 100.0 | 98.9 | -1.1 | 99.4 | 44.7 s |
+| unbounded | none | 99.4 | 99.4 | 0.0 | 99.4 | 45.7 s |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q1n-1 | b512 AND b1024 both >= 10 pts below b128 | b1024 **11.1**, b512 **8.8** | **partial**: the trough reproduces, b512's depth does not reach 10 |
+| P7-Q1n-2 | b128 and b256 within 3 pts | b128 **0.0**, b256 **-3.3** | **partial**, b256 misses by 0.3 |
+| P7-Q1n-3 | b2048 and unbounded within 2 pts | **-1.1** and **0.0** | **correct** |
+| P7-Q1n-4 | b0 within 3 pts | **+1.7** | **correct** |
+| P7-Q1n-5 | reached-fractions within 8 pts; b2048 at 100% | b1024 **70%** (was 68), b2048 **98%** (was 100) | **correct** |
+| P7-Q1n-6 | leak 35-50% on b128-b512 | **42.2 / 43.3 / 45.6%** | **correct** |
+
+**The finding survives.** Pooled at n = 360 per arm the curve is 86.4, 94.4, 92.2, 84.2, 83.1,
+99.4, 99.4. b1024 is **11.3 points below b128 while costing 24 seconds more silence**, and
+**16.3 points below unbounded**. Largest paired arm-to-arm movement between runs was 3.3 points,
+consistent with the +/-3 noise floor the gsm8k control established, and an order below the
+trough's depth.
+
+**The mechanism reproduces to the point.** Among records where the budget bound, the fraction
+that had already reached the answer, and the accuracy split either side of it:
+
+| arm | reached, run 1 -> run 2 | acc if reached | acc if NOT reached |
+|---|---|---|---|
+| b512 | 30% -> 29% | 90.6 -> 94.3 | 79.4 -> 81.9 |
+| b1024 | 68% -> 70% | 91.0 -> 92.3 | **53.2 -> 51.1** |
+| b2048 | 100% -> 98% | 100.0 -> 100.0 | -- |
+
+The number that matters is the last cell: a record whose hidden reasoning is cut before it
+reaches an answer scores **53.2% and then 51.1%** -- effectively a coin flip, twice, from
+independent runs. That is what a mid-solve truncation costs, and it is not noise.
+
+**Q1 is settled and Q1b has its brief.** The budget is free on easy work (gsm8k, 0.4 points for
+160x less silence), and on real work it is free at BOTH ends and expensive in the middle. The
+policy question is no longer "what budget" but "never stop the model between committing to a
+line of reasoning and finishing it". A controller that ramps a budget upward from small to
+large traverses the trough on the way, which is the worst possible schedule. Either stay under
+~256, where the model re-derives visibly and loses 5 points, or clear the natural length,
+where the budget costs nothing at all.

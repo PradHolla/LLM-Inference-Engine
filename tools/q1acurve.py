@@ -21,7 +21,7 @@ BUDGET = {"b0": 0, "b128": 128, "b256": 256, "b512": 512,
 
 
 def arm_of(path: Path) -> str:
-    return path.stem.replace("rec-", "").replace("p7q1a-", "").replace("p7q1c-", "").replace("p7q1m-", "")
+    return path.stem.replace("rec-", "").replace("p7q1a-", "").replace("p7q1c-", "").replace("p7q1m-", "").replace("p7q1n-", "")
 
 
 def load(path: Path) -> list[dict]:
