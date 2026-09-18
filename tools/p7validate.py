@@ -43,6 +43,24 @@ async def model_of(c: httpx.AsyncClient, url: str) -> str | None:
         return None
 
 
+
+async def prefix_counters(c: httpx.AsyncClient, url: str) -> tuple[float, float]:
+    """(hits, queries) in BLOCKS. `_created` series are unix timestamps, not counts --
+    binding one into a counter role is incident 41, so each role must match exactly one."""
+    r = await c.get(f"{url}/metrics", timeout=10)
+    roles = {"vllm:prefix_cache_hits_total": [], "vllm:prefix_cache_queries_total": []}
+    for line in r.text.splitlines():
+        if line.startswith("#"):
+            continue
+        name = line.split("{", 1)[0].split(" ", 1)[0]
+        if name in roles:
+            roles[name].append(float(line.rsplit(" ", 1)[1]))
+    for k, v in roles.items():
+        if len(v) != 1:
+            raise RuntimeError(f"{k} bound {len(v)} series, expected exactly 1")
+    return roles["vllm:prefix_cache_hits_total"][0], roles["vllm:prefix_cache_queries_total"][0]
+
+
 async def check_budget(c, url, model) -> dict:
     """Does thinking_token_budget actually bind? The phase gate (design doc 0c)."""
     rows = []
@@ -56,6 +74,14 @@ async def check_budget(c, url, model) -> dict:
             r = await c.post(f"{url}/v1/chat/completions", json=body, timeout=300)
             r.raise_for_status()
             m = (r.json().get("choices") or [{}])[0].get("message") or {}
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text[:200]
+            except Exception:
+                pass
+            return {"verdict": "UNSUPPORTED", "rows": rows,
+                    "detail": f"HTTP {e.response.status_code} at budget={budget}: {body}"}
         except Exception as e:
             return {"verdict": "ERROR", "detail": f"{type(e).__name__}: {e}", "rows": rows}
         rc = m.get("reasoning") or m.get("reasoning_content") or ""
@@ -98,12 +124,15 @@ async def check_splice(c, url, model) -> dict:
 
     body2 = {"model": model, "prompt": cont.prompt, "max_tokens": 400,
              "temperature": 0, "stream": False}
+    h0, q0 = await prefix_counters(c, url)
     t0 = time.perf_counter()
     r2 = await c.post(f"{url}/v1/completions", json=body2, timeout=300)
     r2.raise_for_status()
     d2 = r2.json()
     reissue_ms = (time.perf_counter() - t0) * 1e3
     tail = (d2.get("choices") or [{}])[0].get("text") or ""
+    h1, q1 = await prefix_counters(c, url)
+    hit_blocks, q_blocks = h1 - h0, q1 - q0
     u2 = d2.get("usage") or {}
     det = u2.get("prompt_tokens_details") or {}
     cached = det.get("cached_tokens")
@@ -113,20 +142,26 @@ async def check_splice(c, url, model) -> dict:
     reported = u2.get("prompt_tokens")
     hit_frac = (cached / reported) if (cached and reported) else 0.0
 
-    if cached is None:
-        verdict, detail = "UNSUPPORTED", "usage carried no prompt_tokens_details.cached_tokens"
-    elif cached == 0:
-        verdict, detail = "FAIL", "re-issue cached nothing; the splice does not hit the cache"
+    blk_frac = (hit_blocks / q_blocks) if q_blocks else 0.0
+    if q_blocks <= 0:
+        verdict, detail = "ERROR", "the re-issue queried no prefix-cache blocks at all"
+    elif hit_blocks <= 0:
+        verdict = "FAIL"
+        detail = (f"re-issue hit 0 of {q_blocks:.0f} blocks; generated tokens are NOT "
+                  "reusable as a prompt prefix and the Q3 design collapses")
     else:
-        verdict = "PASS" if hit_frac > 0.5 else "PARTIAL"
-        detail = (f"{cached}/{reported} prompt tokens cached ({hit_frac:.1%}); "
-                  f"prefix {n_prefix} tokens, {partial_blk} in a partial block")
+        verdict = "PASS" if blk_frac > 0.5 else "PARTIAL"
+        detail = (f"{hit_blocks:.0f}/{q_blocks:.0f} blocks hit ({blk_frac:.1%}), "
+                  f"~{hit_blocks * 16:.0f} of {reported} prompt tokens; prefix {n_prefix} "
+                  f"tokens, {partial_blk} stranded in a partial block")
     print(f"    partial thinking : {len(partial)} chars, {tokcount(partial)} tokens")
-    print(f"    re-issue prompt  : {reported} tokens, cached {cached}")
+    print(f"    re-issue prompt  : {reported} tokens, usage.cached_tokens={cached}")
+    print(f"    prefix blocks    : {hit_blocks:.0f} hit of {q_blocks:.0f} queried")
     print(f"    re-issue latency : {reissue_ms:.0f} ms")
     print(f"    --- what the model said after the splice ---")
     print("    " + (tail[:600].replace("\n", "\n    ") or "(nothing)"))
     return {"verdict": verdict, "detail": detail, "cached_tokens": cached,
+            "hit_blocks": hit_blocks, "queried_blocks": q_blocks,
             "reissue_prompt_tokens": reported, "reissue_ms": reissue_ms,
             "prefix_tokens": n_prefix, "partial_block_tokens": partial_blk,
             "first_usage": u1, "partial_text": partial, "tail_text": tail}

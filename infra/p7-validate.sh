@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Phase 7 instrument validation. Launches the phase's one configuration, records what
 # the server actually resolved, then runs the three checks the offline fakes cannot.
-# Deliberately does NOT set VLLM_USE_V2_MODEL_RUNNER: which runner the engine picks by
-# default is the question (design doc 0c), and forcing it would hide the answer.
+# Run 1 left VLLM_USE_V2_MODEL_RUNNER unset and the engine answered: V2 is the 0.27.1
+# default and rejects thinking_token_budget with a 400. It is now set explicitly.
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -12,7 +12,7 @@ LABEL=p7v
 mkdir -p results
 
 echo "=== launching $LABEL ==="
-KV_PIN="$KV_PIN_BYTES" ./infra/vllm-launch.sh "$LABEL" \
+VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN="$KV_PIN_BYTES" ./infra/vllm-launch.sh "$LABEL" \
     --model "$MODEL" --quantization fp8 --max-model-len 16384 \
     --kv-cache-dtype fp8 --enable-prefix-caching \
     --reasoning-parser qwen3 \

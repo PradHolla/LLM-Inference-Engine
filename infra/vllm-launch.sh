@@ -11,6 +11,11 @@ LABEL="${1:?usage: vllm-launch.sh <label> [args...]}"; shift
 # 10-15% run-to-run KV variance that makes capacity comparisons unattributable.
 PIN_ARGS=""
 [ -n "${KV_PIN:-}" ] && PIN_ARGS="--kv-cache-memory $KV_PIN"
+# Some engine behaviour is env-only, not a flag. Model Runner V2 is the 0.27.1 default and
+# rejects thinking_token_budget with a 400, so Phase 7 must be able to turn it off.
+ENVARGS=()
+[ -n "${VLLM_USE_V2_MODEL_RUNNER:-}" ] && \
+    ENVARGS+=("--setenv=VLLM_USE_V2_MODEL_RUNNER=$VLLM_USE_V2_MODEL_RUNNER")
 VENV=/opt/llm/.venv-vllm
 
 sudo systemctl stop vllm 2>/dev/null
@@ -37,6 +42,7 @@ sudo systemd-run --unit=vllm --collect --working-directory=/opt/llm \
   --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 --setenv=PYTHONUNBUFFERED=1 \
   --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --setenv=PATH=$VENV/bin:/usr/local/bin:/usr/bin:/bin \
+  ${ENVARGS[@]+"${ENVARGS[@]}"} \
   $VENV/bin/python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 --port 8000 $PIN_ARGS "$@" >/dev/null 2>&1
 INVID=$(systemctl show vllm --property=InvocationID --value 2>/dev/null)
