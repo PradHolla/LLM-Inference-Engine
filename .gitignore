@@ -31,3 +31,4 @@ data/
 # numbers. gateway-traces-A.jsonl reached 32 MB and each battery would add another.
 results/gateway-traces-A.jsonl
 results/labbench-traces.jsonl
+NOTES/phase7-budget-design.md
