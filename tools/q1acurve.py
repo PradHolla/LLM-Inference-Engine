@@ -50,6 +50,13 @@ def rtokens(r: dict) -> float | None:
     return r["usage_completion"] * rc / (rc + cc)
 
 
+def leaked(r: dict) -> bool:
+    """A stray "</think>" in the VISIBLE stream. Scanned raw: think_path reports only the
+    first branch taken and goes quiet about this once reasoning lands in its own field."""
+    cc = r.get("content_chars") or 0
+    return "</think>" in ((r.get("text") or "")[-cc:] if cc else "")
+
+
 def silence(r: dict) -> float | None:
     """Time until the first VISIBLE token -- what the user actually waits through."""
     return r.get("tt_content") if r.get("tt_content") is not None else r.get("ttft")
@@ -60,8 +67,7 @@ def summarise(arm: str, recs: list[dict]) -> dict:
     nt = [r for r in recs if not r["thinking"] and r["status"] == "ok"]
     rt = [v for v in (rtokens(r) for r in th) if v is not None]
     sil = [v for v in (silence(r) for r in th) if v is not None]
-    # the mixed-semantics subset: reasoning that leaked into content (see predictions.md)
-    clean = [r for r in th if r["think_path"] != "inline_tags"]
+    nleak = sum(1 for r in th if leaked(r))
     return {
         "arm": arm, "n": len(th),
         "acc": pct(r["correct"] for r in th),
@@ -72,7 +78,7 @@ def summarise(arm: str, recs: list[dict]) -> dict:
         "e2e_p50": quant([r["e2e"] for r in th], .50),
         "e2e_p95": quant([r["e2e"] for r in th], .95),
         "trunc": sum(1 for r in th if r["truncated"]),
-        "inline": len(th) - len(clean),
+        "leak": 100.0 * nleak / len(th) if th else float("nan"),
     }
 
 
@@ -102,20 +108,24 @@ def main() -> int:
     by_arm = {arm_of(p): load(p) for p in args.files}
     rows = [summarise(a, by_arm[a]) for a in ARM_ORDER if a in by_arm]
 
-    print("Qwen3-8B, fp8 weights / fp8 KV, KV pinned, gsm8k 200 items, concurrency 32,")
-    print("reasoning-parser qwen3, VLLM_USE_V2_MODEL_RUNNER=0, max_tokens_think 3000.")
+    any_recs = next(iter(by_arm.values()))
+    sl = sorted({r.get("slice", "?") for r in any_recs})
+    cfg = sorted({r.get("config", "?") for r in any_recs})
+    print(f"Qwen3-8B, fp8 weights / fp8 KV, KV pinned, slice {'+'.join(sl)}, "
+          f"{rows[0]['n']} items/arm, concurrency 32,")
+    print(f"reasoning-parser qwen3, VLLM_USE_V2_MODEL_RUNNER=0. configs: {', '.join(cfg)}")
     print("rtok = reasoning tokens actually emitted. silence = time to first VISIBLE token.")
     print()
     hdr = (f"{'arm':>10} {'budget':>7} {'acc%':>6} {'nothink%':>9} {'rtok_p50':>9} "
            f"{'rtok_p95':>9} {'out_p50':>8} {'sil_p50':>8} {'sil_p95':>8} "
-           f"{'e2e_p50':>8} {'trunc':>6} {'inline':>7}")
+           f"{'e2e_p50':>8} {'trunc':>6} {'leak%':>6}")
     print(hdr); print("-" * len(hdr))
     for r in rows:
         b = BUDGET.get(r["arm"])
         print(f"{r['arm']:>10} {('none' if b is None else b):>7} {r['acc']:>6.1f} "
               f"{r['acc_nt']:>9.1f} {r['rt_p50']:>9.0f} {r['rt_p95']:>9.0f} "
               f"{r['out_p50']:>8.0f} {r['sil_p50']:>8.2f} {r['sil_p95']:>8.2f} "
-              f"{r['e2e_p50']:>8.2f} {r['trunc']:>6} {r['inline']:>7}")
+              f"{r['e2e_p50']:>8.2f} {r['trunc']:>6} {r['leak']:>6.1f}")
 
     notes = control(by_arm)
     print()
