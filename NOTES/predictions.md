@@ -5712,3 +5712,26 @@ useful policy question is how to stay out of the 512-1024 trough. Before buildin
 this, the curve needs one repeat run -- the within-arm splits are controlled and convincing
 about the MECHANISM, but the cross-arm shape rests on a single run per arm, and the gsm8k
 unbounded arm moved 4.3 points between identical runs.
+
+## P7-Q1n  the math ladder repeated, written 2026-09-18 before launch
+
+Identical configuration to P7-Q1m -- same server, same 180 items, same seeds, same caps --
+run again because the cross-arm shape rested on one run per arm and gsm8k's unbounded arm
+moved 4.3 points between identical runs. This run tests the SHAPE; the mechanism was already
+established by within-arm splits that cannot be reproduced away.
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-Q1n-1** | the trough reproduces: b512 and b1024 both at least **10 points below b128** | the observed gap was 11.6 and 11.6 points. This is the whole finding; if it does not reproduce, there is no U-shape and the phase reverts to a smooth-tradeoff question |
+| **P7-Q1n-2** | b128 and b256 land within **3 points** of 94.4 and 93.9 | the gsm8k control put the noise floor near +/-3 points at n = 200; this is n = 180 |
+| **P7-Q1n-3** | b2048 and unbounded land within **2 points** of 100.0 and 99.4 | both arms are at a ceiling where the budget barely binds, and ceilings are the least noisy place on the curve |
+| **P7-Q1n-4** | b0 lands within **3 points** of 85.6 | same noise-floor argument, no budget interaction at all |
+| **P7-Q1n-5** | the "answer already reached before the cut" fractions reproduce within **8 points**: b1024 near 68%, b2048 at **100%** | this is the mechanism. It is a property of where the model's natural solution length sits relative to the cap, which does not move between runs |
+| **P7-Q1n-6** | the content leak reproduces at **35-50%** on b128 through b512 | it was 43.3 / 42.8 / 43.9%. P7-Q1m-6 established it is workload-dependent; this tests whether it is at least RUN-stable, which is the weaker claim I should have made the first time |
+
+**What would falsify what.** P7-Q1n-1 is load-bearing and everything else is context for it. If
+the trough vanishes, the U-shape was a single-run artefact and the P7-Q1m write-up must be
+withdrawn rather than amended -- so this is written before the numbers exist, deliberately. If
+the trough reproduces but at a different depth, the shape stands and only the magnitude moves.
+P7-Q1n-5 is the one I expect to be most stable, because it depends on the model's natural
+solution length rather than on any scoring threshold.
