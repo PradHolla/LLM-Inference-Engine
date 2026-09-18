@@ -5288,3 +5288,36 @@ Impossible on its face, which is the only reason it was caught.
 sets it inline on the launch call and so does not carry it in its own environment. It now
 reads `systemctl show vllm --property=Environment`. A status line that reports the caller's
 state and calls it the server's is worse than no status line.
+
+## P7-Q1a  the budget ladder on gsm8k, written 2026-09-18 before launch
+
+200 gsm8k items, seven budgets: **0, 128, 256, 512, 1024, 2048, unbounded**. Qwen3-8B, fp8
+weights, fp8 KV, KV pinned 10,213,733,807, `--max-model-len 16384`, `--enable-prefix-caching`,
+`--reasoning-parser qwen3`, **`VLLM_USE_V2_MODEL_RUNNER=0`**, greedy, concurrency 32.
+
+`--max-tokens-think 3000` on **every** arm. The instrument's default of 1024 for gsm8k would
+truncate the thinking before an answer exists, and an arm that differs in two ways measures
+neither. **So "unbounded" here means "bounded by max_tokens 3000", not truly unbounded** --
+truncation rate is recorded per arm rather than assumed to be zero.
+
+Each arm also runs the gsm8k **nothink** pass, which the budget cannot touch. That is a free
+control: its accuracy must be identical across all seven arms, and if it is not, something
+other than the budget is moving between runs.
+
+| # | Prediction | Derivation |
+|---|---|---|
+| **P7-Q1a-1** | accuracy **saturates by 512** reasoning tokens, within **2 points** of unbounded | This is P7-2 from the design doc, now the phase's load-bearing prediction. gsm8k solutions are four or five arithmetic steps; the literature puts saturation near 1,000 on harder sets and gsm8k is not hard |
+| **P7-Q1a-2** | unbounded lands **50-57%** | P6-M8Q measured gsm8k/think at **52.5%** on fp8 KV and 56.5% on fp16 KV, same model, same items, patched template |
+| **P7-Q1a-3** | budget **2048 is indistinguishable from unbounded**, under 1 point | P7V measured mean unbounded reasoning at 1,526 tokens, so a 2048 cap binds on only the tail |
+| **P7-Q1a-4** | budget **0 costs 10-20 points** against unbounded | Forcing `</think>` immediately is not the same as `enable_thinking=False`: the model still renders a think block, just an empty one. Qwen3 is documented to degrade when thinking is suppressed |
+| **P7-Q1a-5** | E2E per item = TTFT + (budget + answer) x **18.9 ms**, within 20% at concurrency 32 | The fp8 batch-1 ITL. Concurrency 32 will inflate it, hence the loose band; the SHAPE being linear in budget is the real claim |
+| **P7-Q1a-6** | the nothink control is **identical across all seven arms**, to the item | The budget field is only sent on thinking passes. Any drift here invalidates the comparison |
+
+**What would falsify what.** If P7-Q1a-1 misses and accuracy is still climbing at 2048, the
+adaptive-budget policy has little room and Q1b is not worth running -- that is the result
+that would reshape the phase, so it is checked first. If P7-Q1a-6 drifts, nothing else in the
+table can be trusted.
+
+**The number this exists to produce.** At 18.9 ms/token, unbounded's 1,526 reasoning tokens
+are **28.8 s of silence**. If accuracy saturates at 512, the same answer costs **9.7 s** --
+a 3x latency cut for free, and that is the whole premise of Q1.

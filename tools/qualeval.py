@@ -19,6 +19,9 @@ from dataclasses import dataclass, field, asdict
 import httpx
 
 MODEL = "Qwen/Qwen3-8B"
+# Phase 7 Q1a. None means unbounded. Set once from argv rather than threaded through
+# four call sites, because this is a validated instrument and the diff should be small.
+THINKING_BUDGET: int | None = None
 
 # (slice, thinking, default max_tokens). max_tokens for the thinking passes is a PLACEHOLDER
 # until calibration measures the p99 of the thinking-token distribution -- see design 3d.
@@ -98,6 +101,7 @@ class Rec:
     slice: str = ""
     id: str = ""
     thinking: bool = False
+    thinking_budget: int | None = None
     k: int | None = None
     depth: float | None = None
     answer: str = ""
@@ -134,6 +138,7 @@ async def one(client, url, item, cfg, think, max_tokens, seed, attempts=3):
 
 async def _one(client, url, item, cfg, think, max_tokens, seed):
     r = Rec(config=cfg, slice=item["slice"], id=item["id"], thinking=think,
+            thinking_budget=THINKING_BUDGET,
             k=item.get("k"), depth=item.get("depth"), answer=item["answer"],
             prompt_chars=len(item["prompt"]))
     payload = {
@@ -148,6 +153,10 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
         "stream_options": {"include_usage": True},
         "chat_template_kwargs": {"enable_thinking": bool(think)},
     }
+    # Model Runner V2 rejects this field with a 400, so the server must be launched with
+    # VLLM_USE_V2_MODEL_RUNNER=0. Verified binding exactly in P7V.
+    if THINKING_BUDGET is not None and think:
+        payload["thinking_token_budget"] = THINKING_BUDGET
     t0 = time.perf_counter()
     reasoning, content = [], []
     try:
@@ -318,6 +327,8 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
 
 
 async def cmd_run(args):
+    global THINKING_BUDGET
+    THINKING_BUDGET = args.thinking_budget
     items = [json.loads(l) for l in open(args.items) if l.strip()]
     want = set(args.slices.split(","))
     passes = [p for p in PASSES if p[0] in want]
@@ -537,6 +548,10 @@ def main():
     r.add_argument("--max-tokens-think", type=int, default=0,
                    help="override the thinking passes once calibration has measured p99")
     r.add_argument("--order-seed", type=int, default=7)
+    r.add_argument("--thinking-budget", type=int, default=None,
+                   help="cap reasoning tokens on the thinking passes. Omit for unbounded. "
+                        "Needs VLLM_USE_V2_MODEL_RUNNER=0 on the server or every "
+                        "request 400s")
     r.add_argument("--limit", type=int, default=0,
                    help="cap EVERY pass at N. Calibration only; prefer --limit-pass")
     r.add_argument("--limit-pass", default="",
