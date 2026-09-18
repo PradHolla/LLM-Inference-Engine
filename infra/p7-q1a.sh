@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Phase 7 Q1a: the accuracy-and-latency-versus-thinking-budget curve on gsm8k.
+# Phase 7: the accuracy-and-latency-versus-thinking-budget curve. SLICE/PREFIX/MAXTOK*/
+# LIMIT_PASS come from the environment; defaults reproduce the gsm8k Q1a run.
 # Assumes the P7V server is already up with VLLM_USE_V2_MODEL_RUNNER=0. Flushes one
 # result file per arm so a crash costs one arm, not the sweep.
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root
-MAXTOK=4096
-MAXTOK_NT=1024        # the nothink control capped at 256 in run 1 and truncated 22% of it
+SLICE="${SLICE:-gsm8k}"
+MAXTOK="${MAXTOK:-4096}"
+MAXTOK_NT="${MAXTOK_NT:-1024}"   # the nothink control capped at 256 in run 1 and truncated 22% of it
+LIMIT_PASS="${LIMIT_PASS:-}"
 PREFIX="${PREFIX:-p7q1a}"      # re-runs write a new prefix, never overwrite an arm
 mkdir -p results
 
@@ -32,9 +35,9 @@ for b in 0 128 256 512 1024 2048 none; do
     echo "=== arm $label -> $out ==="
     HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1 \
       "$UV" run tools/qualeval.py run --url http://localhost:8000 \
-        --config "q1a-$label" --slices gsm8k --concurrency 32 \
+        --config "$PREFIX-$label" --slices "$SLICE" --concurrency 32 \
         --max-tokens-think "$MAXTOK" --max-tokens-nothink "$MAXTOK_NT" \
-        $ARG --out "$out"
+        ${LIMIT_PASS:+--limit-pass "$LIMIT_PASS"} $ARG --out "$out"
     rc=$?
     echo "  arm $label rc=$rc"
     [ "$rc" = 0 ] && "$UV" run tools/qualeval.py grade "$out" 2>&1 | tail -6
