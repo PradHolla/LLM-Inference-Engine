@@ -5091,3 +5091,94 @@ concurrency, arrival rates and prompt uniqueness already. Attempts 3 through 6 w
 reinventing it badly. **Phase 7 uses the standard harness for load and quality --
 `vllm bench serve` and `lm-evaluation-harness` -- and hand-rolls only what cannot be bought:
 the cross-engine ladder in `bench.py`, and the controlled cache experiments.**
+
+### P7-F CORRECTION, 2026-09-17: `thinking_token_budget` was there the whole time
+
+P7-F recorded `thinking_budget` as **NOT AVAILABLE** on the installed vLLM 0.27.1. **That
+verdict is wrong.** The feature is present at exactly the version on the box, and the probe
+failed in two independent ways that each produce the same silent null.
+
+**1. It grepped the wrong class.** The evidence recorded was "`ReasoningConfig` in the
+installed vLLM 0.27.1 has zero occurrences of `budget`". That is true and irrelevant.
+`vllm/config/reasoning.py` at `v0.27.1` holds exactly `reasoning_parser`,
+`reasoning_start_str`, `reasoning_end_str` and the derived token ids -- a budget was never
+going to be there. The budget lives in `SamplingParams`:
+
+    vllm/sampling_params.py:349                          thinking_token_budget: int | None = None
+    vllm/entrypoints/openai/chat_completion/protocol.py:257   thinking_token_budget: ThinkingTokenBudget = None
+    vllm/entrypoints/openai/chat_completion/protocol.py:729   passed into to_sampling_params()
+    vllm/v1/sample/thinking_budget_state.py                   the implementation
+    tests/entrypoints/openai/chat_completion/test_thinking_token_budget.py   an E2E HTTP test
+
+It is a **first-class field on `ChatCompletionRequest`**, not an extra_body passthrough.
+Upstream PR #20859 "limit thinking tokens (hard limit)" merged **2026-03-24**, four and a
+half months before 0.27.1 was released on 2026-08-11.
+
+**2. It sent the wrong field name.** `tools/p7probe.py` sets `body["thinking_budget"]`. The
+parameter is `thinking_token_budget`. An unknown top-level field is ignored, so the request
+succeeded, reasoning came back unbounded, and the probe read that as absence.
+
+Either error alone produces NOT AVAILABLE. Both together made it look corroborated -- a
+source grep and a live request agreeing with each other, both wrong.
+
+**What this costs and saves.** P7-F's stated consequence was "the budget actuator must be
+built in the gateway. Stream, count reasoning tokens, and at the limit force `</think>` and
+re-issue. Not a free capability; a prerequisite task." **That task does not exist.** The
+phase's central actuator is a request field. What remains is verifying it binds under our
+configuration, which is a measurement.
+
+### What the budget actually does, from the source rather than the changelog
+
+`ThinkingBudgetStateHolder` tracks each budgeted request's thinking span and forces the
+reasoning-end token ids at sample time, "applied after penalties". Two configuration facts:
+
+- **`--reasoning-parser` is required.** `maybe_create_thinking_budget_state_holder` returns
+  `None` when `reasoning_config is None`, and the class comments that "a non-`None`
+  `reasoning_config` is the switch". No parser means no budget, silently.
+- **`--reasoning-config` is optional** and takes `reasoning_start_str` / `reasoning_end_str`.
+  Setting the end string to a transitional phrase rather than a bare tag --
+  `"I have to give the solution based on the reasoning directly now.</think>"` -- is
+  supported, which is the s1 budget-forcing trick available as configuration.
+
+### The trap that will decide whether any of this is measurable
+
+The upstream E2E test launches its server with `VLLM_USE_V2_MODEL_RUNNER=0` under the
+comment:
+
+    # thinking_token_budget is not yet supported by the V2 model runner.
+
+and also passes `--no-async-scheduling`. At `v0.27.1` `envs.py` defaults
+`VLLM_USE_V2_MODEL_RUNNER` to `None` -- unset, resolved by the engine -- so **which runner
+our server picks is not knowable from the flags and must be read off the startup log.**
+
+If the V2 runner is active the budget is accepted, validated, and silently does nothing.
+That is the exact failure shape of incident 32 and incident 41: a plausible number rather
+than an error. **So the first Phase 7 measurement needs a positive control that asserts the
+reasoning token count actually falls as the budget falls, and aborts if it does not** --
+before any latency number computed under a budget is believed.
+
+### Three other lookups that change the design
+
+**Prefix caching covers generated tokens, not just prompts.** vLLM's design doc states a
+block is cached as soon as it is full regardless of whether its tokens came from the prompt
+or from decode, and shows a later request hitting blocks that contain an earlier request's
+output. So re-issuing a truncated reasoning trace as a prompt does hit -- for the *full*
+blocks only, leaving a partial trailing block to recompute. This was the open question from
+the design discussion and the answer is now known without spending GPU time on it.
+
+**`vllm bench serve` cannot set request priority** -- zero occurrences of "priorit" in
+`vllm/benchmarks/serve.py`. It does have `--extra-body`, which applies one body to every
+request. So the two-class design stands: bench serve generates one priority class as
+background load, and a small separate client fires the measured requests at the other.
+`tools/p7prio.py` is already shaped that way. Its gate still needs the P7-F fix -- assert
+the MEASURED request waited, not that a queue existed.
+
+**`--goodput ttft:250 tpot:35` measures PROJECT.md section 1's SLO natively**, on the
+DistServe definition, alongside the usual percentiles. The success criteria can be read
+straight off the standard harness instead of being recomputed.
+
+**Question 3 has no native support.** `docs/features/interleaved_thinking.md` at v0.27.1
+covers Kimi-K2-Thinking and MiniMax-M2 only, not Qwen3, and it interleaves reasoning
+*between tool calls* in the message array -- sequential, not mid-generation injection.
+Overlapping thinking with the search round-trip remains hand-built, and is a scope decision
+rather than a capability.
