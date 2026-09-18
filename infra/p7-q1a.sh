@@ -5,7 +5,9 @@
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root
-MAXTOK=3000
+MAXTOK=4096
+MAXTOK_NT=1024        # the nothink control capped at 256 in run 1 and truncated 22% of it
+PREFIX="${PREFIX:-p7q1a}"      # re-runs write a new prefix, never overwrite an arm
 mkdir -p results
 
 if ! curl -sf -m 5 http://localhost:8000/health >/dev/null; then
@@ -25,13 +27,14 @@ for b in 0 128 256 512 1024 2048 none; do
     else
         label="b$b"; ARG="--thinking-budget $b"
     fi
-    out="results/p7q1a-$label.jsonl"
+    out="results/$PREFIX-$label.jsonl"
     echo
     echo "=== arm $label -> $out ==="
     HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1 \
       "$UV" run tools/qualeval.py run --url http://localhost:8000 \
         --config "q1a-$label" --slices gsm8k --concurrency 32 \
-        --max-tokens-think "$MAXTOK" $ARG --out "$out"
+        --max-tokens-think "$MAXTOK" --max-tokens-nothink "$MAXTOK_NT" \
+        $ARG --out "$out"
     rc=$?
     echo "  arm $label rc=$rc"
     [ "$rc" = 0 ] && "$UV" run tools/qualeval.py grade "$out" 2>&1 | tail -6

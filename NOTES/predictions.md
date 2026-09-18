@@ -5411,3 +5411,109 @@ max_tokens ceiling" when p99 reaches 95% of the cap. The condition was met in bo
 runs -- p99 is 1024 against a 972.8 threshold -- so the warning was emitted at run time. The
 run logs are not retained, so whether it was read is not recoverable; what is certain is that
 the number went into the record without the caveat.
+
+### P7-Q1a ACTUALS, 2026-09-18: the budget buys latency almost for free, and two predictions died with their anchor
+
+Qwen3-8B, fp8 weights, fp8 KV, KV pinned 10213733807, `--reasoning-parser qwen3`,
+`VLLM_USE_V2_MODEL_RUNNER=0`, gsm8k 200 items per arm, concurrency 32, max_tokens_think 3000.
+Reasoning-token counts are RECOVERED offline (`tools/q1atokens.py`) because this run's client
+dropped the reasoning stream -- see the instrument correction above. Accuracy, usage and
+timing are as measured. Run 2 (`p7q1c`) repeats this with a fixed client as confirmation.
+
+| arm | budget | acc % | rtok p50 | rtok p95 | out p50 | silence p50 | silence p95 | e2e p50 | leaked inline |
+|---|---|---|---|---|---|---|---|---|---|
+| b0 | 0 | 93.5 | 3 | 3 | 204 | **0.15 s** | 0.92 | 5.23 | 0 |
+| b128 | 128 | 92.0 | 131 | 1174 | 301 | 3.12 | 3.27 | 7.24 | 22 |
+| b256 | 256 | 91.0 | 259 | 961 | 374 | 5.89 | 6.20 | 8.46 | 20 |
+| b512 | 512 | 94.5 | 515 | 564 | 524 | 11.62 | 12.22 | 12.33 | 10 |
+| b1024 | 1024 | 94.5 | 721 | 1027 | 946 | 17.10 | 25.32 | 21.94 | 1 |
+| b2048 | 2048 | 95.0 | 780 | 2051 | 948 | 18.86 | 51.02 | 23.46 | 1 |
+| unbounded | none | **95.8** | 721 | 2077 | 926 | **18.03 s** | 50.70 | 22.26 | 0 |
+
+"silence" is time to the first VISIBLE token -- with the trace hidden from the user this is
+what they sit through. "leaked inline" counts records whose reasoning arrived in `content`
+instead of the reasoning channel.
+
+**The budget binds, to within the closing tag.** 128 -> 131, 256 -> 259, 512 -> 515. The
+constant +3 is `</think>` plus retokenisation drift. Above 512 it stops binding at the median
+because the natural median is 721 tokens, which is why b1024, b2048 and unbounded all sit at
+721-780. It still binds on the TAIL: p95 goes 1027 at b1024, 2051 at b2048, 2077 unbounded.
+
+| prediction | expected | actual | verdict |
+|---|---|---|---|
+| P7-Q1a-1 | accuracy saturates by 512, within 2 pts of unbounded | b512 94.5 vs 95.8, **1.3 pts** | **correct** |
+| P7-Q1a-2 | unbounded lands 50-57% | **95.8%** | **miss by 39 points** |
+| P7-Q1a-3 | 2048 within 1 pt of unbounded | 95.0 vs 95.8, **0.8 pts** | **correct** |
+| P7-Q1a-4 | budget 0 costs 10-20 pts | costs **2.3 pts** | **miss** |
+| P7-Q1a-5 | silence linear in budget at 18.9 ms/token +/-20% | **24.29 ms/token, r^2 0.9967** | shape correct, constant **+29%, outside the band** |
+| P7-Q1a-6 | nothink control identical to the item | drifts **0.5% to 3.0%** | **miss** |
+
+**P7-Q1a-2 and -4 died of the same cause, and it was not the model.** Both were anchored to
+P6's 52.5%, which the re-read above shows was a truncation rate rather than an accuracy. Once
+the ceiling is raised, gsm8k/think is a 95.8% task, so there was never 10-20 points of headroom
+for budget 0 to lose. The predictions were arithmetic on a number that did not mean what it
+said. This is the cost of an unchecked baseline, paid a phase later.
+
+**P7-Q1a-5's shape is the part that matters and it is emphatic.** Fitting silence against
+reasoning tokens actually emitted: `silence = -0.18 s + 24.29 ms/token`, r^2 = 0.9967 across
+seven arms spanning 3 to 780 tokens. A near-zero intercept means the silence IS the reasoning,
+with nothing else of consequence in it. The constant missed high because 18.9 ms was the
+batch-1 ITL and this ran at concurrency 32; the prediction anticipated inflation and set a
++/-20% band, and the real inflation is +29%. The band was too tight, not the model wrong.
+
+**P7-Q1a-6 was the wrong gate, in the way incident 22 already described.** Item-level identity
+cannot hold: batch composition varies between runs, so bf16/fp8 accumulation order varies with
+it. Worse, the control was itself truncation-limited -- the nothink pass ran at qualeval's
+default max_tokens of 256 and 44 of 200 responses hit it. Of the 11 items that ever flipped, 7
+sit at or beside that ceiling (six at exactly 256) against a 21% base rate among stable items,
+a 3x enrichment. Most of the "drift" is responses oscillating across the cap, not the model
+changing its mind. What the control actually delivers is a noise floor: roughly +/-3 points at
+n = 200, which is the band every accuracy comparison in the table above must be read against.
+
+**The number this was run to produce.** Unbounded reasoning costs **18.03 s of silence** at
+p50 and **50.70 s** at p95 to score 95.8%. Forcing the think block shut costs **2.3 points**
+and returns first output in **0.15 s** -- a **122x** cut in silence. The prediction written
+before launch said the premise held if saturation arrived by 512; it arrives at zero.
+
+**What this does to Q1b.** The adaptive-budget policy was motivated by expecting a steep
+accuracy-versus-budget tradeoff to navigate. On gsm8k there is no tradeoff to navigate: the
+curve is flat to within its own noise from budget 0 upward. An adaptive policy cannot beat a
+flat curve by much, so Q1b is not worth running ON THIS SLICE. It becomes worth running only
+on a slice where the curve actually bends, which is now the thing to find. gsm8k was chosen
+because it was already wired up and graded; it turns out to be too easy to be the phase's
+workload, and that is a result about the workload rather than about budgets.
+
+**What budget 0 actually does, which is not "stop reasoning".** At budget 0 the model still
+reasons -- it just reasons in the VISIBLE answer instead of the hidden trace. Median output is
+204 tokens of step-by-step arithmetic ending in ANSWER. So the lever is not "think less", it is
+"move the thinking where the user can watch it arrive". That is why silence collapses to 0.15 s
+while accuracy holds: the same work streams instead of buffering.
+
+**A caution against an adjacent claim that looked true and is not.** The nothink pass
+(`enable_thinking=False`) scores 72.0% against budget-0's 93.5%, which reads as a 21-point case
+for budgeting to zero rather than disabling thinking. It is not. Among UNTRUNCATED nothink
+responses the accuracy is **91.7%**, and the gap is almost entirely that the nothink template
+writes longer LaTeX-heavy answers that overflow a 256-token cap. The two configurations are
+close. Recording this because it survived several minutes as a headline before being checked.
+
+## P7-Q1c  the same ladder with a fixed client, written 2026-09-18 while run 2 is in flight
+
+Run 2 is not a re-measurement of the model; it is a test of the instrument fix, and of three
+specific claims run 1 could only infer. Changes from run 1: the client reads `reasoning`, so
+reasoning tokens come from the server's own stream rather than being reconstructed; a separate
+`tt_content` is recorded; max_tokens_think 3000 -> 4096 and max_tokens_nothink 256 -> 1024.
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-Q1c-1** | measured reasoning tokens match the recovered estimates within **5 tokens** at p50 on every arm | the recovery subtracts retokenised content from the server's own completion count; only tokeniser boundary drift separates them, and no record came out negative |
+| **P7-Q1c-2** | nothink control drift falls **below 1%** on every arm, from up to 3.0% | 7 of 11 flips sat at the 256 ceiling; raising it to 1024 removes the boundary they were oscillating across |
+| **P7-Q1c-3** | nothink accuracy rises to **90-93%**, from 72.0% | run 1's untruncated nothink accuracy was 91.7%, and a 1024 cap should truncate almost nothing at a 178-token median |
+| **P7-Q1c-4** | the accuracy curve reproduces run 1 within **3 points** per arm | the control puts the noise floor at roughly +/-3 points at n = 200 |
+| **P7-Q1c-5** | the inline leak persists at **8-12%** on b128 and b256 and stays near zero above b512 | it is the SERVER's parser breaking when the budget forces `</think>` mid-stream; fixing the client cannot change it. If it vanishes, it was mine and I have misattributed it |
+| **P7-Q1c-6** | the silence fit reproduces at **24.3 ms/token +/-10%**, r^2 > 0.99 | same server, same concurrency, same batch shape |
+
+**What would falsify what.** P7-Q1c-1 is the load-bearing one: it is the only check that the
+offline recovery, on which every reasoning-token number in the P7-Q1a table rests, is sound. If
+it misses, the run 1 table's rtok column is withdrawn and only run 2's stands. P7-Q1c-5 decides
+whether the inline leak is a vLLM behaviour worth reporting upstream or an artefact of my own
+client, and those are opposite conclusions from the same observation.
