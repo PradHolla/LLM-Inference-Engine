@@ -5182,3 +5182,31 @@ covers Kimi-K2-Thinking and MiniMax-M2 only, not Qwen3, and it interleaves reaso
 *between tool calls* in the message array -- sequential, not mid-generation injection.
 Overlapping thinking with the search round-trip remains hand-built, and is a scope decision
 rather than a capability.
+
+## P7V  Phase 7 instrument validation, written 2026-09-18 while the run is in flight
+
+Three things the offline fakes cannot answer, on Qwen3-8B, fp8 weights, fp8 KV, KV pinned
+at 10,213,733,807 bytes, `--max-model-len 16384`, `--enable-prefix-caching`,
+`--reasoning-parser qwen3`, `reasoning_end_str` the bare `</think>`, greedy.
+
+**The model runner is deliberately left at its default.** The upstream E2E test forces
+`VLLM_USE_V2_MODEL_RUNNER=0` under the comment that the budget is not supported on V2.
+Setting it here would hide the question this run exists to answer.
+
+| # | Prediction | Derivation |
+|---|---|---|
+| **P7V-1** | The budget **binds**: reasoning tokens monotone decreasing across unbounded/1024/256/64, and the 64-arm inside [1, 96] | `thinking_token_budget` is first-class at 0.27.1 with its own E2E test. The risk is entirely the V2 runner, and `envs.py` defaults it to unset rather than on. Call it 75% -- this is the prediction I am least sure of, and the one that gates the phase |
+| **P7V-2** | Unbounded reasoning on the tank question is **300-700 tokens** | It is an easy four-step arithmetic problem. Qwen3-8B does not need long reasoning for it, and Phase 6's gsm8k/think traces were of this order |
+| **P7V-3** | The splice **hits**: `cached_tokens` around **190**, roughly **60-70%** of the re-issue prompt | Prefix is prompt_sent (~40 tokens) + up to 160 generated = ~200. Only full blocks cache, so at block 16 that is 12 blocks = **192 tokens**, with ~8 stranded in a partial block. The re-issue prompt adds the ~90-token sources block, so the denominator is ~290 and the fraction is 192/290 = **66%** |
+| **P7V-4** | Aborting a stream **frees the sequence within 1 s** | vLLM aborts on client disconnect. If this misses, the overlap path spends GPU the serial path does not, and Q3's saving is partly fictional |
+
+**What would falsify what.** P7V-1 failing means the budget is silently ignored and every Q1
+number would have been a plausible fiction -- the phase stops and re-runs with the V2 runner
+disabled. P7V-3 landing at zero means generated tokens are not cached as a prompt prefix, the
+claim in `splice.py`'s design note is wrong, and Q3 collapses to a full re-prefill. P7V-4
+failing does not stop anything but it changes Q3's accounting from "saves the search wait" to
+"saves the search wait and pays for abandoned decode".
+
+**Note on P7V-3's denominator.** The hit fraction is computed over the whole re-issue prompt
+including the newly spliced block, so a "low" percentage is not a cache failure -- the number
+that matters is `cached_tokens` against the *prefix* length, not against the total.
