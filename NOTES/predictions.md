@@ -5210,3 +5210,81 @@ failing does not stop anything but it changes Q3's accounting from "saves the se
 **Note on P7V-3's denominator.** The hit fraction is computed over the whole re-issue prompt
 including the newly spliced block, so a "low" percentage is not a cache failure -- the number
 that matters is `cached_tokens` against the *prefix* length, not against the total.
+
+### P7V ACTUALS, 2026-09-18: all three pass, and the splice misses exactly one token
+
+Qwen3-8B, fp8 weights, fp8 KV, KV pinned at 10,213,733,807 bytes, `--max-model-len 16384`,
+`--enable-prefix-caching`, `--reasoning-parser qwen3`, `reasoning_end_str` the bare
+`</think>`, greedy, **`VLLM_USE_V2_MODEL_RUNNER=0`**. GPU KV cache 138,528 tokens.
+
+**Run 1 answered section 0c and had to be thrown away.** With the runner left at its
+default, the engine printed at startup:
+
+    Model Runner V2 does not yet support the thinking_token_budget request parameter.
+    Set VLLM_USE_V2_MODEL_RUNNER=0 if this is required.
+
+**V2 is the 0.27.1 default.** But it does not silently ignore the budget -- it returns
+**400 Bad Request**. The design doc feared "accepted, validated, and does nothing", which
+would have been incident 32's shape. The real behaviour is the loud one, so this is one
+fewer way for the phase to produce plausible fiction. Run 2 set the flag.
+
+| # | Prediction | Measured | |
+|---|---|---|---|
+| P7V-1 | budget binds, monotone, 64-arm in [1,96] | **1526 -> 1024 -> 256 -> 64**, exact | correct |
+| P7V-2 | unbounded reasoning 300-700 tokens | **1,526** | **MISS, 2.2-5.1x** |
+| P7V-3 | cached ~192 tokens, 60-70% of the re-issue | **208 tokens, 72.7%** | correct |
+| P7V-4 | abort frees the sequence within 1 s | **0.5 s** | correct |
+
+**The budget is a hard cap, not a soft one.** 1024 gave exactly 1024 reasoning tokens, 256
+exactly 256, 64 exactly 64. It does not overshoot by a token.
+
+### The splice accounting closes to the token
+
+    re-issue prompt                     286 tokens
+    prefix (prompt_sent + generated)    209 tokens
+    prefix cache hit                    208 tokens
+    stranded                              1 token
+    predicted stranded, 209 mod 16        1 token
+    spliced block, new text              77 tokens
+    total uncached, 77 + 1               78  =  286 - 208
+
+**208 of 209 prefix tokens cached: 99.5%.** `splice.py`'s design note said only full blocks
+cache, so `N mod block_size` tokens must be recomputed. 209 mod 16 is 1, and exactly one
+token missed. Generated tokens ARE reusable as a prompt prefix, and the cost of the splice
+is the arithmetic the module predicted rather than something that had to be measured to be
+believed.
+
+**P7-7's splice-cost prediction holds with room to spare.** One stranded token at the
+cold-prefill constant of 0.2915 ms/token is **0.3 ms** against a predicted "under 50 ms".
+
+### P7V-2 is the miss, and it is the useful one
+
+1,526 reasoning tokens on a four-step arithmetic problem the model gets right. At fp8's
+measured 18.9 ms/token that is **28.8 seconds of silence** for "47 - 3x5 + 12".
+
+My 300-700 estimate came from assuming reasoning length tracks problem difficulty. It does
+not, at least not here. This is the overthinking result from the literature landing on our
+own model and our own task, and it makes Q1 *more* interesting rather than less: the gap
+between what the model spends and what the problem needs is where the whole adaptive-budget
+question lives. **P7-2 predicted gsm8k saturates by 512 thinking tokens; if that holds
+against an unbounded 1,526, the budget can cut two thirds of the wait for free.**
+
+Recorded caveat: run 1 measured 1,738 unbounded reasoning tokens on the same question under
+the V2 runner, against run 2's 1,526 under V1. Same prompt, same sampling, **14% apart**, so
+reasoning length is not identical across runners and no budget number should be compared
+across that boundary.
+
+### Two instrument corrections found in this run
+
+**`usage.prompt_tokens_details.cached_tokens` is in the 0.27.1 schema but never populated.**
+The Q3 measurement comes from `vllm:prefix_cache_hits_total` / `queries_total` deltas
+instead. Both are documented in `v1/metrics/loggers.py` as **token** counts -- "in terms of
+number of queried tokens" and "in terms of number of cached tokens" -- and the first version
+of the reader called them blocks and multiplied by 16, printing "3328 of 286 prompt tokens".
+Impossible on its face, which is the only reason it was caught.
+
+**A status line described the wrong process.** `p7-validate.sh` echoed
+`VLLM_USE_V2_MODEL_RUNNER=<unset>` while the server unit had it set to 0, because the driver
+sets it inline on the launch call and so does not carry it in its own environment. It now
+reads `systemctl show vllm --property=Environment`. A status line that reports the caller's
+state and calls it the server's is worse than no status line.

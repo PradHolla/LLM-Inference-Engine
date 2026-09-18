@@ -45,8 +45,8 @@ async def model_of(c: httpx.AsyncClient, url: str) -> str | None:
 
 
 async def prefix_counters(c: httpx.AsyncClient, url: str) -> tuple[float, float]:
-    """(hits, queries) in BLOCKS. `_created` series are unix timestamps, not counts --
-    binding one into a counter role is incident 41, so each role must match exactly one."""
+    """(hits, queries) in TOKENS -- vLLM documents both counters as token counts, not
+    blocks. `_created` series are unix timestamps; binding one is incident 41."""
     r = await c.get(f"{url}/metrics", timeout=10)
     roles = {"vllm:prefix_cache_hits_total": [], "vllm:prefix_cache_queries_total": []}
     for line in r.text.splitlines():
@@ -132,7 +132,7 @@ async def check_splice(c, url, model) -> dict:
     reissue_ms = (time.perf_counter() - t0) * 1e3
     tail = (d2.get("choices") or [{}])[0].get("text") or ""
     h1, q1 = await prefix_counters(c, url)
-    hit_blocks, q_blocks = h1 - h0, q1 - q0
+    hit_tok, q_tok = h1 - h0, q1 - q0
     u2 = d2.get("usage") or {}
     det = u2.get("prompt_tokens_details") or {}
     cached = det.get("cached_tokens")
@@ -142,26 +142,30 @@ async def check_splice(c, url, model) -> dict:
     reported = u2.get("prompt_tokens")
     hit_frac = (cached / reported) if (cached and reported) else 0.0
 
-    blk_frac = (hit_blocks / q_blocks) if q_blocks else 0.0
-    if q_blocks <= 0:
-        verdict, detail = "ERROR", "the re-issue queried no prefix-cache blocks at all"
-    elif hit_blocks <= 0:
+    # The fraction that matters is against the PREFIX, not the whole re-issue prompt:
+    # the spliced block is new text and could never have been cached.
+    pref_frac = (hit_tok / n_prefix) if n_prefix else 0.0
+    tot_frac = (hit_tok / q_tok) if q_tok else 0.0
+    stranded = n_prefix - hit_tok
+    if q_tok <= 0:
+        verdict, detail = "ERROR", "the re-issue queried no prefix-cache tokens at all"
+    elif hit_tok <= 0:
         verdict = "FAIL"
-        detail = (f"re-issue hit 0 of {q_blocks:.0f} blocks; generated tokens are NOT "
+        detail = (f"re-issue hit 0 of {q_tok:.0f} tokens; generated tokens are NOT "
                   "reusable as a prompt prefix and the Q3 design collapses")
     else:
-        verdict = "PASS" if blk_frac > 0.5 else "PARTIAL"
-        detail = (f"{hit_blocks:.0f}/{q_blocks:.0f} blocks hit ({blk_frac:.1%}), "
-                  f"~{hit_blocks * 16:.0f} of {reported} prompt tokens; prefix {n_prefix} "
-                  f"tokens, {partial_blk} stranded in a partial block")
+        verdict = "PASS" if pref_frac > 0.9 else "PARTIAL"
+        detail = (f"{hit_tok:.0f}/{n_prefix} prefix tokens cached ({pref_frac:.1%}); "
+                  f"{stranded:.0f} stranded against {partial_blk} predicted by block "
+                  f"alignment; {hit_tok:.0f}/{q_tok:.0f} of the whole re-issue ({tot_frac:.1%})")
     print(f"    partial thinking : {len(partial)} chars, {tokcount(partial)} tokens")
     print(f"    re-issue prompt  : {reported} tokens, usage.cached_tokens={cached}")
-    print(f"    prefix blocks    : {hit_blocks:.0f} hit of {q_blocks:.0f} queried")
+    print(f"    prefix cache     : {hit_tok:.0f} tokens hit of {q_tok:.0f} queried")
     print(f"    re-issue latency : {reissue_ms:.0f} ms")
     print(f"    --- what the model said after the splice ---")
     print("    " + (tail[:600].replace("\n", "\n    ") or "(nothing)"))
     return {"verdict": verdict, "detail": detail, "cached_tokens": cached,
-            "hit_blocks": hit_blocks, "queried_blocks": q_blocks,
+            "hit_tokens": hit_tok, "queried_tokens": q_tok, "stranded": stranded,
             "reissue_prompt_tokens": reported, "reissue_ms": reissue_ms,
             "prefix_tokens": n_prefix, "partial_block_tokens": partial_blk,
             "first_usage": u1, "partial_text": partial, "tail_text": tail}
