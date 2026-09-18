@@ -115,6 +115,7 @@ class Rec:
     usage_prompt: int | None = None
     finish_reason: str | None = None
     ttft: float | None = None
+    tt_content: float | None = None
     e2e: float | None = None
     status: str = "ok"
     error: str | None = None
@@ -182,7 +183,8 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
                     if ch.get("finish_reason"):
                         r.finish_reason = ch["finish_reason"]
                     d = ch.get("delta") or {}
-                    rc, cc = d.get("reasoning_content"), d.get("content")
+                    rc = d.get("reasoning") or d.get("reasoning_content")
+                    cc = d.get("content")
                     if rc:
                         reasoning.append(rc)
                     if cc:
@@ -191,6 +193,8 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
                         r.n_deltas += 1
                         if r.ttft is None:
                             r.ttft = time.perf_counter() - t0
+                    if cc and r.tt_content is None:
+                        r.tt_content = time.perf_counter() - t0
         r.e2e = time.perf_counter() - t0
     except Exception as e:
         r.status, r.error, r.e2e = "exception", f"{type(e).__name__}: {e}", time.perf_counter() - t0
@@ -200,7 +204,7 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
     # vLLM splits <think> into reasoning_content only with --reasoning-parser; otherwise it
     # arrives inline. Handle both and RECORD WHICH (see NOTES/code-notes.md).
     if rtext:
-        r.think_path = "reasoning_content"
+        r.think_path = "reasoning_field"
         r.reasoning_chars, r.content_chars = len(rtext), len(ctext)
         r.text = f"<think>{rtext}</think>{ctext}"
     else:
@@ -471,6 +475,63 @@ def cmd_compare(args):
 
 # --------------------------------------------------------------------------- selftest
 
+def _sse(*chunks):
+    return "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+
+
+def _read_once(sse):
+    """Drive the real streaming reader against a canned SSE body."""
+    item = {"slice": "gsm8k", "id": "t", "answer": "42", "prompt": "q"}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, text=sse)))
+
+    async def go():
+        async with client:
+            return await _one(client, "http://mock", item, "selftest", True, 100, 0)
+    return asyncio.run(go())
+
+
+def reader_cases():
+    """The field name the server emits is an ASSUMPTION; pin every spelling we accept."""
+    usage = {"usage": {"completion_tokens": 9, "prompt_tokens": 3}, "choices": []}
+    fin = {"choices": [{"delta": {"content": "ANSWER: 42"}, "finish_reason": "stop"}]}
+    cases = [
+        ("vllm 0.27 'reasoning'", _sse(
+            {"choices": [{"delta": {"reasoning": "let me think"}}]}, fin, usage),
+         "reasoning_field", 12, 10),
+        ("legacy 'reasoning_content'", _sse(
+            {"choices": [{"delta": {"reasoning_content": "let me think"}}]}, fin, usage),
+         "reasoning_field", 12, 10),
+        # the inline path leaves "</think>" in the content; the field path does not.
+        ("no parser, inline tags", _sse(
+            {"choices": [{"delta": {"content": "<think>hmm</think>"}}]}, fin, usage),
+         "inline_tags", 10, 18),
+        ("no reasoning at all", _sse(fin, usage), "none", 0, 10),
+    ]
+    bad = 0
+    for why, sse, want_path, want_rchars, want_cchars in cases:
+        r = _read_once(sse)
+        ok = (r.think_path == want_path and r.reasoning_chars == want_rchars
+              and r.content_chars == want_cchars and r.usage_completion == 9
+              and r.status == "ok")
+        bad += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'}  {why:<42} path={r.think_path:<16} "
+              f"rchars={r.reasoning_chars:<4} cchars={r.content_chars:<4} "
+              f"uc={r.usage_completion}")
+        if not ok:
+            print(f"        expected path={want_path} rchars={want_rchars} "
+                  f"cchars={want_cchars} uc=9 status=ok (got status={r.status} "
+                  f"err={r.error})")
+
+    r = _read_once(_sse({"choices": [{"delta": {"reasoning": "thinking"}}]}, fin, usage))
+    ok = r.ttft is not None and r.tt_content is not None and r.ttft <= r.tt_content
+    bad += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'ttft precedes first visible token':<42} "
+          f"ttft={r.ttft} tt_content={r.tt_content}")
+    return bad
+
+
+
 def cmd_selftest(args):
     cases = [
         ("ANSWER: 42", "math", "42", "plain"),
@@ -521,7 +582,11 @@ def cmd_selftest(args):
         bad += not ok
         print(f"  {'ok  ' if ok else 'FAIL'}  mcnemar_exact(b={b}, c={c}) = {got:.9f}"
               + ("" if ok else f"   expected {want}"))
-    print(f"\n{'SELFTEST FAILED' if bad else 'selftest passed'}: {len(cases)+len(mc)} cases, {bad} bad")
+    print()
+    nreader = 5
+    bad += reader_cases()
+    total = len(cases) + len(mc) + nreader
+    print(f"\n{'SELFTEST FAILED' if bad else 'selftest passed'}: {total} cases, {bad} bad")
     return 1 if bad else 0
 
 

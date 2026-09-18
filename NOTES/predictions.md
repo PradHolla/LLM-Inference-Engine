@@ -5321,3 +5321,93 @@ table can be trusted.
 **The number this exists to produce.** At 18.9 ms/token, unbounded's 1,526 reasoning tokens
 are **28.8 s of silence**. If accuracy saturates at 512, the same answer costs **9.7 s** --
 a 3x latency cut for free, and that is the whole premise of Q1.
+
+### P7-Q1a INSTRUMENT CORRECTION, 2026-09-18: qualeval discarded the entire reasoning stream
+
+Found while reading the first three arms, before the sweep finished. The sweep was allowed
+to run to completion because the defect does not touch the channel P7-Q1a-1 is scored on.
+
+vLLM 0.27.1 emits the reasoning delta as `reasoning`. Its own source says so, at
+`vllm/entrypoints/openai/chat_completion/protocol.py:515` -- "Renames the deprecated
+`reasoning_content` field to `reasoning` so downstream code only needs to check one field."
+`qualeval.py` read `delta.reasoning_content`, which is therefore always `None`. With
+`--reasoning-parser qwen3` active, the parser routes every reasoning token to a field the
+client was not reading, and those deltas were dropped on the floor rather than recorded.
+
+This is the same lookup already written into CLAUDE.md section 1b after the Phase 7
+feasibility probe. The rule was recorded and the tool was shipped with the defect anyway.
+
+What the defect does and does not invalidate in `results/p7q1a-*.jsonl`:
+
+| field | status | why |
+|---|---|---|
+| `correct`, `parsed`, `extracted` | VALID | graded on `content`, which the parser fills correctly; the answer never travelled in the reasoning channel |
+| `usage_completion`, `usage_prompt` | VALID | read from the server's own `usage` block, which counts reasoning tokens whether or not the client reads them |
+| `e2e` | VALID | wall clock over the whole stream |
+| `finish_reason`, `truncated` | VALID | read from the choice, untouched |
+| `ttft` | CONTAMINATED, splittable | set on the first delta where `rc or cc` is truthy. `rc` is always `None`, so for the 89% of records whose reasoning was routed to the unread field this is time-to-first-CONTENT; for the 11% whose reasoning leaked inline it is time-to-first-token. Two different quantities inside one arm, separable by `think_path` |
+| `reasoning_chars`, `content_chars`, `think_path` | BROKEN | `reasoning_chars` is 0 except where tags leaked inline |
+| `n_deltas` | UNDERCOUNTS | counts content deltas only |
+
+Phases 5 and 6 are NOT affected. Checked rather than assumed: their result files record
+`inline_tags` on 553/560, 554/560, 406/560, 402/560 and 395/560 thinking records, which is
+only reachable when no reasoning parser is running and the tags arrive in `content` where
+the client does read them. The defect was dormant until Phase 7 added `--reasoning-parser
+qwen3` and thereby activated the field the client was blind to.
+
+The budget still binds, and that is established from the valid channel rather than assumed.
+At b128 the median completion is 301 tokens. If the budget were being ignored the median
+would sit near 1,526 + answer, which is what P7V measured unbounded reasoning to be. It does
+not. 301 is not consistent with an unbounded think block by a factor of five.
+
+**The fix.** `qualeval.py` now reads `d.get("reasoning") or d.get("reasoning_content")`, so
+both spellings work and no server version silently empties the channel. `think_path`'s
+field label is renamed `reasoning_field`, because the old label named a field that no longer
+exists. A second latency is recorded alongside `ttft`: `tt_content`, the first VISIBLE token,
+which is the quantity Q1 actually cares about -- with reasoning hidden from the user, time to
+first content IS the silence.
+
+**Why the selftest did not catch it.** It covered answer extraction and McNemar and never
+exercised the reader, which is where the bug was. It now drives the real streaming reader
+against a canned SSE body in four spellings -- `reasoning`, `reasoning_content`, inline tags,
+and no reasoning at all -- and asserts that `ttft` precedes `tt_content`. 40 cases, 0 bad.
+This is incident 41's lesson restated: a fixture that does not contain the real name set
+cannot detect a binding that reads the wrong name.
+
+### P6 RE-READ, 2026-09-18: the Phase 6 gsm8k accuracy numbers were truncation rates
+
+Found while checking the baseline that P7-Q1a-2 was anchored to. Belongs beneath P6-M8Q
+above; recorded here because this file is append-only.
+
+Qwen3-8B, gsm8k 200 items, thinking pass, max_tokens 1024:
+
+| run | reported acc | truncated | truncated % | acc among UNTRUNCATED | usage_completion p95 |
+|---|---|---|---|---|---|
+| phase6-qual-kvfp16 | 56.5% | 88 | 44.0% | **100.0%** | 1024 |
+| phase6-qual-kvfp16b | 56.0% | 88 | 44.0% | **100.0%** | 1024 |
+| phase6-qual-kvfp8 | 52.5% | 95 | 47.5% | **99.0%** | 1024 |
+
+`usage_completion` p95 equals the ceiling exactly in all three. In the fp8 run, 69 of 200
+records never closed their think block at all -- `think_path` none, `finish_reason` length --
+and those 69 scored **0.0%**, because a response cut off mid-thought has no answer to grade.
+
+So the reported figure was never the model's accuracy on gsm8k. It was the fraction of
+responses that both finished inside 1024 tokens and were right, on a sample where the cap
+bound on nearly half. The variation between arms is variation in truncation rate, not in
+correctness: among responses that finished, all three arms are 99-100%.
+
+**What survives.** P6-M8Q's conclusion -- fp8 KV costs no accuracy, 0.5 points, p = 0.6084 --
+is a null result, and it survives; the untruncated numbers strengthen it, since both
+precisions answer essentially every question they finish. What does not survive is the
+absolute level. 52.5% is a property of the token budget, not of the model.
+
+**What it cost today.** P7-Q1a-2 predicted unbounded at 50-57% on the strength of that
+number, which means it predicted the artifact rather than the quantity. Q1a runs with
+`--max-tokens-think 3000` and is not truncation-limited, so the prediction should be expected
+to miss high, and the miss is the anchor's fault rather than the model's.
+
+The instrument warns about this. `qualeval.py` prints "WARNING: completion p99 is at the
+max_tokens ceiling" when p99 reaches 95% of the cap. The condition was met in both Phase 6
+runs -- p99 is 1024 against a 972.8 threshold -- so the warning was emitted at run time. The
+run logs are not retained, so whether it was read is not recoverable; what is certain is that
+the number went into the record without the caveat.
