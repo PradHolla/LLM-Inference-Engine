@@ -29,7 +29,12 @@ LOG=$(sudo journalctl "_SYSTEMD_INVOCATION_ID=$INV" --no-pager -o cat 2>/dev/nul
 echo "$LOG" | grep -oiE "model runner[^,]*|V2ModelRunner|GPUModelRunner|use_v2[^,]*" | sort -u | head -5 | sed 's/^/  runner: /'
 echo "$LOG" | grep -oiE "reasoning[_-]parser[^,]*|ReasoningConfig\([^)]*\)" | sort -u | head -3 | sed 's/^/  reasoning: /'
 echo "$LOG" | grep -oiE "async[_ ]scheduling[^,]*" | sort -u | head -2 | sed 's/^/  sched: /'
-echo "  env VLLM_USE_V2_MODEL_RUNNER=${VLLM_USE_V2_MODEL_RUNNER:-<unset>}"
+# Read what the SERVER unit actually received. The driver sets this inline on the launch
+# call, so the driver's own environment does not have it and reporting that said <unset>
+# while the server was correctly configured -- a status line that described the wrong process.
+systemctl show vllm --property=Environment --value 2>/dev/null \
+    | tr ' ' '\n' | grep -i V2_MODEL_RUNNER | sed 's/^/  server env: /' \
+    || echo "  server env: VLLM_USE_V2_MODEL_RUNNER not in the unit environment"
 
 echo
 echo "=== checks ==="
