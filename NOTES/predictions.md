@@ -5626,3 +5626,89 @@ knee location -- somewhere near 1,800 tokens if P7-Q1m-4 holds -- is the number 
 policy would be built around. P7-Q1m-1 and P7-Q1m-3 fail together or not at all: both rest on
 the claim that budget 0 does not relocate reasoning into the visible answer, which gsm8k's
 token counts imply but did not directly test.
+
+### P7-Q1m ACTUALS, 2026-09-18: the budget curve on math is U-shaped, and the danger zone is the middle
+
+Qwen3-8B, fp8 weights, fp8 KV, KV pinned, `--reasoning-parser qwen3`,
+`VLLM_USE_V2_MODEL_RUNNER=0`, math slice 180 items per pass, concurrency 32,
+max_tokens_think 6144, max_tokens_nothink 2048. Zero truncation on every arm.
+
+| arm | budget | acc % | reasoning tok p50 | visible tok p50 | silence p50 | e2e p50 |
+|---|---|---|---|---|---|---|
+| b0 | 0 | 85.6 | 0 | 536 | **0.23 s** | 15.19 |
+| b128 | 128 | **94.4** | 128 | 871 | **3.93 s** | 28.08 |
+| b256 | 256 | 93.9 | 256 | 846 | 7.33 s | 30.82 |
+| b512 | 512 | **82.8** | 512 | 597 | 14.35 s | 29.79 |
+| b1024 | 1024 | **82.8** | 1024 | 8 | 28.25 s | 29.24 |
+| b2048 | 2048 | **100.0** | 1609 | 8 | 44.70 s | 49.66 |
+| unbounded | none | 99.4 | 1597 | 97 | 45.70 s | 49.33 |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q1m-1 | budget 0 scores 75-85% | **85.6%** | **miss by 0.6**, at the boundary |
+| P7-Q1m-2 | unbounded 97-99.5% | **99.4%** | **correct** |
+| P7-Q1m-3 | no saturation by 512; b512 at least 5 pts below unbounded | **16.7 pts below** | **correct** |
+| P7-Q1m-4 | b2048 within 2 pts of unbounded | **0.6 pts, and above it** | **correct** |
+| P7-Q1m-5 | same silence slope, 24.4 ms/token +/-10% | **27.99 ms/token, +14.4%**, r^2 0.9994 | **miss** |
+| P7-Q1m-6 | inline leak 8-12% as on gsm8k | **43.3 / 42.8 / 43.9 / 22.2%** | **miss, 4x high** |
+
+**The curve is not monotone and the middle is the worst place to be.** 85.6 at zero, 94.4 at
+128, 93.9 at 256, then a collapse to 82.8 at both 512 and 1024, then 100.0 at 2048. A budget
+of 1024 is **16.7 points worse than no budget at all costs 28 seconds more silence**. Nothing
+in the Q1 design anticipated a region where spending more tokens buys less accuracy.
+
+**The mechanism, established inside the data rather than argued.** The question is whether the
+cut lands before or after the model has reached its answer. Among records where the budget
+actually bound, the share that already contained the correct answer inside the reasoning:
+
+| arm | bound | answer already reached | acc if reached | acc if not |
+|---|---|---|---|---|
+| b256 | 180 | 11% | 84.2 | **95.0** |
+| b512 | 179 | 30% | 90.6 | 79.4 |
+| b1024 | 147 | 68% | 91.0 | **53.2** |
+| b2048 | 44 | **100%** | **100.0** | -- |
+
+Three regimes fall out of it:
+
+- **Cut early (0-256).** The model has not committed to a hidden line of work, so it simply
+  re-derives the solution in the VISIBLE answer -- 871 visible tokens at b128 against 536 at
+  b0. Being cut before reaching an answer is harmless here, 95.0%.
+- **Cut mid-solve (512-1024).** The model has committed, has not finished, and answers from
+  partial work. Visible output collapses to a median of **8 tokens** at b1024: it is not
+  re-deriving anything, it is guessing from an unfinished thought. Records cut before reaching
+  an answer score **53.2%**.
+- **Cut after the answer (2048).** Every bound record at b2048 already contained its answer,
+  so the budget only truncates Qwen3's habitual self-checking. 100.0%, free.
+
+The independent check is b1024's own internal split: 147 records where the budget bound score
+**78.9%**, the 33 where reasoning finished under the cap score **100.0%**. Same items, same
+run, same server -- the budget binding IS the cause, not a confound.
+
+**The operating point this hands Q1b.** On math, b128 gives **94.4% at 3.93 s of silence**
+against unbounded's 99.4% at 45.70 s: 5 points for an **11.6x** cut. b256 gives 93.9% at
+7.33 s. Everything between 512 and 1024 is dominated -- worse accuracy AND more silence than
+b128. So an adaptive policy does not want a middling budget; it wants either a small one, or
+one comfortably past the model's natural length. The knee is not a knee, it is a cliff with a
+recovery on the far side, and an adaptive controller that ramps a budget upward would walk
+straight into the worst region on its way.
+
+**P7-Q1m-5 misses for a reason worth keeping.** Linearity is unimpeachable -- r^2 = 0.9994 --
+but the slope is 27.99 ms/token against gsm8k's 24.46, +14.4%. The silence law is per-workload,
+not universal: math holds ~1,700-token sequences where gsm8k held ~950, and at concurrency 32
+the per-token attention cost rises with the KV each sequence carries. This is incident 18
+again -- a constant measured in one regime is not a constant -- and it means no ITL figure may
+be carried across workloads, only across runs of the same one.
+
+**P7-Q1m-6 misses by 4x and the cause is unresolved.** The stray `</think>` in the content
+stream runs at 43.3 / 42.8 / 43.9 / 22.2% on math against 10.5% on gsm8k, so the leak is
+workload-dependent, which the prediction explicitly denied. At b128 every one of the 180
+records was bound yet only 78 leaked, so it is not simply "forcing the close leaks". Chunk
+boundaries under a different batch shape are a candidate and I have not tested it. Recording
+it as unresolved rather than guessing, which is what incident 48 was about.
+
+**What this does to the phase.** Q1b is back, with a better question than it started with. It
+was designed to find where on a smooth tradeoff to sit; the tradeoff is not smooth, and the
+useful policy question is how to stay out of the 512-1024 trough. Before building anything on
+this, the curve needs one repeat run -- the within-arm splits are controlled and convincing
+about the MECHANISM, but the cross-arm shape rests on a single run per arm, and the gsm8k
+unbounded arm moved 4.3 points between identical runs.
