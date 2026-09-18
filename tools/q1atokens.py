@@ -26,6 +26,10 @@ def split_text(r: dict) -> tuple[str, str]:
     if r["think_path"] == "inline_tags":
         i = text.find(CLOSE)
         return text[:i], text[i + len(CLOSE):]
+    if r["think_path"] == "reasoning_field":
+        # text was rebuilt as "<think>" + reasoning + "</think>" + content
+        cc = r.get("content_chars") or 0
+        return (text[:-cc] if cc else text), (text[-cc:] if cc else "")
     return "", text
 
 

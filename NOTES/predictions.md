@@ -5517,3 +5517,81 @@ offline recovery, on which every reasoning-token number in the P7-Q1a table rest
 it misses, the run 1 table's rtok column is withdrawn and only run 2's stands. P7-Q1c-5 decides
 whether the inline leak is a vLLM behaviour worth reporting upstream or an artefact of my own
 client, and those are opposite conclusions from the same observation.
+
+### P7-Q1c ACTUALS, 2026-09-18: the fix holds, the budget binds to the token, and unbounded is the unstable arm
+
+Same server and configuration as P7-Q1a -- Qwen3-8B, fp8 weights, fp8 KV, KV pinned,
+`--reasoning-parser qwen3`, `VLLM_USE_V2_MODEL_RUNNER=0`, gsm8k 200 items per arm,
+concurrency 32 -- with the fixed client, max_tokens_think 4096 and max_tokens_nothink 1024.
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q1c-1 | recovered tokens match measured within 5 at p50 | differ by **exactly 3, every record, every arm** (mean 3.0, max 3) | **correct** |
+| P7-Q1c-2 | nothink drift below 1% on every arm | **0.5% to 1.5%** (was up to 3.0%) | **miss**, 3 arms at 1.0-1.5% |
+| P7-Q1c-3 | nothink accuracy 90-93%, from 72.0% | **91.5-92.5%** on all seven arms | **correct** |
+| P7-Q1c-4 | accuracy reproduces run 1 within 3 points | six arms within 1.0; **unbounded off by 4.3** | **miss on one arm** |
+| P7-Q1c-5 | inline leak persists 8-12% at b128/b256 | **10.5% and 10.0%**, 6% at b512, 2% at b1024, 0% unbounded | **correct** |
+| P7-Q1c-6 | silence fit reproduces at 24.3 ms/token +/-10%, r^2 > 0.99 | **24.46 ms/token, +0.7%, r^2 0.9976** | **correct** |
+
+**The budget binds to the token, exactly.** Tokenising the reasoning text directly gives 128,
+256 and 512 on the nose. The +3 in the P7-Q1a table was my recovery's own offset, not the
+server's -- subtraction attributes the closing sequence to reasoning and direct tokenisation
+of the stripped text does not. The offset is constant at 3 on all 1,200 records, so run 1's
+rtok column is sound with 3 subtracted. This is what P7-Q1c-1 existed to establish, and it
+means the P7-Q1a table stands rather than being withdrawn.
+
+**P7-Q1c-5 was nearly scored backwards.** The first look said `think_path` showed zero
+`inline_tags` in run 2 against 22 and 20 in run 1, which reads as "the leak was my client all
+along". It is not: `think_path` records the FIRST branch taken, so once any reasoning arrives
+in the proper field the label stops reporting what else was in the content stream. Scanning
+the content directly finds a stray `</think>` in 21/200 at b128 and 20/200 at b256, against
+22 and 20 in run 1. The leak is the server's, it reproduces across runs, and it decays with
+budget -- 10.5%, 10.0%, 6%, 2%, 0%. A label that summarises is not evidence about what it
+does not summarise.
+
+**Pooled across both runs, n = 400 per arm:**
+
+| arm | budget | run 1 | run 2 | pooled acc | truncated | acc among untruncated | silence p50 |
+|---|---|---|---|---|---|---|---|
+| b0 | 0 | 93.5 | 93.0 | **93.2%** | 0.2% | 93.5% | **0.11-0.15 s** |
+| b128 | 128 | 92.0 | 91.0 | 91.5% | 3.2% | 94.6% | 3.1 s |
+| b256 | 256 | 91.0 | 91.0 | 91.0% | 1.2% | 92.2% | 5.9 s |
+| b512 | 512 | 94.5 | 93.5 | 94.0% | 1.2% | 95.2% | 11.7 s |
+| b1024 | 1024 | 94.5 | 94.5 | 94.5% | 0.8% | 95.2% | 17.6 s |
+| b2048 | 2048 | 95.0 | 94.5 | 94.8% | 1.0% | 95.7% | 19.2 s |
+| unbounded | none | 95.8 | 91.5 | **93.6%** | 2.8% | 96.3% | **17.9 s** |
+
+**The headline, at n = 400.** Budget 0 scores **93.2%** and returns first output in **0.11 s**.
+Unbounded scores **93.6%** and makes the user wait **17.9 s**. That is **0.4 points for a 160x
+cut in silence**, and 0.4 points is inside the noise floor the control puts at roughly +/-2
+points at n = 400. On gsm8k the hidden reasoning trace buys nothing measurable.
+
+**Unbounded is the unstable arm, and that is a second argument for budgets.** Its accuracy
+moved 95.8 -> 91.5 between identical runs while every budgeted arm moved at most 1.0 point.
+The cause is a runaway tail rather than the answers: untruncated accuracy is 96.8% and 95.8%,
+a single point apart, but truncation went 1.0% -> 4.5% when the ceiling was RAISED from 3000
+to 4096, because a higher ceiling lets a runaway response run further before being counted.
+p95 output went 2462 -> 3780. So a budget does not only cut latency, it caps variance: the
+failure mode it removes is the request that thinks until it is killed and returns nothing.
+
+**The dip at 128-256 is a mechanism artefact, not a property of reasoning length.** Pooled
+accuracy is non-monotone -- 93.2, 91.5, 91.0, 94.0, 94.5, 94.8 -- and the trough coincides
+exactly with the leak: b128 and b256 are the arms where the forced `</think>` breaks the
+parser 10% of the time, and b128 carries the highest truncation rate of any arm at 3.2%. Among
+untruncated responses the trough is much shallower (93.5, 94.6, 92.2, 95.2). Read the curve as
+flat-to-slightly-rising with a defect at small budgets, rather than as evidence that a little
+reasoning is worse than none.
+
+**P7-Q1c-2 is the honest miss.** Raising the nothink ceiling from 256 to 1024 cut control drift
+from 3.0% to 1.5% and took nothink accuracy from 72.0% to 92.0%, which confirms the diagnosis --
+that number was a truncation rate. But drift did not reach zero and never will: batch
+composition varies between runs and reorders fp8 accumulation. The residual 0.5-1.5% is the
+instrument's real noise floor, and it is the right band to read every accuracy claim above
+against.
+
+**Where Phase 7 goes.** Q1a is answered and Q1b is retired on this slice: there is no
+accuracy-versus-budget tradeoff on gsm8k to navigate adaptively. The open question the data
+now poses is which workload makes the curve bend -- gsm8k solutions need about 200 visible
+tokens and the model wants to spend 750 hidden ones on them, so the slice is simply too easy.
+The next measurement is the same ladder on a workload with real reasoning depth, and the
+cheapest honest candidate is the math slice already wired into qualeval.
