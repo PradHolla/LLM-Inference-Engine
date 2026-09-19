@@ -6076,3 +6076,51 @@ workload. Adaptive exists to handle load that VARIES, and this run applies a con
 load -- so it tests the policy's behaviour in sustained overload and says nothing about a bursty
 arrival pattern where the queue genuinely empties between bursts. That is the experiment that
 could still rescue the idea, and it is not this one.
+
+### P7-Q2 ACTUALS, 2026-09-19: the run is confounded, and Q3 is cancelled on the same finding
+
+Qwen3-8B fp8/fp8, math 60 items/arm, card sampling, budget 2048, gateway with
+`GW_ALWAYS_SEARCH=1`.
+
+| arm | acc | TTFT p50 | silence p50 | e2e p50 |
+|---|---|---|---|---|
+| retrieve_then_generate | 100.0% | **0.40 s** | 31.71 s | 38.11 s |
+| generate_then_retrieve | 98.3% | **38.26 s** | 38.26 s | 38.33 s |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q2-1 | retrieve-first TTFT exceeds generate-first by 1.0-1.8 s | **retrieve-first is 95x FASTER** | **miss, inverted** |
+| P7-Q2-2 | generate-first E2E higher by 0.5-3 s | **0.22 s**, indistinguishable | **miss** |
+| P7-Q2-3 | accuracy within 3 pts | 1.7 pts | correct, but see below |
+
+**The run does not measure what it claims and the numbers should not be quoted as an ordering
+result.** `n_sources` is **0 on 50 of 60 requests**, `fetch_ms` and `extract_ms` are 0.0, and
+`injected_tokens_est` is 0. Brave returns nothing for "Joe throws 25 punches per minute...",
+because a math word problem is not a web query. So there is no retrieved content to order, no
+fetch stage, and no extract stage -- the entire "round trip" is a bare 180 ms API call that
+returns an empty result. M1's 1,406 ms, which both Q2 and Q3 predictions were anchored to,
+measured search PLUS fetch PLUS extract on queries that actually returned pages.
+
+The P7-RUNS scope note said the math-plus-search pairing was deliberately incongruous and that
+what was lost was any claim about retrieval QUALITY. That was the wrong thing to worry about.
+What was actually lost is the round trip itself: no results means no fetch and no extract, so
+there is nothing for an ordering to reorder or an overlap to hide.
+
+**The 95x TTFT difference is a relay artefact, not an ordering effect.** `retrieve_then_generate`
+goes through the normal relay, which streams token by token, so TTFT is the first reasoning
+token at 0.40 s. `generate_then_retrieve` goes through `_relay_overlap`, which BUFFERS the
+pre-splice generation and yields it only after `_stream_completion` returns -- so its TTFT is
+the full generation time by construction. The two arms differ in streaming implementation as
+well as in ordering, and this run cannot separate them.
+
+**Q3 is cancelled rather than run.** With `block` empty the splice never fires at all -- the
+relay's `if block:` is false -- so the run would exercise no splice, hide no round trip, and
+measure 180 ms of nothing against 38 s of generation. Spending 20 minutes of GPU to confirm
+that is not worth it. P7-Q3-3, the prefix-cache cost of the splice, is ALREADY measured: P7V
+stranded exactly 1 token of 209, matching `209 mod 16`.
+
+**What Q2 and Q3 actually need, recorded as the blocker.** A slice of queries that a web search
+returns pages for. This project has never had one -- math, gsm8k and longctx are all
+self-contained by design. Until that exists, both questions are unanswerable, and no amount of
+re-running changes that. This is a workload gap, not a code gap, and it is the honest reason
+both stay open.
