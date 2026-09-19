@@ -5859,3 +5859,73 @@ the 512-1024 trough on its way down under rising load.
 the server in a known state for everything after. Then q1b (needs only vLLM plus the gateway),
 then q2 and q3 (need the Brave key), then q4 (needs `vllm bench serve` holding load, which
 disturbs everything else and so goes last).
+
+### P7 LITERATURE AND MODEL-CARD PASS, 2026-09-19: two findings, one of which indicts our sampling
+
+Done after the Q1m/Q1n write-up and before the remaining runs, because the plan had been
+built entirely from reading our OWN source tree and our own data, with no external lookup at
+all. Section 1b covers exactly this and it was not applied. Two perspectives, general and
+model-specific.
+
+**1. General: the U-shape is a REPRODUCTION, not a discovery.** The P7-Q1m write-up says
+"nothing in the Q1 design anticipated a region where spending more tokens buys less accuracy".
+True of our design; not true of the field. "Broken Chains: The Cost of Incomplete Reasoning in
+LLMs" (arXiv 2602.14444) reports the same paradox far more starkly than we measured it --
+DeepSeek-V3.2 scores **53% with no reasoning and 17% with truncated CoT at a 50% budget**, and
+47% against 7% at 30%. Their proposed mechanism is ours almost word for word: truncated chains
+leave the model in an inconsistent intermediate state, "variables declared but not resolved",
+and it then hallucinates a completion that contradicts its own partial work. The s1 line of
+work on budget forcing already describes abrupt stopping as the weak heuristic, and Budget
+Guidance (arXiv 2506.13752), BudgetThinker (2508.17196) and Mid-Think (2601.07036) all exist
+to replace it with something smoother.
+
+What survives as ours: **the positional analysis**. Broken Chains ablates fixed percentages of
+the budget and, in its own words, does not analyse which reasoning positions matter. We measured
+whether the cut lands before or after the model reaches its answer -- 11 / 30 / 68 / 100% by
+arm -- and showed accuracy splits 53.2% and 51.1% against 91-92% on that single variable. That
+is the part worth keeping, along with the serving-side half nobody in this list measures: what
+the truncation costs in SILENCE and goodput on real hardware.
+
+Also directly on Q1b, and found only because of this pass: "Queueing-Aware Optimization of
+Reasoning Tokens for Accuracy-Latency Trade-offs in LLM Servers" (arXiv 2601.10274) is Q1b's
+exact problem statement, and LASER (2606.31580) is the load-factor rule the design doc already
+borrowed. Q1b should be positioned against them rather than presented as new.
+
+**2. Model-specific: we have been running Qwen3-8B in a configuration its model card
+explicitly forbids.** The Qwen3-8B card says, verbatim and twice:
+
+> "DO NOT use greedy decoding, as it can lead to performance degradation and endless repetitions."
+
+Recommended thinking-mode sampling is **temperature 0.6, top_p 0.95, top_k 20, min_p 0**.
+`tools/qualeval.py:149` and `tools/bench.py:130` both send **temperature 0.0**. Every number in
+Phases 4, 5, 6 and 7 was produced under greedy decoding.
+
+This is not merely a spec deviation, it has a symptom we already measured and misattributed.
+The runaway tail -- gsm8k unbounded swinging 95.8% to 91.5% between identical runs, driven by
+truncation going 1.0% to 4.5%, and math unbounded reaching p95 2,661-2,813 with a tail into the
+4,096 ceiling -- is precisely "endless repetitions". We recorded it as "a heavy tail" and
+treated it as a property of unbounded reasoning. It may instead be a property of running the
+model wrong.
+
+**What is and is not at risk.** The U-shape and the positional mechanism are comparisons
+BETWEEN arms that all share one sampling config, so a config error common to every arm does not
+manufacture a trough -- and the effect reproduced across two runs at 11+ points against a 3-point
+noise floor. What IS at risk: every ABSOLUTE accuracy figure, and specifically the claim that
+unbounded reasoning is intrinsically unstable, which is now confounded with a known greedy-decoding
+failure mode.
+
+**Decision: measure it rather than assume either way.** Temperature is a one-line change with
+four phases of comparability behind it, so it does not get switched silently. A sampling arm is
+added to the remaining runs.
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-S-1** | at Qwen's recommended sampling the unbounded arm's truncation rate falls **below 1%**, from 4.5% | if the runaway tail is greedy repetition, the card's warning names the fix |
+| **P7-S-2** | unbounded accuracy at recommended sampling is **>= greedy**, by 0-5 points | it recovers the records that previously ran away and scored zero |
+| **P7-S-3** | the trough **survives**: b1024 stays at least 8 points below b128 | the mechanism is a truncated intermediate state, which sampling does not repair |
+| **P7-S-4** | budgeted arms move **less than 3 points** | they never had room to run away, so they had nothing to lose to repetition |
+
+**What would falsify what.** P7-S-3 is the one that matters. If the trough vanishes under
+correct sampling, the entire P7-Q1m and P7-Q1n finding was an artefact of greedy decoding and
+must be withdrawn, not amended. If it survives, the shape stands and only the absolute levels
+and the unbounded-instability claim need restating.
