@@ -6170,3 +6170,28 @@ pairs fired with no backlog, where priority cannot act by construction, and thei
 dominated the median into "FAIL" while the one valid pair showed 5.7x. A verdict must be
 computed over the pairs that could discriminate, or not computed at all. Same family as
 incident 2, where a summary was taken over a sample biased by which requests were included.
+
+### P7-LMEVAL, 2026-09-19: lm-eval's QA tasks are unusable with a reasoning model as shipped
+
+Blocked, recorded before the session ran out of budget. `lm-eval` was NOT installed on the box
+(my claim that BBH/retrieval QA were "zero build" was wrong); installed into `.venv-eval`.
+Tasks `triviaqa`, `nq_open`, `bbh`, `ifeval` all present.
+
+Two defects found by a 10-item sanity check, which is the only reason they were found:
+
+1. `--apply_chat_template` is MANDATORY for `local-chat-completions`; without it the run
+   asserts immediately. Cheap failure, fixed.
+2. **Every response came back an empty string and the task scored exact_match 0.** `nq_open`'s
+   yaml sets `until: ["\n", ".", ","]`. A Qwen3 thinking model's first emission is `<think>\n`,
+   so generation stops before a single answer token. The task also pins `temperature: 0.0`,
+   which the Qwen3-8B card explicitly forbids.
+
+Overriding both via `--gen_kwargs until=["<|endoftext|>"] temperature=0.6 ...` did NOT fix it
+-- still 0 and still fast. Unresolved; the override is either not reaching the request or not
+overriding the task yaml. Next step is to inspect the outgoing request rather than guess again.
+
+**The finding that matters regardless.** Had the full ladder been run without this check, it
+would have produced six clean arms of 0% across every budget and read as "retrieval QA is
+insensitive to thinking budget" -- a plausible, publishable, entirely false result. Same family
+as the Phase 6 truncation artefact. A 10-item eyeball before any sweep is now the rule for any
+new task, not a nicety.
