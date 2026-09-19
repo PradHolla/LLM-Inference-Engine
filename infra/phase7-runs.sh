@@ -151,7 +151,31 @@ q4)
     echo "  rc=$?"
     ;;
 
-*) echo "usage: $0 q4b|q1b|q2|q3|q4"; exit 2 ;;
+# ---- Sampling: is the runaway tail greedy repetition, as the model card warns? ------
+samp)
+    echo "[$(ts)] SAMP greedy against Qwen3's recommended sampling"
+    require_vllm
+    # Only the arms that can discriminate: one inside the trough, one either side of it.
+    for b in 128 1024 none; do
+        if [ "$b" = none ]; then label=unbounded; ARG=""; else label="b$b"; ARG="--thinking-budget $b"; fi
+        for mode in greedy qwen; do
+            if [ "$mode" = greedy ]; then
+                SAMP=(--temperature 0.0)
+            else
+                SAMP=(--temperature 0.6 --top-p 0.95 --top-k 20 --min-p 0)
+            fi
+            echo "  [$(ts)] arm $label/$mode"
+            "$UV" run tools/qualeval.py run --url http://localhost:8000 \
+                --config "p7samp-$label-$mode" --slices math --concurrency 32 \
+                --max-tokens-think 6144 --max-tokens-nothink 2048 \
+                --limit-pass math:think:180,math:nothink:0 \
+                "${SAMP[@]}" $ARG --out "results/p7samp-$label-$mode.jsonl"
+            echo "    rc=$?"
+        done
+    done
+    ;;
+
+*) echo "usage: $0 q4b|q1b|q2|q3|q4|samp"; exit 2 ;;
 esac
 
 echo "[$(ts)] ${1} DONE"

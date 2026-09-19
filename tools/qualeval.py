@@ -22,6 +22,9 @@ MODEL = "Qwen/Qwen3-8B"
 # Phase 7 Q1a. None means unbounded. Set once from argv rather than threaded through
 # four call sites, because this is a validated instrument and the diff should be small.
 THINKING_BUDGET: int | None = None
+# Qwen3-8B's card forbids greedy decoding for thinking mode. Kept at 0.0 by DEFAULT because
+# four phases of paired results were measured that way; overridden per run, never silently.
+SAMPLING: dict = {"temperature": 0.0}
 
 # (slice, thinking, default max_tokens). max_tokens for the thinking passes is a PLACEHOLDER
 # until calibration measures the p99 of the thinking-token distribution -- see design 3d.
@@ -146,7 +149,7 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
         "model": MODEL,
         "messages": [{"role": "user", "content": item["prompt"]}],
         "max_tokens": max_tokens,
-        "temperature": 0.0,
+        **SAMPLING,
         "seed": seed,
         "stream": True,
         # Exact server-side token counts. Delta counting is kept as a cross-check; when the
@@ -348,8 +351,13 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
 
 
 async def cmd_run(args):
-    global THINKING_BUDGET
+    global THINKING_BUDGET, SAMPLING
     THINKING_BUDGET = args.thinking_budget
+    SAMPLING = {"temperature": args.temperature}
+    for k, v in (("top_p", args.top_p), ("top_k", args.top_k), ("min_p", args.min_p)):
+        if v is not None:
+            SAMPLING[k] = v
+    print(f"  sampling {SAMPLING}", flush=True)
     items = [json.loads(l) for l in open(args.items) if l.strip()]
     want = set(args.slices.split(","))
     passes = [p for p in PASSES if p[0] in want]
@@ -641,6 +649,10 @@ def main():
                         "thinking passes dominate cost (math/think is 60 percent of a run) "
                         "and sit at a 100 percent ceiling, where each item is maximally "
                         "informative, so halving them loses little")
+    r.add_argument("--temperature", type=float, default=0.0)
+    r.add_argument("--top-p", type=float, default=None)
+    r.add_argument("--top-k", type=int, default=None)
+    r.add_argument("--min-p", type=float, default=None)
     r.add_argument("--rate", type=float, default=0.0,
                    help="open-loop Poisson arrival rate in req/s. 0 keeps the closed-loop "
                         "--concurrency behaviour every earlier phase used")

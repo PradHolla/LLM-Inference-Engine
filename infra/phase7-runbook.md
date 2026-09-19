@@ -33,10 +33,11 @@ Each goes in its own systemd unit. Never a foreground ssh session.
     /bin/bash /opt/llm/infra/phase7-runs.sh q4b'
 ```
 
-Then the same with `q1b`, `q2`, `q3`, `q4`, changing `--unit=` to match.
+Then the same with `samp` first, then `q4b`, `q1b`, `q2`, `q3`, `q4`, changing `--unit=` to match.
 
 | order | run | needs | rough cost |
 |---|---|---|---|
+| 0 | `samp` | vLLM only. **Run FIRST.** Qwen3-8B's card forbids greedy decoding and we have used it for four phases; if the trough does not survive correct sampling, the Q1m/Q1n finding is withdrawn and the rest of the plan changes | ~35 min |
 | 1 | `q4b` | vLLM only; relaunches it twice itself | ~50 min |
 | 2 | `q1b` | vLLM + gateway | ~45 min |
 | 3 | `q2` | + `/opt/llm/.brave-key` | ~20 min |
