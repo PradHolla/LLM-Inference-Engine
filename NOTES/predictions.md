@@ -5974,3 +5974,54 @@ deliberately breaks numeric comparability with Phases 4 through 6, all of which 
 alternative was to keep repeating a configuration the vendor forbids in order to protect
 comparisons with earlier measurements that were themselves made wrongly, which is the worse
 trade. Q4 (priority) stays as-is: it measures queue ordering and never reads an answer.
+
+### P7-Q4B ACTUALS, 2026-09-19: Qwen's own stop instruction is the wrong actuator for a latency budget
+
+Qwen3-8B fp8/fp8, math 180 items/arm, concurrency 32, card sampling (temp 0.6 / top_p 0.95 /
+top_k 20 / min_p 0), max_tokens_think 6144. Two servers differing ONLY in `reasoning_end_str`.
+A = `</think>`. B = "Considering the limited time by the user, I have to give the solution based
+on the thinking directly now.\n</think>.\n\n", the phrase from the Qwen3 tech report.
+
+| budget | A acc | B acc | A leak | B leak | A visible p50 | B visible p50 |
+|---|---|---|---|---|---|---|
+| 128 | **93.3** | **50.6** | 48.9% | 0.0% | 1,983 ch | 338 ch |
+| 512 | 89.4 | 58.9 | 47.2% | 0.6% | -- | -- |
+| 2048 | 98.9 | 99.4 | 2.8% | 12.8% | -- | -- |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q4B-1 | within 2 pts at b2048 | **0.5 pts** | **correct** |
+| P7-Q4B-2 | at b128 B >= A by 0-5 pts | **B is 42.7 pts LOWER** | **miss, and inverted** |
+| P7-Q4B-3 | leak rate differs between arms | **48.9% against 0.0%** | **correct** |
+
+**Why P7-Q4B-2 inverted, established from the records rather than argued.** At b128 arm A emits
+a median of 1,983 visible characters and only 2 of 180 answers are under 200; arm B emits 338
+and 78 of 180 are under 200. The bare tag ends the thought and says nothing else, so the model
+re-derives the solution in the open -- the recovery behaviour P7-Q1m identified as what makes
+small budgets safe. Qwen's phrase is an INSTRUCTION, and the model obeys it: "give the solution
+based on the thinking directly now" is a command to answer from whatever partial state exists.
+One record, cut mid-sentence:
+
+    ...Day 1: 78 - 39 = 39.\n\nDay 2[Considering the limited time by the user, I have to
+    give the solution based on the thinking directly now.\n</think>]  ->  ".\n\nANSWER: 18"
+
+It stopped mid-"Day 2", was told to answer immediately, and did. Wrong, from three lines of
+arithmetic it had not finished.
+
+**The general statement.** The vendor's trained interrupt is designed for "you are out of time,
+wrap up", which is correct when the thought is nearly complete and destructive when it has
+barely started. It converts a small budget from the safe zone into trough behaviour by
+forbidding the recovery. It should be used, if at all, only where the budget lands past the
+model's natural solution length -- which is exactly where it makes no difference: 98.9 against
+99.4 at b2048.
+
+**The leak is the bare tag's fault and it is cosmetic.** 48.9% of arm A's b128 records carry a
+stray `</think>` in the visible stream against 0.0% of arm B's, because the parser is configured
+to recognise B's long string and so consumes it cleanly. Arm A nonetheless scores 42.7 points
+HIGHER. The leak is a display defect; the instruction is a reasoning defect. P7-Q1m-6's
+unresolved leak cause is now resolved: it is the parser failing to consume a `reasoning_end_str`
+it injected itself.
+
+**Decision.** Keep `reasoning_end_str` = `</think>`. The stray tag should be stripped in the
+gateway rather than fixed by changing the stop string, because changing the stop string costs
+42 points.
