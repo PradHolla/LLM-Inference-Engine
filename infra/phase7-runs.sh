@@ -157,8 +157,9 @@ q3)
 q4)
     echo "[$(ts)] Q4 priority"
     require_vllm
-    ./infra/p7-priority.sh
-    echo "  rc=$?"
+    ./infra/p7-priority.sh; rc=$?
+    echo "  rc=$rc"
+    [ "$rc" = 0 ] || die "p7-priority.sh failed rc=$rc (verdict UNTESTED means no queue formed)"
     ;;
 
 # ---- Sampling: is the runaway tail greedy repetition, as the model card warns? ------

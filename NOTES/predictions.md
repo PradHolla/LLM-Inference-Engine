@@ -6124,3 +6124,49 @@ returns pages for. This project has never had one -- math, gsm8k and longctx are
 self-contained by design. Until that exists, both questions are unanswerable, and no amount of
 re-running changes that. This is a workload gap, not a code gap, and it is the honest reason
 both stay open.
+
+### P7-Q4 ACTUALS, 2026-09-19: priority works, but only with the right scheduler AND a real backlog
+
+Three runs, kept as a set because each is a control for the others. Qwen3-8B fp8/fp8,
+`--max-num-seqs 16`, load from `vllm bench serve --dataset-name random`, matched high/low
+priority pairs fired into it by `tools/p7prio.py`.
+
+| run | scheduler | load | peak queue | high med | low med | reading |
+|---|---|---|---|---|---|---|
+| p7-priority-fcfs | **fcfs** (default) | 400 @ 30 | 27 | 33.63 s | 33.65 s | priority accepted and IGNORED |
+| p7-priority-shortload | priority | 400 @ 30 | 27 | -- | -- | pair 0: **31.06 s vs 178.04 s** |
+| p7-priority | priority | 2000 @ 20 | 10 | 1.27 s | 1.27 s | no effect; queue drains in ~1 s |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q4-1 | high-priority TTFT below low by >= 2x | **5.7x**, on ONE pair | **supported, n = 1** |
+| P7-Q4-2 | the effect vanishes when the queue is empty | confirmed three ways | **correct** |
+
+**The first FAIL was a configuration error and was nearly recorded as a vLLM limitation.**
+`vllm/config/scheduler.py:99` sets `policy: SchedulerPolicy = "fcfs"` by default, so the
+`priority` field is accepted and silently ignored. `--scheduling-policy priority` is required.
+That run is retained as `p7-priority-fcfs.jsonl` because "priority is inert under FCFS" is a
+genuine negative control, and it is the strongest evidence the actuator is real: same load,
+same peak queue of 27, and the only difference between 33.63/33.65 and 31.06/178.04 is the
+scheduler flag.
+
+**The effect needs a backlog that is deep AND slow to drain.** With peak queue 27 and requests
+waiting minutes, priority moved a request from 178 s to 31 s. With peak queue 10 draining in
+about a second, it moved nothing measurable -- there is no meaningful reordering available in a
+queue that empties before the next scheduling decision matters.
+
+**The honest weakness: the 5.7x rests on a single pair.** Deep queues and many samples are in
+direct tension here, because each pair in a deep queue takes minutes to complete, so a load
+window long enough for six deep pairs needs roughly 15 minutes of sustained overload. Three
+attempts to tune `--num-prompts` and `--request-rate` produced, in order: load too short (5 of
+6 pairs fired into an idle server), load too large to start (20,000 prompts never finished
+dataset preparation inside the window, peak queue 0), and load too shallow (this run). Stopped
+at three rather than continue guessing; the parameter needs deriving from measured bench
+start-up time and per-pair service time, not another guess.
+
+**The instrument's verdict field is unsafe and should not be quoted.** It takes a MEDIAN across
+pairs regardless of whether each pair experienced a queue. In the shortload run five of six
+pairs fired with no backlog, where priority cannot act by construction, and their ~1.2 s
+dominated the median into "FAIL" while the one valid pair showed 5.7x. A verdict must be
+computed over the pairs that could discriminate, or not computed at all. Same family as
+incident 2, where a summary was taken over a sample biased by which requests were included.
