@@ -266,8 +266,9 @@ async def _relay_overlap(base: dict, tr: GatewayTrace, messages: list[dict],
         prompt_sent = RENDER(messages, enable_thinking=enable_thinking)
         # Q3 overlaps: stop generating when the search lands. Q2 defers: generate first,
         # search after, which is the same splice on a different clock.
-        usage = await _stream_completion(_completion_body(base, prompt_sent), collect,
-                                         stop_when=search_task.done if search_task else None)
+        usage = usage_pre = await _stream_completion(
+            _completion_body(base, prompt_sent), collect,
+            stop_when=search_task.done if search_task else None)
         pre = "".join(generated)
         tr.overlap_hidden_ms = (time.perf_counter() - t0) * 1e3
         tr.overlap_pre_tokens = len(pre) // int(CHARS_PER_TOKEN) if pre else 0
@@ -289,6 +290,16 @@ async def _relay_overlap(base: dict, tr: GatewayTrace, messages: list[dict],
             tr.reissue_prompt_tokens = usage.get("prompt_tokens")
             det = usage.get("prompt_tokens_details") or {}
             tr.reissue_cached_tokens = det.get("cached_tokens")
+        # Both phases generate, so the client's completion count is their SUM. Without this
+        # the relay emits no usage at all and every token metric downstream reads nan.
+        pre_ct = (usage_pre or {}).get("completion_tokens") or 0
+        post_ct = 0 if usage is usage_pre else ((usage or {}).get("completion_tokens") or 0)
+        total = pre_ct + post_ct
+        yield _sse({"id": cid, "object": "chat.completion.chunk", "model": model,
+                    "choices": [], "usage": {
+                        "completion_tokens": total,
+                        "prompt_tokens": (usage or {}).get("prompt_tokens"),
+                        "total_tokens": total + ((usage or {}).get("prompt_tokens") or 0)}})
         tr.http_status, tr.status = 200, "ok"
     except Exception as e:
         tr.status, tr.error = "exception", f"{type(e).__name__}: {e}"
