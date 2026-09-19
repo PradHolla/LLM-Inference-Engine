@@ -271,7 +271,11 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
         return []
     print(f"  {label:<18} {len(sel):>4} items  max_tokens={max_tokens}", flush=True)
 
-    sem = asyncio.Semaphore(args.concurrency)
+    # Open-loop when --rate is set: arrivals do not wait for completions, so a queue can
+    # actually form. Closed-loop concurrency cannot build one and its p95 is fiction.
+    rate = getattr(args, "rate", 0.0) or 0.0
+    inflight = args.concurrency if rate <= 0 else max(args.concurrency, len(sel))
+    sem = asyncio.Semaphore(inflight)
     lock = asyncio.Lock()
     done = [0]
     samples: list[float] = []
@@ -280,8 +284,8 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
 
     # max_keepalive MUST equal max_connections, or the pool evicts connections under fast
     # turnover and the next request dies with ReadError (measured 36% vs 1%; see NOTES/code-notes.md).
-    limits = httpx.Limits(max_connections=args.concurrency + 8,
-                          max_keepalive_connections=args.concurrency + 8)
+    limits = httpx.Limits(max_connections=inflight + 8,
+                          max_keepalive_connections=inflight + 8)
     async with httpx.AsyncClient(limits=limits, timeout=args.timeout) as client:
         async def work(item):
             async with sem:
@@ -294,7 +298,20 @@ async def run_pass(args, items, slice_, think, max_tokens, fh):
                     if done[0] % 25 == 0:
                         print(f"    {done[0]}/{len(sel)}", flush=True)
                 return rec
-        recs = await asyncio.gather(*(work(i) for i in sel))
+        if rate > 0:
+            async def arrive(item, delay):
+                await asyncio.sleep(delay)
+                return await work(item)
+            gap = random.Random(args.seed ^ 0x5EED)
+            sched, t = [], 0.0
+            for i in sel:
+                sched.append(arrive(i, t))
+                t += gap.expovariate(rate)      # Poisson arrivals, not a fixed cadence
+            print(f"    open-loop: {rate} req/s, last arrival scheduled at {t:.1f}s",
+                  flush=True)
+            recs = await asyncio.gather(*sched)
+        else:
+            recs = await asyncio.gather(*(work(i) for i in sel))
 
     stop.set()
     await probe
@@ -624,6 +641,9 @@ def main():
                         "thinking passes dominate cost (math/think is 60 percent of a run) "
                         "and sit at a 100 percent ceiling, where each item is maximally "
                         "informative, so halving them loses little")
+    r.add_argument("--rate", type=float, default=0.0,
+                   help="open-loop Poisson arrival rate in req/s. 0 keeps the closed-loop "
+                        "--concurrency behaviour every earlier phase used")
     r.add_argument("--max-tokens-nothink", type=int, default=0)
     r.add_argument("--out", default="")
 

@@ -5785,3 +5785,77 @@ line of reasoning and finishing it". A controller that ramps a budget upward fro
 large traverses the trough on the way, which is the worst possible schedule. Either stay under
 ~256, where the model re-derives visibly and loses 5 points, or clear the natural length,
 where the budget costs nothing at all.
+
+## P7-RUNS  predictions for Q1b, Q4B, Q2, Q3 and Q4, written 2026-09-19 before the box comes up
+
+Written now, at the effort level section 8b rates for design, so that execution needs no
+design decisions and no predictions invented after seeing data. One driver:
+`./infra/phase7-runs.sh q4b|q1b|q2|q3|q4`.
+
+**Scope cuts, announced as cuts.** (1) Q4B runs THREE budget arms (128, 512, 2048) not seven:
+the stop string is only reachable when the budget forces the close, so the unbound arms cannot
+discriminate and cost the most. (2) Q2 and Q3 run 60 items, not 180 -- they are latency
+comparisons whose effect size is ~1.4 s against ITLs of tens of ms, so they do not need
+accuracy-grade n. (3) Q2 and Q3 run the MATH slice with web search attached, which is
+deliberately incongruous: no math item needs the web, and the search is there purely as a
+round-trip to hide or fail to hide. Accuracy in those two runs is a GUARD (the splice must not
+break the model), never a relevance measurement. What is lost is any claim about retrieval
+quality, which this project has never had a slice for.
+
+**A defect this planning already caught.** `apply_thinking_budget` set only `enable_thinking`
+and never forwarded `thinking_token_budget`, so every gateway-side budget above 0 was a silent
+no-op. Q1b would have returned three indistinguishable arms and read as "the policy does
+nothing". Fixed, with a selftest assertion that the field reaches the outgoing body.
+
+### Q1b  fixed against load-adaptive, matched arrival rate
+
+The policy is a two-position switch with hysteresis, not the continuous ramp the design doc
+originally specified. The ramp is now known to be the worst possible schedule: it traverses
+the 512-1024 trough on its way down under rising load.
+
+    budget = 2048 while queue <= 8, 128 once queue > 8, back to 2048 only below 2
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-Q1b-0** | the queue actually exceeds 8 during the adaptive arm | if it never does, adaptive IS the big arm and the run is void. Checked FIRST; every other row is meaningless without it |
+| P7-Q1b-1 | adaptive accuracy lands **between** 94.4% and 99.4%, and within 2 points of whichever arm it spends most of its time as | it is literally one of the two, per request |
+| P7-Q1b-2 | adaptive p95 silence beats the big arm by **>= 2x** | big holds ~2048 reasoning tokens at ~24 ms; small holds 128 |
+| P7-Q1b-3 | adaptive goodput **>= big**, and accuracy loss **<= 3 points** | the design doc's win condition, unchanged |
+| P7-Q1b-4 | no trace records a budget in **400-1200** | guaranteed by construction and asserted in the selftest; this confirms it in production, where a config error could still set one |
+
+### Q4B  Qwen's trained stop phrase against the bare tag
+
+| # | prediction | derivation |
+|---|---|---|
+| P7-Q4B-1 | at b2048 the two arms are within **2 points** | the budget binds on only ~24% of records there, so the stop string is mostly unreachable |
+| P7-Q4B-2 | at b128 arm B (trained phrase) is **>= arm A**, by 0-5 points | Qwen was trained on that exact sentence as the interrupt; the bare tag is out of distribution. A cheap way to be wrong is for it to make no difference at all, which is the honest null |
+| P7-Q4B-3 | the stray-`</think>` leak rate **differs between arms** | the leak tracks a forced close, and the arms force it with different strings |
+
+### Q2  search-then-think against think-then-search
+
+| # | prediction | derivation |
+|---|---|---|
+| P7-Q2-1 | retrieve_then_generate TTFT exceeds generate_then_retrieve by **1.0-1.8 s** | M1 measured search+fetch+extract at 1,406 ms, and that blocks the first token in one order and not the other |
+| P7-Q2-2 | generate_then_retrieve E2E is **higher**, by 0.5-3 s | it pays for two generation phases and a second prefill |
+| P7-Q2-3 | accuracy within **3 points** | guard only; no math item needs the web |
+
+### Q3  overlapping the thinking with the search round-trip
+
+| # | prediction | derivation |
+|---|---|---|
+| P7-Q3-1 | overlap TTFT is within **200 ms** of generate_then_retrieve, both far below retrieve_then_generate | both start generating before the search returns |
+| P7-Q3-2 | overlap E2E beats retrieve_then_generate by **1.0-1.8 s** | it hides exactly one search round-trip, which M1 measured |
+| P7-Q3-3 | the splice strands at most **15 tokens** of prefix cache | only full blocks cache at block_size 16, and P7V measured exactly 1 stranded of 209 |
+| P7-Q3-4 | accuracy within **3 points** of retrieve_then_generate | guard: the splice must not break the model. P7V already showed it answers correctly through a splice |
+
+### Q4  does priority actually reorder the queue
+
+| # | prediction | derivation |
+|---|---|---|
+| P7-Q4-1 | high-priority TTFT is **below** low-priority under load, by at least 2x | vLLM exposes `priority` and the probe fires matched pairs into a queue `vllm bench serve` is holding open |
+| P7-Q4-2 | the effect **vanishes when the queue is empty** | priority reorders a queue; with nothing waiting there is nothing to reorder. If it shows an effect at idle, the measurement is picking up something else |
+
+**Order to run them in, and why.** q4b first: it relaunches vLLM twice, so doing it first leaves
+the server in a known state for everything after. Then q1b (needs only vLLM plus the gateway),
+then q2 and q3 (need the Brave key), then q4 (needs `vllm bench serve` holding load, which
+disturbs everything else and so goes last).

@@ -7,6 +7,7 @@ Reuses labbench/proxy.py's trace and streaming machinery; see code-notes.md.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -28,12 +29,23 @@ from gateway.search import CHARS_PER_TOKEN, render_block, run_search
 UPSTREAM = os.environ.get("GW_UPSTREAM", "http://localhost:8000")
 TIMEOUT = float(os.environ.get("GW_TIMEOUT", "600"))
 BUDGET_TOKENS = int(os.environ.get("GW_BUDGET_TOKENS", "12000"))
+# Q1b. Two SAFE budgets and a hysteresis band, never a value between them: P7-Q1m/n measured
+# 512-1024 as a trough 11 points below both neighbours. See NOTES/predictions.md.
+ADAPT_BIG = int(os.environ.get("GW_BUDGET_BIG", "2048"))
+ADAPT_SMALL = int(os.environ.get("GW_BUDGET_SMALL", "128"))
+Q_HIGH = float(os.environ.get("GW_Q_HIGH", "8"))
+Q_LOW = float(os.environ.get("GW_Q_LOW", "2"))
+ADAPT_STATE = {"small": False}
+# The policy is a property of the SERVING layer, not the client, so Q1b's three arms are
+# three gateway configurations driving one unchanged client.
+BUDGET_POLICY = os.environ.get("GW_BUDGET_POLICY", "off")
+BUDGET_DEFAULT = os.environ.get("GW_BUDGET_DEFAULT", "")
 DEFAULT_CONTEXT_STRATEGY = os.environ.get("GW_CONTEXT", "none")
 # Orchestration order is a Phase 7 parameter. "overlap" generates while the search is in
 # flight and splices results in mid-stream; generate_then_retrieve is still a stub.
 ORDER_DEFAULT = os.environ.get("GW_ORDER", "retrieve_then_generate")
 ORDERS = ("retrieve_then_generate", "generate_then_retrieve", "overlap")
-BUILDABLE_ORDERS = ("retrieve_then_generate", "overlap")
+BUILDABLE_ORDERS = ("retrieve_then_generate", "overlap", "generate_then_retrieve")
 METRICS_URL_ENV = os.environ.get("GW_METRICS", "http://localhost:8000")
 ALWAYS_SEARCH = os.environ.get("GW_ALWAYS_SEARCH") == "1"
 
@@ -71,6 +83,7 @@ class GatewayTrace(Trace):
     order: str = ORDER_DEFAULT
     order_honoured: bool = True
     thinking_budget: int | None = None
+    budget_policy: str | None = None
     overlap_hidden_ms: float | None = None
     overlap_pre_tokens: int = 0
     splice_chars: int = 0
@@ -111,6 +124,19 @@ def _last_user_text(messages: list[dict]) -> str:
     return ""
 
 
+def adaptive_budget(waiting: float | None) -> int:
+    """Pick one of two safe budgets from queue depth. Hysteresis stops a queue oscillating
+    around one threshold from flapping the budget across the trough every request."""
+    if waiting is None:
+        return ADAPT_BIG
+    if ADAPT_STATE["small"]:
+        if waiting < Q_LOW:
+            ADAPT_STATE["small"] = False
+    elif waiting > Q_HIGH:
+        ADAPT_STATE["small"] = True
+    return ADAPT_SMALL if ADAPT_STATE["small"] else ADAPT_BIG
+
+
 def apply_thinking_budget(body: dict, budget: int | None) -> dict:
     """The single point where a thinking budget lands on the outgoing request.
     Phase 7 decides the number; 6a only applies whatever it is given."""
@@ -119,6 +145,9 @@ def apply_thinking_budget(body: dict, budget: int | None) -> dict:
     kw = dict(body.get("chat_template_kwargs") or {})
     kw["enable_thinking"] = budget > 0
     body["chat_template_kwargs"] = kw
+    # 6a set only enable_thinking, which is an on/off switch. The actual actuator is this
+    # field, and without it every budget above 0 was a silent no-op. See code-notes.
+    body["thinking_token_budget"] = budget
     return body
 
 
@@ -221,7 +250,7 @@ async def _stream_completion(body: dict, on_text, stop_when=None) -> dict | None
 
 
 async def _relay_overlap(base: dict, tr: GatewayTrace, messages: list[dict],
-                         search_task, enable_thinking: bool = True):
+                         search_task, enable_thinking: bool = True, defer_search=None):
     """Generate against the un-retrieved prompt while the search runs, then splice.
     A separate path from _relay, whose byte-fidelity the protocol gate validated."""
     t0 = time.perf_counter()
@@ -235,15 +264,19 @@ async def _relay_overlap(base: dict, tr: GatewayTrace, messages: list[dict],
 
     try:
         prompt_sent = RENDER(messages, enable_thinking=enable_thinking)
+        # Q3 overlaps: stop generating when the search lands. Q2 defers: generate first,
+        # search after, which is the same splice on a different clock.
         usage = await _stream_completion(_completion_body(base, prompt_sent), collect,
-                                         stop_when=search_task.done)
+                                         stop_when=search_task.done if search_task else None)
         pre = "".join(generated)
         tr.overlap_hidden_ms = (time.perf_counter() - t0) * 1e3
         tr.overlap_pre_tokens = len(pre) // int(CHARS_PER_TOKEN) if pre else 0
         if pre:
             yield _chunk(cid, model, {"content": pre})
 
-        block = await search_task
+        if search_task is None and defer_search is not None:
+            search_task = asyncio.ensure_future(defer_search())
+        block = await search_task if search_task is not None else ""
         if block:
             cont = splice.build(prompt_sent, pre, block)
             splice.verify(cont, prompt_sent, pre)
@@ -314,7 +347,6 @@ async def chat(req: Request):
 
     tr.order = order if order in ORDERS else ORDER_DEFAULT
     tr.order_honoured = tr.order in BUILDABLE_ORDERS
-    tr.thinking_budget = budget
     if priority is not None:
         try:
             tr.priority = int(priority)
@@ -322,21 +354,31 @@ async def chat(req: Request):
         except (TypeError, ValueError):
             tr.priority = None
     s = await SENSOR.sample(CLIENT)
+    if budget == "adaptive" or (budget is None and BUDGET_POLICY == "adaptive"):
+        budget = adaptive_budget(s.waiting)
+        tr.budget_policy = "adaptive"
+    elif budget is None and BUDGET_DEFAULT:
+        budget = int(BUDGET_DEFAULT)
+        tr.budget_policy = "fixed"
+    tr.thinking_budget = budget
     tr.load_running, tr.load_waiting = s.running, s.waiting
     tr.load_kv_usage, tr.load_stale = s.kv_usage, s.stale
 
     trimmed_first = None
-    if tr.order == "overlap" and do_search and messages and body.get("stream"):
-        # The whole point: the search runs as a task instead of blocking the turn.
-        import asyncio
-        task = asyncio.ensure_future(_do_search(messages, tr))
+    if tr.order in ("overlap", "generate_then_retrieve") and do_search and messages \
+            and body.get("stream"):
+        # overlap starts the search now; generate_then_retrieve starts it only after the
+        # model has had its turn. Same relay, same splice, different ordering.
+        deferred = tr.order == "generate_then_retrieve"
+        task = None if deferred else asyncio.ensure_future(_do_search(messages, tr))
         trimmed_first = await _trim(messages, BUDGET_TOKENS, strategy)
         tr.trim_ms, tr.trim_strategy, tr.dropped_turns = (
             trimmed_first.trim_ms, trimmed_first.strategy, trimmed_first.dropped_turns)
         body.pop("stream_options", None)
         return StreamingResponse(
             _relay_overlap(body, tr, trimmed_first.messages, task,
-                           enable_thinking=(budget is None or budget > 0)),
+                           enable_thinking=(budget is None or budget > 0),
+                           defer_search=(lambda: _do_search(messages, tr)) if deferred else None),
             media_type="text/event-stream")
 
     retrieved_block = await _do_search(messages, tr) if do_search and messages else ""
@@ -562,8 +604,26 @@ def selftest() -> int:
             chk("thinking budget applied to the forwarded body",
                 fwd.get("chat_template_kwargs", {}).get("enable_thinking") is False)
             chk("thinking budget recorded", t.thinking_budget == 0)
+            b = apply_thinking_budget({"messages": []}, 512)
+            chk("the budget reaches upstream as thinking_token_budget",
+                b.get("thinking_token_budget") == 512)
+            chk("a positive budget leaves thinking enabled",
+                b["chat_template_kwargs"]["enable_thinking"] is True)
             chk("order recorded", t.order == "generate_then_retrieve")
-            chk("unbuildable order marked not honoured", t.order_honoured is False)
+            chk("generate_then_retrieve is now a buildable order", t.order_honoured is True)
+            # Q1b: the policy may only ever return one of the two SAFE budgets.
+            ADAPT_STATE["small"] = False
+            chk("idle queue picks the big budget", adaptive_budget(0.0) == ADAPT_BIG)
+            chk("below the high-water mark holds big", adaptive_budget(Q_HIGH) == ADAPT_BIG)
+            chk("above the high-water mark switches small",
+                adaptive_budget(Q_HIGH + 1) == ADAPT_SMALL)
+            chk("inside the band it HOLDS small, it does not drift",
+                adaptive_budget(Q_LOW + 0.5) == ADAPT_SMALL)
+            chk("below the low-water mark returns to big", adaptive_budget(0.0) == ADAPT_BIG)
+            chk("a failed scrape is not read as an empty queue",
+                adaptive_budget(None) == ADAPT_BIG)
+            chk("the policy never returns a value in the measured trough",
+                all(adaptive_budget(q) not in range(400, 1200) for q in (0, 5, 9, 20, 3, 1)))
 
             r = client.post("/v1/chat/completions", json={
                 "model": "m", "messages": [{"role": "user", "content": "hi"}],
