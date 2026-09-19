@@ -6025,3 +6025,54 @@ it injected itself.
 **Decision.** Keep `reasoning_end_str` = `</think>`. The stray tag should be stripped in the
 gateway rather than fixed by changing the stop string, because changing the stop string costs
 42 points.
+
+### P7-Q1b ACTUALS, 2026-09-19: the adaptive policy is dominated by the fixed small budget
+
+Qwen3-8B fp8/fp8, math 180 items/arm, card sampling, open-loop Poisson at 0.6 req/s,
+`--max-num-seqs 16` so a queue can form, gateway-side policy, max_tokens_think 6144.
+
+| arm | acc | silence p50 | silence p95 | e2e p50 | e2e p95 | budgets issued |
+|---|---|---|---|---|---|---|
+| big (2048) | **98.9%** | 118.1 s | 213.2 s | 126.6 | 215.0 | 2048 x180 |
+| adaptive | 94.4% | 48.1 s | 87.6 s | 82.3 | 153.9 | 2048 x46, 128 x134 |
+| small (128) | **95.0%** | **11.1 s** | **73.6 s** | **52.2** | 125.4 | 128 x180 |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-Q1b-0 | the queue exceeds 8 | **max 47, exceeded on 125/180** | **correct**, gate passes |
+| P7-Q1b-1 | adaptive within 2 pts of the arm it mostly is | spent 74% small; **94.4 against small's 95.0** | **correct** |
+| P7-Q1b-2 | adaptive p95 silence beats big by >= 2x | **2.43x** | **correct** |
+| P7-Q1b-3 | adaptive goodput >= big, accuracy loss <= 3 pts | latency yes, **accuracy loss 4.5 pts** | **miss** on the accuracy half |
+| P7-Q1b-4 | no budget in 400-1200 | only 2048 and 128 issued | **correct** |
+
+**The headline is not in the prediction table.** The fixed SMALL budget beats the adaptive
+policy on **both** axes -- 95.0% against 94.4%, and 11.1 s of silence against 48.1 s. There is
+no trade being made; adaptive is simply worse. The first run of Q1b was void for two unrelated
+reasons, and had it been believed it would have shown three identical arms and concluded the
+policy "does nothing". The real answer is worse than that: it does something, and the something
+is negative.
+
+**Why, and it is a queueing argument rather than a modelling one.** Under sustained overload
+the queue is deep almost all the time, so adaptive issues the small budget on 74% of requests
+anyway. The other 26% are 2048-token requests that occupy one of only 16 sequence slots for
+roughly two minutes each. Those requests do not merely cost themselves latency -- they hold
+slots that the cheap requests behind them need, so the whole queue drains slower. The policy
+pays the full latency price of the expensive arm for a quarter of its traffic and buys 0 points
+of accuracy for it (94.4 against small's 95.0, inside the noise floor).
+
+The general form: **under sustained overload, a policy that occasionally issues an expensive
+request is worse than one that never does**, because the expensive request's cost is externalised
+onto every request queued behind it. Hysteresis does not save this; it is what lets the policy
+sit at BIG long enough to do the damage.
+
+**What this means for the phase.** Load-adaptive budgeting is not worth building for this
+workload at this scale. The honest recommendation from Q1a plus Q1b together is a FIXED small
+budget: on math it costs 3.9 points against unbounded (95.0 against 98.9) and returns first
+output 10.6x sooner, and on gsm8k it costs nothing at all. That is a simpler system than the
+one the phase set out to build, and the measurement is the reason to prefer it.
+
+**The caveat that would change the answer.** One arrival rate, one concurrency cap, one
+workload. Adaptive exists to handle load that VARIES, and this run applies a constant offered
+load -- so it tests the policy's behaviour in sustained overload and says nothing about a bursty
+arrival pattern where the queue genuinely empties between bursts. That is the experiment that
+could still rescue the idea, and it is not this one.

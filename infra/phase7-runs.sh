@@ -20,7 +20,12 @@ require_vllm() {
     systemctl show vllm --property=Environment --value 2>/dev/null \
         | tr ' ' '\n' | grep -q '^VLLM_USE_V2_MODEL_RUNNER=0$' \
         || die "vllm unit lacks VLLM_USE_V2_MODEL_RUNNER=0; the budget would not bind"
-    echo "  [$(ts)] vLLM up, V2 runner disabled"
+    if [ "${1:-strict}" = strict ]; then
+        sudo journalctl -u vllm --no-pager -o cat | grep -o "reasoning_end_str=[^,)]*" | tail -1 \
+            | grep -q "reasoning_end_str='</think>'" \
+            || die "server is not on the bare </think> stop string; q4b leaves it on Qwen's phrase, which costs 42 points at small budgets"
+    fi
+    echo "  [$(ts)] vLLM up, V2 runner disabled, stop string checked"
 }
 
 # Stop, WAIT for the port, relaunch, then wait for readiness and BRANCH on it.
@@ -57,7 +62,7 @@ restart_vllm_endstr() {
         --kv-cache-dtype fp8 --enable-prefix-caching --reasoning-parser qwen3 \
         --reasoning-config "{\"reasoning_start_str\": \"<think>\", \"reasoning_end_str\": $endstr}" \
         || die "vllm relaunch failed for $label"
-    require_vllm
+    require_vllm lax
 }
 
 ladder() {   # $1 out-prefix, $2 url, rest: extra qualeval args
@@ -79,10 +84,12 @@ case "${1:-}" in
 # ---- Q1 section 4b: does Qwen's trained stop phrase beat the bare tag? -------------
 q4b)
     echo "[$(ts)] Q4B stop-instruction A/B"
-    restart_vllm_endstr p7q4b-A '"</think>"'
+    restart_vllm_endstr p7q4b-A '"</think>"' 
     ladder p7q4bA http://localhost:8000
     restart_vllm_endstr p7q4b-B '"Considering the limited time by the user, I have to give the solution based on the thinking directly now.\n</think>.\n\n"'
     ladder p7q4bB http://localhost:8000
+    echo "  [$(ts)] restoring the default server so the next run is not silently poisoned"
+    restart_vllm_endstr p7 '"</think>"'
     ;;
 
 # ---- Q1b: fixed vs load-adaptive budget at a MATCHED arrival rate ------------------
