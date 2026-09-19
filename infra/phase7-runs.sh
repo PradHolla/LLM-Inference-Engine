@@ -9,6 +9,9 @@ UV=/home/ubuntu/.local/bin/uv
 PY=/opt/llm/.venv/bin/python
 export HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1
 MODEL=Qwen/Qwen3-8B
+# The model card forbids greedy decoding in thinking mode, and P7-S confirmed the trough
+# survives correct sampling. Every run below uses the card's values.
+QSAMP=(--temperature 0.6 --top-p 0.95 --top-k 20 --min-p 0)
 ts() { date -u +%H:%M:%S; }
 die() { echo "ABORT: $*"; exit 1; }
 
@@ -66,7 +69,7 @@ ladder() {   # $1 out-prefix, $2 url, rest: extra qualeval args
         "$UV" run tools/qualeval.py run --url "$url" --config "$prefix-$label" \
             --slices math --concurrency 32 --max-tokens-think 6144 \
             --max-tokens-nothink 2048 --limit-pass math:think:180,math:nothink:0 \
-            --thinking-budget "$b" --out "results/$prefix-$label.jsonl" "$@"
+            "${QSAMP[@]}" --thinking-budget "$b" --out "results/$prefix-$label.jsonl" "$@"
         echo "    rc=$?"
     done
 }
@@ -104,7 +107,7 @@ q1b)
             --config "p7q1b-$arm" --slices math --rate "$RATE" --concurrency 32 \
             --max-tokens-think 6144 --max-tokens-nothink 2048 \
             --limit-pass math:think:180,math:nothink:0 \
-            --out "results/p7q1b-$arm.jsonl"
+            "${QSAMP[@]}" --out "results/p7q1b-$arm.jsonl"
         echo "    rc=$?"
     done
     ;;
@@ -121,7 +124,7 @@ q2)
             --config "p7q2-$order" --slices math --concurrency 8 \
             --max-tokens-think 6144 --max-tokens-nothink 2048 \
             --limit-pass math:think:60,math:nothink:0 \
-            --thinking-budget 2048 --out "results/p7q2-$order.jsonl"
+            "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q2-$order.jsonl"
         echo "    rc=$?"
     done
     ;;
@@ -138,7 +141,7 @@ q3)
             --config "p7q3-$order" --slices math --concurrency 8 \
             --max-tokens-think 6144 --max-tokens-nothink 2048 \
             --limit-pass math:think:60,math:nothink:0 \
-            --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
+            "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
         echo "    rc=$?"
     done
     ;;

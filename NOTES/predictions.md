@@ -5929,3 +5929,48 @@ added to the remaining runs.
 correct sampling, the entire P7-Q1m and P7-Q1n finding was an artefact of greedy decoding and
 must be withdrawn, not amended. If it survives, the shape stands and only the absolute levels
 and the unbounded-instability claim need restating.
+
+### P7-S ACTUALS, 2026-09-19: the trough survives correct sampling, and greedy is the noisier setting
+
+Qwen3-8B fp8/fp8, math 180 items, concurrency 32, max_tokens_think 6144. greedy = temperature
+0.0 (what phases 4-7 used); qwen = the card's values, temperature 0.6 / top_p 0.95 / top_k 20 /
+min_p 0.
+
+| arm | greedy acc | qwen acc | greedy trunc | qwen trunc |
+|---|---|---|---|---|
+| b128 | 93.9 | 93.9 | 1.7% | 3.3% |
+| b1024 | **88.9** | **82.8** | 0.0% | 0.0% |
+| unbounded | 99.4 | 98.9 | 0.0% | 0.6% |
+
+| # | prediction | actual | verdict |
+|---|---|---|---|
+| P7-S-1 | unbounded truncation falls below 1%, from 4.5% | **untestable on this slice** | the 4.5% was gsm8k; math unbounded truncates 0% under BOTH settings, here and in Q1m/Q1n |
+| P7-S-2 | unbounded qwen >= greedy, 0-5 pts | **98.9 vs 99.4, 0.5 pts LOWER** | **miss**, marginally |
+| P7-S-3 | the trough survives, b1024 >= 8 pts below b128 | **11.1 pts** under card sampling | **correct** |
+| P7-S-4 | budgeted arms move under 3 pts | b128 **0.0**, b1024 **6.1** | **miss** on b1024 |
+
+**The finding stands.** Under the card's sampling the trough is 11.1 points deep, against 11.6
+and 11.1 measured under greedy in P7-Q1m and P7-Q1n. Same depth, different sampling, so the
+U-shape is a property of truncating an unfinished thought and not an artefact of greedy
+decoding. P7-Q1m and P7-Q1n are not withdrawn.
+
+**The surprise is which setting is noisier.** Three greedy measurements of b1024 now read 82.8,
+83.3 and **88.9** -- a 6.1-point spread at identical configuration, twice the +/-3 noise floor
+the gsm8k control established. The single card-sampling measurement lands at 82.8, exactly where
+the first two greedy runs did. Greedy decoding is supposed to be the deterministic setting; it
+is behaving as the erratic one, which is what a bimodal degeneracy looks like -- a run either
+falls into repetition or does not, and averaging over 180 items does not smooth a coin flip that
+lands per-item. Not chased further here; recorded because it argues for the card's values on
+reproducibility grounds alone, independent of accuracy.
+
+**P7-S-1 could not be tested and that is a flaw in the prediction, not a result.** It was
+anchored to gsm8k's 4.5% runaway rate and then scheduled on the math slice, where the runaway
+has never appeared in four runs. The greedy-repetition explanation for the gsm8k tail therefore
+remains OPEN, and it needs a gsm8k arm to close. Logged as outstanding rather than quietly
+dropped.
+
+**Decision, recorded with its cost.** Runs q4b, q1b, q2 and q3 use the card's sampling. This
+deliberately breaks numeric comparability with Phases 4 through 6, all of which are greedy. The
+alternative was to keep repeating a configuration the vendor forbids in order to protect
+comparisons with earlier measurements that were themselves made wrongly, which is the worse
+trade. Q4 (priority) stays as-is: it measures queue ordering and never reads an answer.
