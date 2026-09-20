@@ -1,0 +1,1338 @@
+<title>An Inference Engine From Scratch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root{
+    --ground:#F2F5F3; --surface:#FFFFFF; --surface-2:#E9EEEB;
+    --ink:#141D1A; --body:#36443F; --muted:#6A7A74; --rule:#D3DCD7;
+    --measured:#0C6B57; --measured-soft:#DCEDE7;
+    --predicted:#4E6289;
+    --miss:#A3452A; --miss-soft:#F4E2DB;
+    --grid:#E4EAE6;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    --serif:"Source Serif 4",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0C1412; --surface:#141E1B; --surface-2:#1C2825;
+      --ink:#E6EDE9; --body:#B9C6C1; --muted:#7E8F89; --rule:#28352F;
+      --measured:#42C4A3; --measured-soft:#123029;
+      --predicted:#93AAD2;
+      --miss:#E08A6C; --miss-soft:#33201A;
+      --grid:#22302B;
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0C1412; --surface:#141E1B; --surface-2:#1C2825;
+    --ink:#E6EDE9; --body:#B9C6C1; --muted:#7E8F89; --rule:#28352F;
+    --measured:#42C4A3; --measured-soft:#123029;
+    --predicted:#93AAD2;
+    --miss:#E08A6C; --miss-soft:#33201A;
+    --grid:#22302B;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--body);
+       font-family:var(--serif);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1220px;margin:0 auto;padding:0 24px;display:grid;gap:52px;
+        grid-template-columns:1fr;align-items:start}
+  @media(min-width:1120px){.wrap{grid-template-columns:214px minmax(0,1fr)}}
+
+  nav{display:none}
+  @media(min-width:1120px){
+    nav{display:block;position:sticky;top:28px;padding-top:100px;font-family:var(--sans);
+        font-size:12.5px;line-height:1.45;
+        max-height:calc(100vh - 44px);overflow-y:auto;overscroll-behavior:contain;
+        scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+    nav::-webkit-scrollbar{width:7px}
+    nav::-webkit-scrollbar-thumb{background:var(--rule);border-radius:4px}
+    nav::-webkit-scrollbar-track{background:transparent}
+    nav ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+    nav .grp{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+             color:var(--muted);margin:16px 0 5px;padding-left:8px}
+    nav .grp:first-child{margin-top:0}
+    nav a{display:block;padding:5px 8px;border-radius:4px;color:var(--muted);text-decoration:none}
+    nav a:hover{color:var(--measured);background:var(--surface-2)}
+    nav a:focus-visible{outline:2px solid var(--measured);outline-offset:2px}
+  }
+
+  main{min-width:0;padding-bottom:100px}
+  header{padding:100px 0 40px;border-bottom:1px solid var(--rule);margin-bottom:48px}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--measured);margin:0 0 18px}
+  h1{font-family:var(--sans);font-weight:700;font-size:clamp(2.1rem,5vw,3.15rem);line-height:1.06;
+     letter-spacing:-.023em;color:var(--ink);margin:0 0 20px;text-wrap:balance}
+  .standfirst{font-size:1.12rem;max-width:62ch;margin:0 0 34px}
+  .hstat{display:flex;flex-wrap:wrap;border:1px solid var(--rule);border-radius:6px;
+         overflow:hidden;background:var(--surface)}
+  .hs{flex:1 1 140px;padding:15px 19px;border-right:1px solid var(--rule)}
+  .hs:last-child{border-right:none}
+  .hs .k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+         color:var(--muted);display:block;margin-bottom:5px}
+  .hs .v{font-family:var(--sans);font-weight:600;font-size:1.3rem;color:var(--ink);
+         font-variant-numeric:tabular-nums;line-height:1.15}
+  .hs .v em{font-style:normal;color:var(--measured)}
+
+  .part{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+        color:var(--measured);padding:8px 0;border-top:2px solid var(--measured);margin:0 0 30px}
+  h2{font-family:var(--sans);font-weight:600;font-size:1.6rem;letter-spacing:-.016em;
+     color:var(--ink);margin:0 0 6px;line-height:1.2;text-wrap:balance}
+  h3{font-family:var(--sans);font-weight:600;font-size:1.02rem;color:var(--ink);margin:32px 0 9px}
+  p{margin:0 0 16px;max-width:68ch}
+  strong{color:var(--ink);font-weight:600}
+  code{font-family:var(--mono);font-size:.85em;background:var(--surface-2);padding:1px 5px;
+       border-radius:3px;color:var(--ink)}
+  section{margin-bottom:60px;scroll-margin-top:22px}
+  ul{margin:0 0 16px;padding-left:22px;max-width:68ch}
+  li{margin-bottom:7px}
+
+  .step-head{display:flex;gap:15px;align-items:baseline;margin-bottom:20px}
+  .step-n{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--measured);
+          border:1px solid var(--measured);border-radius:3px;padding:2px 7px;flex:none;letter-spacing:.04em}
+  .sub{font-family:var(--sans);font-size:.83rem;color:var(--muted);margin:2px 0 0}
+
+  .scroll{overflow-x:auto;margin:20px 0 22px;border:1px solid var(--rule);border-radius:6px;
+          background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:.86rem}
+  th{text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+     color:var(--muted);padding:11px 15px;border-bottom:1px solid var(--rule);white-space:nowrap}
+  td{padding:10px 15px;border-bottom:1px solid var(--rule);font-variant-numeric:tabular-nums;
+     vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.n{text-align:right;white-space:nowrap}
+  .m{color:var(--measured);font-weight:600}
+  .p{color:var(--predicted)}
+  .x{color:var(--miss);font-weight:600}
+  caption{caption-side:bottom;text-align:left;padding:10px 15px;font-family:var(--sans);
+          font-size:.78rem;color:var(--muted);border-top:1px solid var(--rule)}
+
+  .concept{background:var(--surface);border:1px solid var(--rule);border-radius:6px;
+           padding:21px 23px;margin:26px 0}
+  .concept .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+                color:var(--predicted);display:block;margin-bottom:9px}
+  blockquote{margin:22px 0;padding:14px 20px;border-left:3px solid var(--predicted);background:var(--surface);color:var(--muted);font-style:italic}
+  blockquote p{margin:0}
+  .concept h4{font-family:var(--sans);font-size:1rem;font-weight:600;color:var(--ink);margin:0 0 10px}
+  .concept p:last-child{margin-bottom:0}
+
+  .finding{border-left:3px solid var(--measured);background:var(--measured-soft);padding:15px 21px;
+           margin:22px 0;border-radius:0 5px 5px 0}
+  .finding p{margin:0;max-width:64ch}
+  .finding.warn{border-left-color:var(--miss);background:var(--miss-soft)}
+
+  pre{font-family:var(--mono);font-size:.78rem;line-height:1.62;background:var(--surface);
+      border:1px solid var(--rule);border-radius:6px;padding:16px 18px;overflow-x:auto;
+      margin:20px 0;color:var(--body)}
+
+  figure{margin:22px 0 8px;background:var(--surface);border:1px solid var(--rule);
+         border-radius:7px;padding:17px 17px 6px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 9px;font-family:var(--sans);font-size:12.5px}
+  .lg{display:flex;align-items:center;gap:6px;color:var(--body)}
+  .sw{width:14px;height:3px;border-radius:2px;flex:none}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .gl{stroke:var(--grid);stroke-width:1}
+  .ax{stroke:var(--rule);stroke-width:1}
+  .tk{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+  .al{font-family:var(--sans);font-size:11.5px;fill:var(--muted);font-weight:500}
+  .dl{font-family:var(--sans);font-size:11.5px;font-weight:600}
+  figcaption{font-family:var(--sans);font-size:.79rem;color:var(--muted);padding:10px 0 5px;
+             border-top:1px solid var(--rule);margin-top:11px}
+
+  details{margin:18px 0}
+  summary{font-family:var(--sans);font-size:.87rem;color:var(--measured);cursor:pointer;padding:6px 0}
+  summary:focus-visible{outline:2px solid var(--measured);outline-offset:3px}
+  footer{border-top:1px solid var(--rule);padding-top:26px;font-family:var(--sans);
+         font-size:.83rem;color:var(--muted)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+<nav aria-label="Contents">
+  <ol>
+    <div class="grp">The problem</div>
+    <li><a href="#start">Where it starts</a></li>
+    <li><a href="#physics">The physics</a></li>
+    <li><a href="#instruments">Building the ruler</a></li>
+    <div class="grp">Writing an engine</div>
+    <li><a href="#recon">Recon: the KV cache</a></li>
+    <li><a href="#s1">1 &middot; Manual loop</a></li>
+    <li><a href="#s2">2 &middot; Static batching</a></li>
+    <li><a href="#s3">3 &middot; Continuous batching</a></li>
+    <li><a href="#s4">4 &middot; A negative result</a></li>
+    <div class="grp">Measuring vLLM</div>
+    <li><a href="#vllm">The baseline</a></li>
+    <li><a href="#ablate">Which feature earns it</a></li>
+    <li><a href="#seqs">The concurrency knob</a></li>
+    <div class="grp">Making it smaller</div>
+    <li><a href="#quant">What quantization buys</a></li>
+    <li><a href="#workload">1.07&times; or 2.35&times;</a></li>
+    <li><a href="#quality">Measuring damage</a></li>
+    <li><a href="#thinking">A backwards prediction</a></li>
+    <div class="grp">Guessing ahead</div>
+    <li><a href="#spec">The idle GPU</a></li>
+    <li><a href="#specmem">What the helper costs</a></li>
+    <li><a href="#speccontent">Content decides it</a></li>
+    <li><a href="#crossover">Where it stops working</a></li>
+    <div class="grp">Cache, not overhead</div>
+    <li><a href="#headroom">The real crossover</a></li>
+    <li><a href="#kvcost">When more cache hurts</a></li>
+    <li><a href="#conversation">What a chat is worth</a></li>
+    <li><a href="#tax">The shrinking tax</a></li>
+    <div class="grp">The product</div>
+    <li><a href="#wait">What people wait for</a></li>
+    <li><a href="#fourtokens">Four tokens, 2.3x</a></li>
+    <li><a href="#twobugs">Two bugs, not findings</a></li>
+    <li><a href="#regime">The mistake underneath</a></li>
+    <div class="grp">Thinking budgets</div>
+    <li><a href="#budget">Reasoning nobody waits for</a></li>
+    <li><a href="#trough">Halfway is worst</a></li>
+    <li><a href="#position">Where you cut</a></li>
+    <li><a href="#stopword">42 points of politeness</a></li>
+    <li><a href="#adaptive">Clever lost to simple</a></li>
+    <li><a href="#priority">Priority needs a queue</a></li>
+    <li><a href="#overlap">A win that wasn&rsquo;t</a></li>
+    <div class="grp">Conclusions</div>
+    <li><a href="#attrib">The attribution</a></li>
+    <li><a href="#method">Bugs and method</a></li>
+  </ol>
+</nav>
+
+<main>
+<header>
+  <p class="eyebrow">Qwen3-8B &middot; one NVIDIA A10G &middot; every number predicted before it was measured</p>
+  <h1>An inference engine from scratch, and why every speed-up here is a range</h1>
+  <p class="standfirst">Eight parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest.</p>
+  <div class="hstat">
+    <div class="hs"><span class="k">Naive server</span><span class="v">0.332 req/s</span></div>
+    <div class="hs"><span class="k">Engine from scratch</span><span class="v"><em>1.60</em> req/s</span></div>
+    <div class="hs"><span class="k">vLLM</span><span class="v"><em>5.70</em> req/s</span></div>
+    <div class="hs"><span class="k">vLLM gap explained by flags</span><span class="v">~2%</span></div>
+    <div class="hs"><span class="k">Same quantization flag</span><span class="v"><em>1.07×</em> vs <em>2.35×</em></span></div>
+    <div class="hs"><span class="k">Same guessing ahead</span><span class="v"><em>1.19×</em> to <em>2.25×</em></span></div>
+    <div class="hs"><span class="k">Same prefix cache</span><span class="v"><em>0×</em> to <em>35×</em></span></div>
+    <div class="hs"><span class="k">Four tokens of formatting</span><span class="v"><em>2.3×</em> slower</span></div>
+    <div class="hs"><span class="k">Hidden reasoning, gsm8k</span><span class="v"><em>0.4</em> points for <em>160×</em> the silence</span></div>
+    <div class="hs"><span class="k">Vendor&rsquo;s own stop phrase</span><span class="v"><em>42.7</em> points worse</span></div>
+  </div>
+</header>
+
+<p class="part">Part one &middot; The problem</p>
+
+<section id="start">
+  <h2>Where it starts: a server that serves one person at a time</h2>
+  <p>The first server was built to be bad on purpose. It holds a lock around the whole model: a request arrives, generates all its tokens, releases the lock, and only then can the next one start. That gives a hard ceiling of about one request every three seconds.</p>
+  <p>The number that mattered wasn't the throughput, though. It was this:</p>
+  <div class="scroll"><table>
+    <caption>Phase 1 baseline under increasing load. Tokens keep arriving at a constant speed; people just wait longer to get any.</caption>
+    <thead><tr><th class="n">Offered load</th><th class="n">Inter-token latency</th><th class="n">Time to first token</th></tr></thead>
+    <tbody>
+      <tr><td class="n">0.1 req/s</td><td class="n">44.6 ms</td><td class="n">354 ms</td></tr>
+      <tr><td class="n">0.3 req/s</td><td class="n">44.2 ms</td><td class="n">974 ms</td></tr>
+      <tr><td class="n">0.5 req/s</td><td class="n m">44.7 ms</td><td class="n x">7,293 ms</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Inter-token latency is flat across a five-fold increase in load while time-to-first-token grows 20&times;.</strong> That is the fingerprint of a queue, not a slow model. The GPU is producing tokens at exactly the same rate throughout; the wait is people standing in line.</p>
+  <p>So the diagnosis wrote itself: batch-1 decoding was already within 4% of what the hardware physically allows. <strong>The problem was capacity, not speed.</strong> Serving more people at once, not making one person faster.</p>
+
+  <div class="concept">
+    <span class="tag">Terms used throughout</span>
+    <h4>Three numbers, and why they are never averaged</h4>
+    <p><strong>TTFT</strong> — time to first token — is how long you stare at nothing after pressing enter. <strong>ITL</strong> — inter-token latency — is the gap between tokens once they start, which is how fast text appears to stream. <strong>Capacity</strong> is the arrival rate above which the queue grows without bound.</p>
+    <p>All three are reported at p50 / p95 / p99, never as means. An average hides the one-in-twenty user who waited four seconds, and that user is the one who complains. TTFT and ITL are kept separate because they break for different reasons — TTFT degrades from queueing, ITL from the model execution itself. Reporting only end-to-end latency conflates them and hides which one broke.</p>
+  </div>
+</section>
+
+<section id="physics">
+  <h2>The one piece of physics everything rests on</h2>
+  <p>Generating a single token requires reading <strong>every weight in the model</strong> — all 15.26 GiB — out of GPU memory. The arithmetic performed on those weights is trivial by comparison. Decoding is therefore not limited by how fast the GPU computes; it is limited by how fast it can read.</p>
+  <pre>16.4 GB of weights  &divide;  600 GB/s of bandwidth  =  27.3 ms per token, floor
+measured on this card:                                40.5 ms per token
+                                                      &rarr; 67% of theoretical peak</pre>
+  <p>And here is the consequence that makes an inference engine worth writing at all: <strong>if you process eight requests together, you read those 15.26 GiB once for all eight, not eight times.</strong> The expensive part is shared. Only the per-request cache grows with batch size.</p>
+
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>What the KV cache is, and why it sets every limit in this document</h4>
+    <p>When a model generates token 500, it must attend to tokens 1 through 499. Rather than recompute them each step, it stores two vectors per token per layer — the <em>keys</em> and the <em>values</em>. That store is the KV cache.</p>
+    <p>For this model it works out to <code>2 &times; 36 layers &times; 8 kv-heads &times; 128 dims &times; 2 bytes</code> = 147,456 bytes, exactly <strong>144 KiB per token</strong>. Every request holds its own. That is why you cannot simply batch a thousand requests: the weights are shared, the cache is not, and the cache is what runs out.</p>
+  </div>
+</section>
+
+<section id="instruments">
+  <h2>Build the ruler before the thing it measures</h2>
+  <p>Everything above is a number, and a number is only worth as much as the instrument that produced it. So the first work on this project involved no model at all. Three tools were written and proven first, because <strong>a benchmark you have not tested is not a measurement, it is a rumour.</strong></p>
+  <p><code>roofline.py</code> predicts what the hardware <em>should</em> manage from two facts and nothing else: memory bandwidth and parameter count. <code>bench.py</code> measures what it actually manages. And <code>mock_server.py</code> is a fake server with no model inside it &mdash; it imitates a real one badly on purpose, complete with a queue and a capacity ceiling, so the benchmark client could be proven capable of finding a knee before it was ever pointed at a GPU that costs $1.21 an hour.</p>
+  <p>Only then was the naive server measured, against predictions written down in advance:</p>
+  <div class="scroll"><table>
+    <caption>Phase 1. Every one of these was predicted from hardware specifications before the model was loaded.</caption>
+    <thead><tr><th>Quantity</th><th class="n">Predicted</th><th class="n">Measured</th><th class="n">Gap</th></tr></thead>
+    <tbody>
+      <tr><td>Weights held in GPU memory</td><td class="n p">15.26 GiB</td><td class="n m">15.26 GiB</td><td class="n m">0.0%</td></tr>
+      <tr><td>Decode speed, one request</td><td class="n p">23.8 tok/s</td><td class="n m">22.8 tok/s</td><td class="n">&minus;4.2%</td></tr>
+      <tr><td>Time to first token, 512-token prompt</td><td class="n p">176 ms</td><td class="n">195 ms</td><td class="n">+11.0%</td></tr>
+      <tr><td>Capacity</td><td class="n p">0.338 req/s</td><td class="n m">0.332 req/s</td><td class="n m">&minus;1.8%</td></tr>
+    </tbody>
+  </table></div>
+  <p>Three of the four landed inside 5%. That is what validates the model of the machine &mdash; and it is why, later, a prediction that missed by 3&times; could be treated as information about the world rather than as a broken spreadsheet.</p>
+
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Why the load generator never waits for a reply</h4>
+    <p>The obvious way to benchmark a server is to send a request, wait for the answer, then send the next. That is <em>closed-loop</em>, and it cannot measure capacity. If the server slows down, you send requests more slowly, so a queue can never form &mdash; the offered load is throttled by the very latency you are trying to measure. The p95 it reports is fiction.</p>
+    <p>This benchmark is <em>open-loop</em>: requests are fired at a fixed rate on a random arrival schedule, regardless of whether earlier ones have finished. If the server cannot keep up, the queue grows and the latency numbers show it. Sweep the rate upward and the point where latency turns sharply upward is real capacity. Every capacity number in this document was found that way.</p>
+  </div>
+</section>
+
+<p class="part">Part two &middot; Writing an engine</p>
+
+<section id="recon">
+  <div class="step-head"><span class="step-n">RECON</span>
+    <div><h2>Measure the cache before designing around it</h2>
+    <p class="sub">Before any engine code was written</p></div></div>
+  <p>One prediction was carried forward untested: <em>"bf16 dies of KV exhaustion above batch 4 at 4k context."</em> Since the next step was to start batching, that number set the entire design budget. So the first thing built was an instrument that reads the cache off the GPU rather than inferring it.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Quantity</th><th class="n">Predicted</th><th class="n">Measured</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>KV bytes per token</td><td class="n p">147,456 B</td><td class="n m">147,456 B</td><td>exact</td></tr>
+      <tr><td>VRAM growth per decode step</td><td class="n p">147,456 B</td><td class="n m">147,456 B</td><td>exact</td></tr>
+      <tr><td>Batch ceiling at 4k context</td><td class="n p">11</td><td class="n x">7</td><td>missed 36%</td></tr>
+    </tbody>
+  </table></div>
+  <p>The carried claim was wrong in the safe direction — it dies above <strong>7</strong>, not 4. "Batch 4" turned out to be an artifact of the prediction tool printing powers of two: it showed rows 1, 2, 4, 8, so 4 was simply the last one that passed. Rows 5, 6 and 7 were never displayed.</p>
+  <h3>Three things were eating memory that nothing had budgeted for</h3>
+  <ul>
+    <li><strong>Allocator fragmentation — 1.93 GiB, the largest term.</strong> PyTorch grows the cache by allocating a slightly bigger block and freeing the slightly smaller one. Every freed block is permanently one size too small for what comes next, so they accumulate. Cost: <strong>0.265 GiB per sequence, 47% of the KV it accompanied.</strong></li>
+    <li><strong>The GPU reports three different "total memory" numbers.</strong> Marketing says 24 GB. <code>nvidia-smi</code> says 22.488 GiB. CUDA can actually address <strong>22.060 GiB</strong>. The 439 MiB difference is driver reserve, and the prediction tool was budgeting from the wrong one.</li>
+    <li><strong>Activations were underestimated 2&times;.</strong></li>
+  </ul>
+  <div class="finding">
+    <p><strong>One environment variable was worth 29% more concurrency.</strong> Setting <code>PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True</code> raised the ceiling from 7 to 9 requests, for zero code change. It switches PyTorch to a virtual-memory allocator that extends regions in place instead of leaving a graveyard of wrong-sized blocks.</p>
+  </div>
+</section>
+
+<section id="s1">
+  <div class="step-head"><span class="step-n">STEP 1</span>
+    <div><h2>Take the decode loop away from the library</h2>
+    <p class="sub">Batch 1, offline, no server</p></div></div>
+  <p>Before batching anything, we needed to own the loop: run the prefill pass, hold the cache, feed one token at a time, decide when to stop. HuggingFace's <code>.generate()</code> does all of that behind a wall you cannot schedule.</p>
+  <p><strong>The correctness gate was strict: under greedy decoding, our loop had to produce token-for-token identical output to <code>.generate()</code>.</strong> Not "similar quality" — identical. It passed on the first run, 64 of 64 tokens.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Quantity</th><th class="n">Predicted</th><th class="n">Measured</th></tr></thead>
+    <tbody>
+      <tr><td>Token-identical to <code>.generate()</code></td><td class="n p">yes</td><td class="n m">identical</td></tr>
+      <tr><td>Decode throughput</td><td class="n p">23.5 tok/s</td><td class="n m">24.7 tok/s</td></tr>
+      <tr><td>Prefill time, 412-token prompt</td><td class="n p">150 ms</td><td class="n m">148.4 ms</td></tr>
+      <tr><td>ITL spread (p95 &divide; p50)</td><td class="n p">&lt; 1.2</td><td class="n m">1.002</td></tr>
+    </tbody>
+  </table></div>
+  <h3>The finding that mattered was not in the table</h3>
+  <p>Running offline, with the web server stripped away, token timing collapsed into a metronome:</p>
+  <div class="scroll"><table>
+    <thead><tr><th></th><th class="n">Through the server</th><th class="n">Offline</th></tr></thead>
+    <tbody>
+      <tr><td>ITL p50</td><td class="n">44.5 ms</td><td class="n m">40.5 ms</td></tr>
+      <tr><td>ITL p95</td><td class="n">89.3 ms</td><td class="n m">40.6 ms</td></tr>
+      <tr><td>ITL p99</td><td class="n">173.8 ms</td><td class="n m">41.0 ms</td></tr>
+      <tr><td>Spread</td><td class="n x">2.008&times;</td><td class="n m">1.002&times;</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The entire latency tail was the web server, not the GPU.</strong> Removing FastAPI, the streaming thread handoff, the async queue and the network took p99 from 173.8 ms to 41.0 ms. The GPU emits tokens at a near-constant 40.5 ms; every millisecond above that was software the model never saw. The scheduler built next would therefore start from a clean instrument rather than inheriting a tail it could not fix.</p>
+  </div>
+</section>
+
+<section id="s2">
+  <div class="step-head"><span class="step-n">STEP 2</span>
+    <div><h2>Static batching, and the waste it exists to reveal</h2>
+    <p class="sub">N requests started together, run to completion together</p></div></div>
+  <p>Static batching means gathering N requests, running them together, and not letting anyone join or leave until all are done. That restriction is the entire point of the step — the goal was to hit its cost deliberately rather than read about it.</p>
+  <h3>First, confirmation that batching works at all</h3>
+  <div class="scroll"><table>
+    <thead><tr><th class="n">Batch</th><th class="n">ITL p50</th><th class="n">Throughput</th><th class="n">vs batch 1</th><th class="n">Latency cost</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">40.5 ms</td><td class="n">24.7 tok/s</td><td class="n">1.0&times;</td><td class="n">1.00&times;</td></tr>
+      <tr><td class="n">8</td><td class="n">43.8 ms</td><td class="n">182.7 tok/s</td><td class="n m">7.4&times;</td><td class="n">1.08&times;</td></tr>
+      <tr><td class="n">32</td><td class="n">61.0 ms</td><td class="n">524.0 tok/s</td><td class="n m">21.2&times;</td><td class="n">1.51&times;</td></tr>
+      <tr><td class="n">48</td><td class="n">68.7 ms</td><td class="n m">698.1 tok/s</td><td class="n m">28.3&times;</td><td class="n">1.70&times;</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>48 requests at once gives 28.3&times; the throughput for 1.70&times; the per-token latency.</strong> That trade is the whole economic argument for building an inference engine.</p>
+  <h3>Then the wall, on purpose</h3>
+  <p>Real traffic is <em>ragged</em> — some requests want 20 tokens, one wants 500. Two runs were constructed to be identical in every respect except that:</p>
+  <div class="scroll"><table>
+    <caption>Same batch size, same 512 decode steps, same ITL, same KV. Identical GPU work.</caption>
+    <thead><tr><th>Run</th><th class="n">Reported throughput</th><th class="n">Actually delivered</th><th class="n">Slot use</th></tr></thead>
+    <tbody>
+      <tr><td>Ragged <code>[512, 32&times;7]</code></td><td class="n">175.8 tok/s</td><td class="n x">31.6 tok/s</td><td class="n x">18.0%</td></tr>
+      <tr><td>Uniform <code>[512&times;8]</code></td><td class="n">175.8 tok/s</td><td class="n m">175.8 tok/s</td><td class="n m">100.0%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>The reported throughput is identical to four figures. What people actually received differs 5.56&times;.</strong> In the ragged run, seven of eight requests finished at step 32 and then held the machine for another 480 steps producing tokens that were discarded — 3,360 of 4,096 slot-steps wasted. A static batch cannot release a finished sequence.</p>
+  </div>
+  <p>This is why the instrument was built to report both numbers side by side. <strong>Divide by slots and static batching looks solved; divide by tokens anyone received and it is 82% waste.</strong> The gap is the entire case for continuous batching, and it is invisible to the flattering metric.</p>
+</section>
+
+<section id="s3">
+  <div class="step-head"><span class="step-n">STEP 3</span>
+    <div><h2>Continuous batching: refill the slot the moment it frees</h2>
+    <p class="sub">Evict, admit, decode &mdash; every step</p></div></div>
+  <p>The fix is simple to state: every step, drop finished requests and admit queued ones into the freed slots. The difficulty is mechanical. Requests admitted at different times have <em>different lengths</em>, and HuggingFace's cache API assumes one shared position across the batch. That mismatch is precisely why vLLM wrote its own attention kernels.</p>
+  <div class="concept">
+    <span class="tag">The workaround</span>
+    <h4>Left-padding, with position decoupled from storage</h4>
+    <p>Put every row in one shared buffer, right-aligned, padding the front of shorter rows. A row's keys and values are rotated by their position <em>at the moment they are written</em>, so where a row physically sits in the buffer does not affect correctness — only the attention mask and the position IDs must be right.</p>
+    <p>That claim was tested before any engine was built, against single-request references, demanding token-for-token identity. All three mechanics passed: ragged batching, evicting a row mid-decode, and admitting a new row mid-flight.</p>
+  </div>
+  <div class="scroll"><table>
+    <caption>64 requests, max batch 8, ragged output lengths.</caption>
+    <thead><tr><th></th><th class="n">Static</th><th class="n">Continuous</th><th class="n">Gain</th></tr></thead>
+    <tbody>
+      <tr><td>Decode steps needed</td><td class="n">2,048</td><td class="n m">736</td><td class="n"></td></tr>
+      <tr><td>Slot utilisation</td><td class="n">30.1%</td><td class="n m">82.6%</td><td class="n m">2.75&times;</td></tr>
+      <tr><td>Delivered throughput</td><td class="n">53.3 tok/s</td><td class="n m">99.3 tok/s</td><td class="n m">1.86&times;</td></tr>
+    </tbody>
+  </table></div>
+  <h3>A failed experiment that taught more than a successful one</h3>
+  <p>Throughput still came in 33% below prediction, because ITL was 61.4 ms where step 2 measured 43.8 ms at the same batch size. Hypothesis: passing an explicit attention mask forces the GPU off its fast path. The test compared a batch with a mask against one without:</p>
+  <pre>static, no mask          44.6 ms
+continuous, with mask    44.7 ms     &rarr; free. hypothesis dead.</pre>
+  <p><strong>Except the control was broken.</strong> Admitting all eight requests at once makes every row the same length — so the mask was <em>all ones</em>. It masked nothing. The experiment had removed the padding along with the thing it was meant to test.</p>
+  <p>Plotting latency against buffer length over the real run settled it: at a constant 8 active rows, <strong>ITL rose 27.4 microseconds per buffer token, against 2.9 predicted by the memory model — 9.4&times;.</strong></p>
+</section>
+
+<section id="s4">
+  <div class="step-head"><span class="step-n">STEP 4</span>
+    <div><h2>The paged allocator we measured, then chose not to build</h2>
+    <p class="sub">A negative result</p></div></div>
+  <p>Step 4 was meant to be a paged allocator — vLLM's central trick, storing the cache in fixed-size blocks with a lookup table so sequences never need contiguous memory. The target was that 27.4&nbsp;&micro;s-per-token tax.</p>
+  <p>But the tax had two possible causes pointing in opposite directions, so the first move was to find out which. One experiment, holding batch, buffer length and cache contents fixed, varying <strong>only</strong> the mask:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Condition</th><th class="n">ITL p50</th><th class="n">vs baseline</th></tr></thead>
+    <tbody>
+      <tr><td>No mask (implicit causal)</td><td class="n">43.89 ms</td><td class="n">1.00&times;</td></tr>
+      <tr><td>Explicit mask, all ones — masks nothing</td><td class="n">43.94 ms</td><td class="n m">1.00&times;</td></tr>
+      <tr><td>Explicit mask, real zeros — actually masks</td><td class="n">54.60 ms</td><td class="n x">1.24&times;</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>A mask that masks nothing is free. A mask with real zeros costs 10.7 ms.</strong> The tax is the GPU's masked attention path — not reads over padded memory. Which means a paged allocator <em>cannot recover it here</em>: rows of different lengths need a mask however the cache is stored, and a block-based design would still have to gather those blocks into a dense padded tensor to hand the attention kernel.</p>
+  </div>
+  <p>The fix that does work is <em>varlen attention</em> — FlashAttention's interface that packs ragged sequences with no padding and no mask at all. That is what vLLM pairs with paged storage.</p>
+  <p>So the conclusion, reached by measurement rather than by reading the paper: <strong>PagedAttention's speed is inseparable from the custom CUDA kernel written to consume block tables directly. The allocator is not the clever part — the kernel is.</strong> Building the allocator on stock PyTorch would have been an exercise, not an optimisation, and the honest call was to say so rather than ship a component whose measured benefit is zero.</p>
+</section>
+
+<p class="part">Part three &middot; Measuring vLLM</p>
+
+<section id="vllm">
+  <h2>The baseline, and the trap in it</h2>
+  <p>Swapping in vLLM is an hour's work, and it is faster. That measurement alone teaches nothing — "the library written by specialists beats my two-day engine" is not a finding. The phase is the <em>ablation</em>: turn each technique off, one at a time, and see which part of the gap it was carrying.</p>
+  <p>First, though, a configuration detail that would have invalidated everything downstream.</p>
+  <div class="concept">
+    <span class="tag">Read the log, never the docs</span>
+    <h4>vLLM ships with two of the techniques already on</h4>
+    <p>Its startup log reports <code>enable_prefix_caching=True</code> and <code>enable_chunked_prefill=True</code>. Older releases had both off, so a great deal of writing about vLLM is misleading on exactly this point. Neither our engine nor the baseline has either.</p>
+    <p>That means "vLLM defaults versus our engine" is <strong>not</strong> a like-for-like comparison, and the ablations must <em>disable</em> these to isolate them rather than enable them. Assuming the older defaults would have made every attribution in this section confidently backwards.</p>
+  </div>
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Prefix caching, and why our benchmark flatters it</h4>
+    <p>If two requests begin with the same tokens — a shared system prompt, say — their keys and values for that span are identical. Prefix caching stores those blocks once and points both sequences at them, skipping the recomputation entirely.</p>
+    <p>Our benchmark sends a <em>byte-identical</em> 412-token prompt on every request. That is the perfect-hit case, and it is an artifact we constructed by holding the prompt constant. The honest measurement uses <code>--unique-prefix</code>, which prepends a random header per request and defeats the cache. Both are reported below; only one describes real traffic.</p>
+  </div>
+  <div class="scroll"><table>
+    <caption>Single stream, one request at a time. ITL is identical either way because prefix caching only touches prefill.</caption>
+    <thead><tr><th></th><th class="n">TTFT p50</th><th class="n">ITL p50</th></tr></thead>
+    <tbody>
+      <tr><td>vLLM, identical prompts (cache hits)</td><td class="n m">190 ms</td><td class="n">34.0 ms</td></tr>
+      <tr><td>vLLM, unique prefixes (cache misses)</td><td class="n">293 ms</td><td class="n">34.0 ms</td></tr>
+      <tr><td>Our engine</td><td class="n">298 ms</td><td class="n">41.1 ms</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>vLLM's single-stream advantage splits cleanly along two independent axes.</strong> With the cache defeated its TTFT equals ours within 2%, so the TTFT advantage is <em>entirely</em> prefix caching. Its ITL is 34.0 ms either way against our 41.1, so the ITL advantage is <em>entirely</em> kernel efficiency — and that is measured at batch 1, where no scheduling advantage exists at all.</p>
+  </div>
+  <p>Back-solved against the 27.30 ms roofline floor, that ITL number revises a conclusion we had already drawn:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Stack</th><th class="n">Fraction of peak memory bandwidth</th></tr></thead>
+    <tbody>
+      <tr><td>Naive server</td><td class="n">0.623</td></tr>
+      <tr><td>Our bare offline loop</td><td class="n">0.674</td></tr>
+      <tr><td>vLLM</td><td class="n m">0.803</td></tr>
+    </tbody>
+  </table></div>
+  <p>We had concluded that 0.674 was "a property of the stack, not the card," and that the naive server's 0.623 was overhead. <strong>That was half right.</strong> A further 16% was sitting in per-step Python — cache bookkeeping, mask concatenation, argmax, the device-to-host sync — that a CUDA graph removes by replaying the whole step in one launch. That is a <em>third</em> axis, orthogonal to all the scheduling work: not how many requests share a weight read, but how much of the hardware a single step uses.</p>
+
+  <h3>The ladder, plotted</h3>
+  <p>Each curve is one engine. The x-axis is throughput actually achieved; the y-axis is the latency the slowest 5% of users saw. A curve that runs flat and then turns vertical has hit capacity — past the turn, arrivals outrun service and the queue grows without bound.</p>
+  <figure>
+    <div class="legend" id="lg-a"></div>
+    <div id="ch-a"></div>
+    <figcaption>Log-scale y-axis; the range spans 265&nbsp;ms to 31&nbsp;seconds. The vertical wall in each curve is that engine's capacity.</figcaption>
+  </figure>
+  <div class="finding">
+    <p><strong>Read the vertical distance, not the horizontal.</strong> At 0.5 req/s the naive server was already 50% past its own capacity and queueing catastrophically — TTFT p95 of 25.1 seconds. vLLM sits at a third of capacity and barely notices, at 336 ms. Capacity improved 17&times; end to end; <strong>latency at a fixed, realistic load improved by nearly two orders of magnitude.</strong></p>
+  </div>
+</section>
+
+<section id="ablate">
+  <h2>Which feature actually earns the gap</h2>
+  <div class="concept">
+    <span class="tag">Method</span>
+    <h4>What an ablation is, and why one run is deliberately expected to do nothing</h4>
+    <p>An ablation turns one thing off and measures what changes, with everything else held fixed. The discipline is that each flag must be paired with a workload where it can act — otherwise the result is a null that means nothing.</p>
+    <p>Disabling prefix caching under unique prompts is exactly such a null: there are no shared prefixes to hit, so on and off must be identical. That run is included anyway, as a <strong>control</strong>. If it moved, the harness would not be measuring what it claims and every other number here would be suspect. It came in at +4%, within noise. The control passed, which is what makes the rest trustworthy.</p>
+  </div>
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Chunked prefill</h4>
+    <p>Processing a new request's prompt is one large, compute-heavy pass. If it runs as its own step, every request already streaming stops dead until it finishes — the admission stall our own engine suffered, worth 213 ms of ITL p95.</p>
+    <p>Chunked prefill splits that pass into pieces small enough to share a step with ongoing decodes. Nobody stalls. It is a <em>latency</em> intervention; it does not create throughput that was not there, and the measurement below shows exactly that.</p>
+  </div>
+  <figure>
+    <div class="legend" id="lg-b"></div>
+    <div id="ch-b"></div>
+    <figcaption>All four runs use unique prompts. The control sits on top of the baseline, as it must.</figcaption>
+  </figure>
+  <div class="finding">
+    <p><strong>Chunked prefill buys tail latency, not throughput.</strong> Capacity barely moves — 5.79 to 5.66 req/s — but ITL p95 goes from 456 ms to 612 ms without it, 34% worse. I had predicted a 10-20% capacity drop. The prediction was wrong about <em>what the flag does</em>, which is more useful than being wrong about a magnitude.</p>
+  </div>
+  <p>The fp8 KV result is a second prediction worth stating, because the naive expectation is so tempting: halving the bytes per cached token should roughly double concurrency, and therefore throughput. <strong>It bought 11%.</strong> The binding constraint here is prefill compute, and quantising the cache does nothing for compute. A 1.57&times; larger memory budget cannot help a workload that is not short of memory.</p>
+</section>
+
+<section id="seqs">
+  <h2>The concurrency knob, and why the returns diminish</h2>
+  <figure>
+    <div class="legend" id="lg-c"></div>
+    <div id="ch-c"></div>
+    <figcaption>Raising the cap moves the wall right and the floor up: more throughput, worse per-token latency. The same tradeoff measured two ways.</figcaption>
+  </figure>
+  <p>One formula built from constants measured two phases earlier reproduces every row of this chart, and hits the default configuration to two decimal places:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>cap</th><th class="n">effective batch</th><th class="n">ITL p50</th><th class="n">measured</th><th class="n">model</th></tr></thead>
+    <tbody>
+      <tr><td>16</td><td class="n">16</td><td class="n">40 ms</td><td class="n">3.65</td><td class="n">3.55</td></tr>
+      <tr><td>32</td><td class="n">32</td><td class="n">42 ms</td><td class="n">5.01</td><td class="n">4.85</td></tr>
+      <tr><td>64</td><td class="n">39 <span style="color:var(--muted)">KV-capped</span></td><td class="n">46 ms</td><td class="n">5.35</td><td class="n">5.06</td></tr>
+      <tr><td>128 (default)</td><td class="n">70 <span style="color:var(--muted)">KV-capped</span></td><td class="n">56 ms</td><td class="n m">5.79</td><td class="n m">5.78</td></tr>
+    </tbody>
+    <caption>R = 1 / (0.122 prefill + (64 / B) &times; ITL)</caption>
+  </table></div>
+  <div class="finding">
+    <p><strong><code>--max-num-seqs 64</code> never ran 64 sequences.</strong> Its KV budget held 39. Effective concurrency is <code>min(cap, KV_tokens / tokens_per_request)</code> — the flag is a ceiling, not a floor, and the model only fits once the effective value is used. Diminishing returns follow directly: decode cost per request falls as concurrency rises, but the 122 ms of prefill never moves, so the asymptote is <strong>8.2 req/s no matter how much you batch</strong>.</p>
+  </div>
+</section>
+
+<p class="part">Part four &middot; Making the model smaller</p>
+
+<section id="quant">
+  <h2>Quantization, and the two separate things it buys</h2>
+  <p>Every number so far used the model at full precision: each of its 8.19 billion parameters stored in two bytes, 15.26 GiB in total. <em>Quantization</em> stores them in fewer bits &mdash; one byte each (fp8), or half a byte (int4) &mdash; accepting some rounding error in exchange for space.</p>
+  <p>The reason this is worth a whole phase is that it buys <strong>two different things at once, and they are easy to confuse</strong>:</p>
+  <ul>
+    <li><strong>Fewer bytes to read.</strong> Every generated token requires reading the entire model out of memory. Halve the model, halve that read. This makes each step faster.</li>
+    <li><strong>Freed memory becomes cache.</strong> Whatever the weights stop occupying is handed to the KV cache, which is what limits how many people can be served at once.</li>
+  </ul>
+  <p>The first works always. The second only works <em>if you were running out of cache in the first place</em> &mdash; and whether you were depends entirely on what your users are sending. That distinction turns out to be the whole story.</p>
+
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Where 24 GB of graphics card actually goes</h4>
+    <p>The card is sold as 24 GB. Almost none of that is available for the thing you care about:</p>
+    <pre>24.00 GiB   printed on the box
+22.49       what nvidia-smi reports
+22.06       what CUDA can actually address (driver and ECC reserve)
+20.24       what the server takes (90%, leaving headroom so it does not crash)
+&minus;15.26       the weights themselves
+&minus; 1.40       activations, CUDA graphs, scratch space
+&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;
+  3.59 GiB  left for the KV cache  =  26,176 tokens  =  ~5 concurrent requests</pre>
+    <p>Five. That is the real concurrency limit of a 24 GB card running an 8B model on long requests, and it is four haircuts away from the number on the box. Now halve the weights and watch what happens to the last line: <strong>the cache is the small term, so giving it the slack is enormous leverage.</strong> fp8 takes it from 26,176 tokens to 73,264, and int4 to 95,648 &mdash; 3.7&times; more people served from the same silicon.</p>
+  </div>
+</section>
+
+<section id="workload">
+  <h2>The same flag, worth 1.07&times; or 2.35&times;</h2>
+  <p>Part three ended with three failed predictions that shared one shape: each guessed the effect of raising a ceiling without first checking whether anything was pressing against it. This phase was designed to avoid repeating that &mdash; and the check it forced changed the entire experiment.</p>
+  <p>The benchmark used throughout this document sends a 512-token prompt and asks for 64 tokens back. Running the arithmetic before spending any GPU time: <strong>at that request size the KV cache sits about 29% full.</strong> Quantization's headline benefit is more cache. Tripling something you are using 29% of does nothing.</p>
+  <p>So the phase was measured on <em>two</em> workloads. The small one above, and a second one shaped like a real question with search results attached &mdash; 4,096 tokens in, 1,024 out. Same GPU, same model, same benchmark client, same day:</p>
+  <div class="scroll"><table>
+    <caption>Capacity relative to the full-precision model. Only the shape of the request changed between the two columns.</caption>
+    <thead><tr><th>Weights</th><th class="n">Cache size</th><th class="n">512 in / 64 out</th><th class="n">4,096 in / 1,024 out</th></tr></thead>
+    <tbody>
+      <tr><td>bf16 (full precision)</td><td class="n">26,176</td><td class="n">6.01 req/s</td><td class="n">0.26 req/s</td></tr>
+      <tr><td>fp8</td><td class="n">73,264</td><td class="n">6.45 &nbsp;<em>1.07&times;</em></td><td class="n m">0.53 &nbsp;<em>2.04&times;</em></td></tr>
+      <tr><td>int4</td><td class="n">95,648</td><td class="n">6.95 &nbsp;<em>1.16&times;</em></td><td class="n m">0.61 &nbsp;<em>2.35&times;</em></td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>The identical technique is worth 1.16&times; or 2.35&times; depending on nothing but which workload you point it at.</strong> On small requests the cache was never the constraint, so freeing it achieves nothing and only the faster-reads effect survives. On realistic ones the cache is the entire constraint and the same flag is transformative.</p>
+  <p>Had this phase been run on the benchmark that was already set up and already working &mdash; the obvious, free, sensible choice &mdash; it would have concluded that quantization is barely worth the trouble, and been wrong by a factor of two.</p>
+
+  <div class="concept">
+    <span class="tag">Why the prediction still missed</span>
+    <h4>More users means more cache to read, every single step</h4>
+    <p>Both predictions for the large workload were written as 2.5&ndash;3.5&times; and both came in low, for one reason worth understanding. Reading the model is not the only memory traffic in a decode step &mdash; the server must also read the cache of every request currently in flight.</p>
+    <pre>              weights    cache read/step   total
+bf16   5 users  16.39 GB      3.47 GB       19.86 GB
+fp8   14 users   8.19 GB      9.71 GB       17.90 GB
+int4  19 users   6.12 GB     12.71 GB       18.83 GB</pre>
+    <p>The step costs almost exactly the same in all three cases. Quantization halved the weights, but the extra users it allowed brought their own caches along and ate the saving. <strong>So the gain is not faster steps at all &mdash; it is the same 40 ms divided among more people.</strong> Concurrency partly limits itself, which the prediction had assumed away.</p>
+  </div>
+</section>
+
+<section id="quality">
+  <h2>Grading a model that disagrees with itself</h2>
+  <p>Everything up to this point could only be faster or slower. Quantization is the first change that can make the model <em>worse</em>, and worse in a way no throughput number will ever reveal. So quality had to be measured &mdash; which is harder than it sounds, for a reason that catches most people.</p>
+
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>The same model, asked the same question twice, does not always answer the same way</h4>
+    <p>Even with all randomness switched off, the server processes twelve requests together, and <em>which</em> twelve are grouped shifts constantly as requests finish. Different grouping means the GPU adds numbers in a different order, which means tiny rounding differences, which occasionally means a different final answer.</p>
+    <p>So a quantized model that disagrees with the original on 5% of questions might be damaged &mdash; or might be showing you the model's own jitter. There is no way to tell from that number alone.</p>
+    <p>The fix is to run the <strong>unquantized model twice</strong> and see how often it disagrees with itself. That is the noise floor. Here it came out at <strong>1.8%</strong>, and nothing below it counts as damage. That control run cost 33 minutes and made every subsequent number interpretable; without it the whole quality axis is uninterpretable arithmetic.</p>
+  </div>
+
+  <p>The test set was 560 problems per configuration, built rather than downloaded so that the difficulty could be dialled: chains of arithmetic where each step consumes the previous step's answer, at 4, 8, 16 and 32 steps. Nothing can be skipped, so the step count is genuinely a measure of how much sequential reasoning is required.</p>
+  <p>Measured against the noise floor, int4 costs 2.1 accuracy points overall. That aggregate hides everything that matters:</p>
+  <div class="scroll"><table>
+    <caption>Of the problems the full-precision model answered correctly, the share each quantized version got wrong.</caption>
+    <thead><tr><th>Task</th><th class="n">fp8 breaks</th><th class="n">int4 breaks</th></tr></thead>
+    <tbody>
+      <tr><td>4-step arithmetic</td><td class="n">0%</td><td class="n">0%</td></tr>
+      <tr><td>8-step</td><td class="n">3%</td><td class="n">3%</td></tr>
+      <tr><td>16-step</td><td class="n">0%</td><td class="n">9%</td></tr>
+      <tr><td>32-step</td><td class="n">11%</td><td class="n x">37%</td></tr>
+      <tr><td>Finding a fact in a 4,000-word document</td><td class="n m">0%</td><td class="n m">0%</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Zero, three, nine, thirty-seven.</strong> The damage grows with the length of the reasoning required, exactly as compounding error should. At 32 steps int4 destroys more than a third of what the full model solved &mdash; while the headline figure politely reports two points.</p>
+  <p>And the last row matters just as much. Retrieval &mdash; finding one buried fact among decoys in a long document &mdash; was <strong>perfect for all three, 270 out of 270, at every depth</strong>. The damage is not general. It is specific to multi-step reasoning, and it leaves the thing a search-backed chat app spends most of its time doing completely untouched.</p>
+</section>
+
+<section id="thinking">
+  <h2>The prediction that was exactly backwards</h2>
+  <p>The project's own written specification contained a confident claim about all this, recorded long before the measurement:</p>
+  <blockquote>Thinking amplifies it &mdash; this is the project-critical one. A reasoning chain is 1,000+ sequential tokens where each conditions the next, so small per-token errors compound.</blockquote>
+  <p>The logic is appealing. Let a slightly-damaged model reason for a thousand tokens and the damage should snowball. The model used here can have that reasoning switched on or off on identical weights, so the claim was directly testable. On the same 32-step problems:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>int4, on problems the full model solved</th><th class="n">Broken</th></tr></thead>
+    <tbody>
+      <tr><td>Allowed to reason step by step first</td><td class="n m">1%</td></tr>
+      <tr><td>Forced to answer directly</td><td class="n x">37%</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Reasoning does not amplify quantization damage. It absorbs it.</strong> Given room to work, the model catches its own perturbed arithmetic and corrects it &mdash; the chain is self-repairing, not error-compounding. Denied that room, every rounding error lands straight in the answer.</p>
+  <p>The specification was updated with the correction written underneath the original claim rather than replacing it. A document that quietly deletes its failed predictions cannot be trusted about its successful ones.</p>
+  <p>There is a practical consequence, and it is the one that carries into the rest of the project. Thinking tokens are expensive: they occupy cache for as long as they run, so a thinking user costs several non-thinking ones. But an int4 model apparently <em>needs</em> to think in order to stay accurate. <strong>The memory quantization frees is partly spent buying back the reasoning that keeps it correct.</strong> Those two knobs are not independent, which is a problem for whatever scheduler eventually has to turn them.</p>
+</section>
+
+<p class="part">Part five &middot; Guessing ahead</p>
+
+<section id="spec">
+  <h2>The 99.6% of the GPU that does nothing</h2>
+  <p>Every phase so far made the server hold more people. This one goes after a different number: how long <em>one</em> person waits. And it starts from a measurement that sounds like a mistake.</p>
+  <p>Producing one token means reading all 16.39 GB of the model out of memory. That takes 34 ms. The arithmetic performed during those 34 ms comes to 16.4 billion operations, against a chip that can do 125 trillion per second.</p>
+  <div class="finding"><p><strong>The compute units are 99.6% idle while the GPU decodes.</strong> Not busy, not partly used &mdash; idle, waiting on memory. Every earlier phase optimised around that wait. This one spends it.</p></div>
+  <p>The trick is called speculative decoding, and the shape of it is simple. Something cheap <em>guesses</em> the next few tokens. The big model then checks all of them in a single pass &mdash; asking, at each position, "is this what I would have said?" Guesses it agrees with are kept. At the first disagreement, that guess and everything after it is thrown away, and the model's own token is used instead.</p>
+  <p>The reason this is worth doing is the asymmetry underneath it. A forward pass costs almost the same whether you push one token through it or five, because the cost is dominated by reading the weights, not by the arithmetic. <strong>Checking four guesses is nearly free; the expensive part already happened.</strong></p>
+
+  <div class="concept">
+    <span class="tag">Why this cannot make the answer worse</span>
+    <h4>Rejected guesses are replaced by what the model would have said anyway</h4>
+    <p>It is natural to assume that anything called "speculative" trades accuracy for speed. It does not. Where the guess matches, the output is what the model would have produced. Where it does not, the guess is discarded and the model's own token takes its place. Either way you end up with the model's answer &mdash; just sooner.</p>
+    <p>That is the theory, and this document does not take theory on trust. It was measured, at the end of the phase, on 1,210 items. The result is in the last section.</p>
+  </div>
+
+  <p>The number that governs everything is the <strong>acceptance rate</strong>: what fraction of guesses survive the check. It is not derivable from hardware specs &mdash; it depends on the guesser, the model, and, as it turned out, very heavily on what is being written.</p>
+</section>
+
+<section id="specmem">
+  <h2>The helper has to live somewhere</h2>
+  <p>The guesser used here is a small trained component called an EAGLE head. It is not a smaller language model; it is a single layer trained specifically to imitate <em>this</em> model, and it gets to see the big model's internal state rather than only its text. That is what makes it guess well.</p>
+  <p>Before renting the GPU, its size was worked out from its configuration file: 622M parameters of vocabulary lookup, 193M for its one layer, 131M for its output head, 50M for the part that reads the big model's state. Just under a billion parameters, <strong>1.904 GiB</strong>. The actual file is 2,044,116,968 bytes. The estimate was right to 2%.</p>
+  <p>That produced the phase's first surprise, and it is worth pausing on because it inverts the intuition. <strong>The "one-layer head" is bigger than a real small model.</strong> Qwen3-0.6B &mdash; twenty-eight layers, a genuine miniature language model &mdash; is 1.400 GiB. The head is larger because it carries a lookup table covering all 151,936 possible tokens, and that table is most of its bulk. One layer describes how much <em>arithmetic</em> it does, not how much room it takes.</p>
+  <p>And room is the thing in short supply. The helper lives in the same memory as the KV cache &mdash; the scratchpad that lets the server hold conversations in flight. Every gigabyte it takes is conversations the server can no longer hold. So the prediction was straightforward: the cache should shrink by exactly the helper's size, 13,863 tokens' worth.</p>
+  <div class="scroll"><table>
+    <caption>Measured against a control launched the same hour. The prediction accounted for the weights and nothing else.</caption>
+    <thead><tr><th>Term</th><th class="n">Without helper</th><th class="n">With helper</th><th class="n">Change</th></tr></thead>
+    <tbody>
+      <tr><td>KV cache</td><td class="n">102,944 tokens</td><td class="n">78,224 tokens</td><td class="n x">&minus;24,720</td></tr>
+      <tr><td>Model weights + helper</td><td class="n">5.98 GB</td><td class="n">7.92 GB</td><td class="n">+1.94 &nbsp;<em>as predicted</em></td></tr>
+      <tr><td>Working scratch space</td><td class="n">0.18 GB</td><td class="n">1.34 GB</td><td class="n x">+1.16 &nbsp;unpredicted</td></tr>
+      <tr><td>Pre-compiled GPU routines</td><td class="n">0.62 GB</td><td class="n">0.96 GB</td><td class="n x">+0.34 &nbsp;unpredicted</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>The helper costs 1.78&times; its own weight.</strong> The weight arithmetic was right; what it missed is that weights are not the only new cost. Checking four positions at once needs roughly four times the scratch space of checking one, and the working memory jumped 7.4&times;. The GPU also pre-compiles routines for the new shapes, which is the rest.</p>
+  <p>That correction matters beyond the accounting, because the scratch-space term <em>scales with how many tokens you guess</em>. The cost was being treated as a fixed charge. It is not: guessing further ahead also costs concurrency, which couples two dials that were assumed independent.</p>
+
+  <div class="concept">
+    <span class="tag">The consequence</span>
+    <h4>Quantization is what makes guessing affordable</h4>
+    <p>The same helper, the same fixed cost, against three different memory budgets:</p>
+    <pre>full precision   33,424 -> 11,712 tokens    1.9 conversations at once
+fp8              68,592 -> 52,224 tokens    8.5 conversations at once
+int4             95,792 -> 78,272 tokens   12.7 conversations at once</pre>
+    <p>A server that can hold 1.9 conversations is not a server. At full precision the helper eats more than half the cache and the configuration is unusable; on a quantized model the same helper is an affordable 15&ndash;24%.</p>
+    <p><strong>This is Part four's finding arriving from the opposite direction.</strong> There, memory freed became capacity gained. Here, memory spent becomes capacity lost &mdash; and how much it hurts depends entirely on how much you had. The two phases combine into a claim neither could make alone.</p>
+  </div>
+</section>
+
+<section id="speccontent">
+  <h2>The benchmark was lying again, and by more this time</h2>
+  <p>The first acceptance measurements came back at <strong>0.30</strong> &mdash; barely a third of guesses surviving, against the 0.7 the published work on these heads would suggest. That looked like a disappointing property of the helper.</p>
+  <p>It was a property of the prompt. Every measurement in this phase up to that point used the benchmark's synthetic filler text: generated tokens, not language. Guessing what comes next in text that is not really writing is close to impossible, and it is the least favourable input that exists.</p>
+  <p>So the same helper, the same model, the same settings were pointed at four kinds of real work, changing nothing but the content:</p>
+  <div class="scroll"><table>
+    <caption>Acceptance rate by what the model is writing. fp8 weights with the EAGLE head, one request at a time, k=3.</caption>
+    <thead><tr><th>What the model is writing</th><th class="n">Acceptance</th><th class="n">Tokens per step</th><th class="n">vs filler</th></tr></thead>
+    <tbody>
+      <tr><td>Synthetic filler <span class="sub">the benchmark</span></td><td class="n">0.3035</td><td class="n">1.91</td><td class="n">&mdash;</td></tr>
+      <tr><td>Natural reasoning <span class="sub">GSM8K word problems</span></td><td class="n m">0.4905</td><td class="n">2.47</td><td class="n m">+62%</td></tr>
+      <tr><td>Recalling a fact from a document</td><td class="n m">0.5270</td><td class="n">2.58</td><td class="n m">+71%</td></tr>
+      <tr><td>Templated arithmetic, thinking on</td><td class="n m">0.5960</td><td class="n">2.79</td><td class="n m">+96%</td></tr>
+      <tr><td>Templated arithmetic, thinking off</td><td class="n m">0.6708</td><td class="n">3.01</td><td class="n m">+121%</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Real work is roughly twice as guessable as the benchmark.</strong> Every acceptance number measured before this point was taken on the worst possible input, and read as a fact about the technique.</p>
+  <p>The two arithmetic rows exist because of a trap worth naming. Those problems are generated from templates &mdash; "N more are added", "the count doubles" &mdash; which is repetitive text that would guess well for reasons having nothing to do with reasoning. Reporting that number alone would have credited the technique for the predictability of the question generator. The GSM8K row is real human-written problems, included specifically as the control. <strong>It scores 21% lower, so part of the advantage really was the templates &mdash; and it is still 62% above filler, so the underlying claim survives.</strong></p>
+
+  <div class="finding warn">
+    <p><strong>Thinking text is harder to guess than ordinary text, not easier.</strong> On identical problems: 0.596 with a thinking block, 0.671 without. The prediction written before the run said the opposite, reasoning that chain-of-thought is repetitive scaffolding. It is not &mdash; thinking is where the model explores, backtracks and reconsiders, which is exactly where the next word is hardest to call. Denied a thinking block it writes a tidy formulaic walkthrough, and tidy is guessable.</p>
+  </div>
+
+  <p>That lands on the part of the project this is all building toward. The model spends around a thousand tokens thinking before answering even a simple question &mdash; <strong>roughly 36 seconds of blank screen</strong> that nobody reads and everybody waits through. Speculative decoding is the main tool available against it. It works there, well, but the reasoning is the <em>hardest</em> part of the response to speed up, not the easiest.</p>
+
+  <p>Converting acceptance into real time, by running each workload again with guessing switched off:</p>
+  <div class="scroll"><table>
+    <caption>Measured end to end on identical items, normalised by tokens produced. fp8 throughout.</caption>
+    <thead><tr><th>Workload</th><th class="n">Speed-up</th></tr></thead>
+    <tbody>
+      <tr><td>Templated arithmetic, thinking off</td><td class="n m">2.25&times;</td></tr>
+      <tr><td>Templated arithmetic, thinking on</td><td class="n m">2.05&times;</td></tr>
+      <tr><td>Natural reasoning</td><td class="n m">1.85&times;</td></tr>
+      <tr><td>Synthetic filler <span class="sub">what was being measured before</span></td><td class="n">1.45&times;</td></tr>
+      <tr><td>Long document in, short answer out</td><td class="n x">1.19&times;</td></tr>
+    </tbody>
+  </table></div>
+  <p>The last row is the interesting failure, and nothing is wrong with its acceptance rate &mdash; 0.527 is among the better ones. That workload sends about 4,096 tokens in and produces about 32 back. <strong>Almost the whole request is the model reading the question, and speculative decoding only accelerates the writing.</strong> The guessing works fine and is diluted to nothing by work it cannot touch.</p>
+  <p>Which is a direct warning for the next phase of this project, a chat app with web search: long retrieved context, short grounded answers. That is exactly this shape. It would gain almost nothing from this technique end to end, however well the guesser performs, while still paying the full memory bill.</p>
+</section>
+
+<section id="crossover">
+  <h2>Where it stops working, and which guesser to use</h2>
+  <p>Every number so far is one request at a time &mdash; the friendliest possible condition, because with a single user the GPU is idle and a wrong guess wastes capacity nobody wanted. On a busy server that stops being true: the wasted work is now work someone was waiting for.</p>
+  <p>So the arrival rate was swept upward with guessing on and off, and the two curves compared. Latency per token, on the small workload:</p>
+  <div class="scroll"><table>
+    <caption>fp8. Requests arrive at a fixed rate without waiting for replies, so a queue can form as it would in production.</caption>
+    <thead><tr><th class="n">Arrival rate</th><th class="n">No guessing</th><th class="n">With guessing</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="n">2 req/s</td><td class="n">19 ms</td><td class="n m">10.1 ms</td><td>guessing 1.88&times; ahead</td></tr>
+      <tr><td class="n">4 req/s</td><td class="n">21 ms</td><td class="n m">11.2 ms</td><td>guessing 1.87&times; ahead</td></tr>
+      <tr><td class="n">6 req/s</td><td class="n">24 ms</td><td class="n x">68 ms</td><td>guessing 2.8&times; <strong>behind</strong></td></tr>
+      <tr><td class="n">10 req/s</td><td class="n">24 ms</td><td class="n x">69 ms</td><td>guessing behind</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>The technique inverts somewhere between 4 and 6 requests per second.</strong> Below that it is a large win; above it, a large loss. On the long-context workload the same sweep found no crossing at all &mdash; guessing stayed ahead everywhere up to the memory ceiling. Two workloads, opposite answers about whether to switch the feature on.</p>
+  <p>Two honest limits on that number. The sweep tested 2, 4, 6, 8, 10, so "between 4 and 6" is as precise as it gets &mdash; the resolution of the sweep is the resolution of the answer, and this document criticised exactly that mistake in an earlier phase before repeating it. And acceptance was sampled once across the whole sweep rather than at each rate, which flatters guessing at high load, meaning the true crossing is <em>lower</em> than shown.</p>
+  <p>One prediction failed outright and is worth keeping. Capacity was expected to drop 15&ndash;30%, since the helper gives up a quarter of the cache. Measured: <strong>2%</strong>. The cache really does shrink &mdash; but neither workload was limited by cache at its breaking point, so losing a quarter of a resource nothing was pressing against cost nothing. That is the same lesson as Part three's prefix caching, now arrived at for the third time.</p>
+
+  <h3>Three ways to guess, and the one to use</h3>
+  <p>The helper is not the only option. There are three, and only the most expensive had been tested:</p>
+  <div class="scroll"><table>
+    <caption>All on fp8, same content, same target model. Memory cost is cache given up, out of 68,448 tokens.</caption>
+    <thead><tr><th>Guesser</th><th class="n">Memory cost</th><th class="n">Tokens per step</th><th class="n">Speed-up</th></tr></thead>
+    <tbody>
+      <tr><td>Text repetition <span class="sub">no model at all</span></td><td class="n m">2,304 &nbsp;<em>3%</em></td><td class="n">1.18</td><td class="n">1.07&times;</td></tr>
+      <tr><td>EAGLE head <span class="sub">trained to imitate this model</span></td><td class="n">16,368 &nbsp;24%</td><td class="n">2.47</td><td class="n m">1.85&times;</td></tr>
+      <tr><td>Qwen3-0.6B <span class="sub">a real small model</span></td><td class="n x">36,448 &nbsp;53%</td><td class="n m">3.17</td><td class="n">1.75&times;</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>The best guesser is not the fastest configuration.</strong> The small model guesses 28% better than the head and finishes 5% slower, because running twenty-eight layers three times per step costs far more than running one layer three times. It also has the largest memory bill of the three &mdash; the <em>lighter</em> model needs the <em>heavier</em> cache, because twenty-eight layers of its own conversation history dwarfs the head's single layer.</p>
+  <p>Text repetition sits at the other extreme: it barely guesses, but what it does costs nothing on the GPU, so it converts 91% of its small gain into real time. The EAGLE head sits at the optimum of a genuine three-way trade between how well you guess, what guessing costs, and what the guesser occupies. <strong>It was the right choice &mdash; which is now known by measurement rather than assumed.</strong></p>
+
+  <div class="concept">
+    <span class="tag">A number that would have been a false headline</span>
+    <h4>Text repetition scored 0.93, and it meant almost nothing</h4>
+    <p>On the filler benchmark, the no-model guesser reported an acceptance rate of <strong>0.9333</strong>, against the trained head's 0.3035. Read plainly, that says the free option is three times better.</p>
+    <p>The catch is in what acceptance measures. It is <em>conditional on a guess having been made</em>, and text repetition only guesses when it finds a matching phrase to copy &mdash; which happened on <strong>4.4% of steps</strong>. Right 93% of the time, on one step in twenty-three. The real gain was 1.12&times;, not 3&times;.</p>
+    <p>It is the same species of error as the token-counting bug in the next section: a measure whose definition quietly assumes something the new mechanism breaks. Comparing a conditional rate against an unconditional one produces a confident, plausible, entirely wrong answer.</p>
+  </div>
+
+  <h3>How far ahead to guess</h3>
+  <p>One setting had been carried through the entire phase without ever being tested: how many tokens the helper guesses per step. Every measurement above used three, because that is the number its checkpoint ships with.</p>
+  <div class="scroll"><table>
+    <caption>fp8, one request at a time, against the same model with guessing switched off.</caption>
+    <thead><tr><th class="n">Tokens guessed ahead</th><th class="n">Speed-up</th><th class="n">Tokens per step</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">1.355&times;</td><td class="n">1.54</td></tr>
+      <tr><td class="n">2</td><td class="n m">1.488&times;</td><td class="n">1.83</td></tr>
+      <tr><td class="n">3 <span class="sub">the shipped default</span></td><td class="n">1.450&times;</td><td class="n">1.91</td></tr>
+      <tr><td class="n">5</td><td class="n">1.338&times;</td><td class="n">2.00</td></tr>
+      <tr><td class="n">7</td><td class="n x">1.215&times;</td><td class="n">2.03</td></tr>
+    </tbody>
+  </table></div>
+  <p>Guessing further ahead never stops working &mdash; guessing seven produces 32% more tokens per step than guessing two. <strong>It simply costs more than it returns.</strong> Each extra guess is another pass through the helper, so the cost grows steadily, while the chance of a guess surviving falls away sharply with how far ahead it sits. The two curves cross at two.</p>
+  <p><strong>The default was one too high</strong>, worth 2.6%, which also means every figure in this part is a slight understatement. The cost model written before the sweep predicted this shape from the helper's size and the model's step time, and matched the measured efficiency to within 4% at every setting &mdash; the most accurate prediction in the whole document, and the one built entirely from things that had already been measured rather than from expectations about how the technique ought to behave.</p>
+  <p>The memory prediction attached to it was simply wrong. Guessing further was expected to need more working memory, and the cache came back <em>identical</em> at every setting. The effect being looked for was around 1%; the run-to-run variation in how this server sizes its own cache is 14%. <strong>The measurement was never capable of resolving what it was pointed at</strong> &mdash; which is worth more as a caution than the number would have been as a result.</p>
+
+  <h3>Does the answer change?</h3>
+  <p>All of the above is worthless if guessing quietly alters what the model says. So the whole thing was run twice more, with and without guessing, over 1,210 graded items &mdash; and compared against a floor established in the previous phase, where the model was run against <em>itself</em> to find out how much it disagrees with its own answers just from the order arithmetic happens to be performed in.</p>
+  <div class="finding">
+    <p><strong>Accuracy 89.3% without guessing, 89.9% with. Answers differed on 2.8% of items; the model's disagreement with itself is 1.8%. Statistically indistinguishable.</strong> Guessing fixed 17 items the control got wrong and broke 10 it got right &mdash; a net in its favour, and noise either way.</p>
+  </div>
+  <p>The shape of the disagreement is better evidence than its size. Three whole categories reproduced <em>identical</em> answers on every single item &mdash; natural reasoning, thinking-enabled arithmetic, document recall. All of the disagreement piled into one category: the hardest arithmetic without a thinking block, where the model scores 44% and is barely better than guessing. There, any perturbation flips answers.</p>
+  <p>If the mechanism were subtly broken, errors would be spread everywhere in proportion to how much text was generated. Instead they appear only where the model was already unsure. <strong>That is the signature of ordinary nondeterminism, not of a technique quietly changing the answer</strong> &mdash; so every speed-up above is a speed-up of the same model, not a faster different one.</p>
+</section>
+
+<p class="part">Part six &middot; Where the crossover really came from</p>
+
+<section id="headroom">
+  <h2>The inversion was never about guessing</h2>
+  <p>Part five ended on a clean-looking result: guessing ahead is a large win at 2 requests a second and a large loss at 6, so somewhere in between it inverts. The explanation offered there was the textbook one &mdash; on a busy server the checking work stops being free, because the GPU no longer has idle capacity to spend. That explanation is wrong, and the way it was caught is the point of this part.</p>
+  <p>The sweep was run again as a <em>matrix</em> rather than a single line: guessing on and off, against all three weight precisions, with identical prompts sent in an identical order. If the inversion belongs to the technique, it should appear in every row.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B, vLLM 0.27.1, fp16 KV cache, 16k context, EAGLE head guessing 2 ahead, 650 real arithmetic prompts. Cache budget read from each configuration's own startup log.</caption>
+    <thead><tr><th>Weights</th><th>Guessing</th><th class="n">Cache budget</th><th class="n">One request</th><th class="n">At 2 req/s</th><th class="n">At 6 req/s</th></tr></thead>
+    <tbody>
+      <tr><td>bf16</td><td>off</td><td class="n">33,312</td><td class="n">29.5 tok/s</td><td class="n">1.72 req/s</td><td class="n">3.58 req/s</td></tr>
+      <tr><td>bf16</td><td>on</td><td class="n x" colspan="4">would not start at all</td></tr>
+      <tr><td>fp8</td><td>off</td><td class="n">74,880</td><td class="n">53.4</td><td class="n">1.65</td><td class="n">4.52</td></tr>
+      <tr><td>fp8</td><td>on</td><td class="n">51,232</td><td class="n m">97.9</td><td class="n m">2.37</td><td class="n x">3.56</td></tr>
+      <tr><td>int4</td><td>off</td><td class="n">101,920</td><td class="n">84.6</td><td class="n">1.65</td><td class="n">4.73</td></tr>
+      <tr><td>int4</td><td>on</td><td class="n">77,280</td><td class="n m">143.1</td><td class="n m">1.96</td><td class="n m">5.30</td></tr>
+    </tbody>
+  </table></div>
+  <p>It does not appear in every row. <strong>Guessing inverts on fp8 and never inverts on int4</strong> &mdash; same helper, same guess depth, same prompts, same hour. A property of the technique cannot switch itself off because the weights were stored differently.</p>
+  <p>What differs between those two rows is not what guessing costs, which is nearly identical &mdash; 23,648 tokens of cache on fp8 and 24,640 on int4. What differs is what is <em>left</em> afterwards: 51,232 against 77,280, a budget half again as large.</p>
+
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Running out of cache does not make requests slow, it makes them wait</h4>
+    <p>Every conversation being served holds its own KV cache for as long as it is in flight. The server admits new requests only while there is room for their cache. When there is not, the request does not run slowly &mdash; it does not run at all. It sits in a queue until somebody finishes and releases their space.</p>
+    <p>This matters for diagnosis because both causes produce the same symptom. Verification overhead would make each step slower. Cache exhaustion makes steps take exactly as long as before, and inserts a wait before the work starts. Averaged into one latency number the two are indistinguishable, which is why the wrong explanation survived a whole phase.</p>
+  </div>
+
+  <p>The engine had been reporting which of the two it was, every ten seconds, into a log nobody had read. It records how full the cache is and how many requests are waiting:</p>
+  <div class="scroll"><table>
+    <caption>Read from the server's own journal, per launch, during the 6 req/s window of the run above.</caption>
+    <thead><tr><th>Configuration</th><th class="n">Cache used, p90</th><th class="n">Running at once</th><th class="n">Waiting in queue</th><th class="n">TTFT p99</th></tr></thead>
+    <tbody>
+      <tr><td>fp8 + guessing</td><td class="n x">95.7%</td><td class="n">90</td><td class="n x">26</td><td class="n x">28,163 ms</td></tr>
+      <tr><td>int4 + guessing</td><td class="n m">18.6%</td><td class="n">88</td><td class="n m">0</td><td class="n m">1,396 ms</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Two configurations running the same number of conversations, one starved of cache and one not.</strong> The fp8 server spent that window at 95.7% full with 26 requests queued behind it; int4 sat at 18.6% and never queued a single one. Their one-request speeds differ by 1.4&times;; their worst-case waits differ by <strong>20&times;</strong>. If verification overhead were the cause, int4 would have suffered too &mdash; it runs the same helper at the same batch size. It did not.</p>
+  </div>
+  <p>That is still only a reading of a correlation, so it was tested by intervention: change the cache and nothing else, and see whether the inversion follows. The server can store its cache in half the bytes per token, which roughly doubles how many conversations fit without touching the helper, the batch or the kernels.</p>
+  <div class="scroll"><table>
+    <caption>fp8 weights with guessing on, the only change being how the cache itself is stored.</caption>
+    <thead><tr><th>Cache stored as</th><th class="n">Budget</th><th class="n">Cache used, p90</th><th class="n">Waiting</th><th class="n">At 6 req/s, vs no guessing</th></tr></thead>
+    <tbody>
+      <tr><td>fp16, as before</td><td class="n">58,816</td><td class="n x">86.1%</td><td class="n x">26</td><td class="n x">0.97&times; &mdash; behind</td></tr>
+      <tr><td>fp8</td><td class="n m">102,464</td><td class="n m">12.0%</td><td class="n m">0</td><td class="n m">1.20&times; &mdash; ahead</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The inversion disappears.</strong> Nothing about the guessing changed &mdash; same helper, same depth, same kernels. Only the room it had to work in. So the honest statement is not that guessing ahead stops working under load; it is that <strong>guessing takes a fixed bite out of the cache, and whichever configuration cannot afford that bite starts queueing.</strong> Quantization does not merely make guessing affordable, as Part five concluded. It decides whether the inversion exists at all in the range you care about.</p>
+  </div>
+  <p>And the bf16 row of the first table is the strongest form of the same claim. At full precision the cache holds 33,312 tokens, guessing costs about 24,000 of them, and roughly 9,300 remain against a 16,384-token context limit. A server that cannot hold one maximum-length conversation does not start. <strong>Without quantization there is nothing to measure.</strong></p>
+</section>
+
+<section id="kvcost">
+  <h2>The same intervention, one workload later, is a 14% loss</h2>
+  <p>Halving the bytes per cached token doubled the budget and rescued the configuration above. The obvious next move is to leave it on. That was tested too, on the same box, with guessing switched off &mdash; and it is worth reporting because the result is the opposite one.</p>
+  <div class="scroll"><table>
+    <caption>fp8 weights, guessing off, same 650 prompts. The only change is how the cache is stored.</caption>
+    <thead><tr><th>Cache stored as</th><th class="n">Budget</th><th class="n">Capacity at 6 req/s</th><th class="n">TTFT p99</th></tr></thead>
+    <tbody>
+      <tr><td>fp16</td><td class="n">74,880</td><td class="n m">5.12 req/s</td><td class="n m">1,818 ms</td></tr>
+      <tr><td>fp8</td><td class="n">135,152</td><td class="n x">4.42 req/s</td><td class="n x">10,870 ms</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>Nearly twice the cache, 14% less capacity.</strong> With guessing off, 74,880 tokens were already more than this workload needed, so the extra room bought nothing &mdash; while the cost of storing the cache in a compressed form, which must be undone on every attention read, was paid on every step regardless. It helps exactly where cache is the binding constraint and hurts where it is not.</p>
+  </div>
+  <p>That is the third time this document has reached the same conclusion by a different route. Prefix caching was worth nothing because there was nothing to cache. Quantization was worth 1.07&times; because the cache was 29% full. Now a bigger cache is worth &minus;14% for the same reason. <strong>Check whether anything is pressing against the limit before relieving it.</strong></p>
+  <p>An accident during these runs made the mechanism clearer than the designed comparison did. This server sizes its own cache by measuring free memory at startup, and that measurement is not repeatable &mdash; the identical command produced 51,232 tokens one day and 58,816 another. Plotting capacity against the budget that happened to be allocated:</p>
+  <pre>cache budget 51,232 tokens  &rarr;  3.56 req/s
+cache budget 58,816 tokens  &rarr;  4.97 req/s
+cache budget 102,464 tokens &rarr;  5.29 req/s</pre>
+  <p><strong>A 14.8% difference in budget, arising from nothing but startup noise, moved measured capacity by 40%.</strong> Which is both a confirmation of the mechanism and a warning about every comparison in this document that did not pin the allocation: two configurations are not comparable until their cache budgets are known to be equal. Every measurement in this part reads that budget from its own startup log.</p>
+
+  <h3>Does storing the cache smaller change what the model says?</h3>
+  <p>Everything above is about speed. Storing the cache in half the bytes means throwing away precision on every remembered token, so the fair question is whether the answers themselves get worse. That needs the same care as Part four: a model does not agree with itself, so the comparison is against how much it disagrees with an identical copy of itself.</p>
+  <div class="scroll"><table>
+    <caption>1,210 questions, each asked of both configurations, paired item by item. The floor is the same model against itself on this exact question set.</caption>
+    <thead><tr><th></th><th class="n">Correct</th><th class="n">Answers that differ</th><th class="n">Significance</th></tr></thead>
+    <tbody>
+      <tr><td>Full-precision cache</td><td class="n">52.1%</td><td class="n" rowspan="2">11.9% against a 7.8% floor</td><td class="n" rowspan="2">p = 0.61</td></tr>
+      <tr><td>Half-precision cache</td><td class="n">51.6%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Half a point apart, and not significant.</strong> The smaller cache changes <em>which</em> questions get answered differently without changing <em>how many</em> come out right &mdash; and it moves the score less than simply running the same configuration twice does. So the speed is free rather than borrowed against quality.</p>
+  </div>
+  <p>One caveat kept rather than buried: about a third of those questions are either easy enough that both configurations always get them right, or hard enough that both always get them wrong. Those cannot move under any treatment, so the real sample is smaller than 1,210 and a better question set would concentrate where the model is genuinely unsure.</p>
+
+</section>
+
+<section id="conversation">
+  <h2>What a conversation is worth</h2>
+  <p>Everything measured so far treats requests as independent. A chat is not: turn 25 resends all of turns 1 through 24 before adding anything new. That makes it the ideal case for prefix caching, which Part three measured as worth <em>nothing</em> on traffic where every request differs.</p>
+  <p>Both things can be true, and the gap between them is large. One conversation was grown to 25 turns and measured twice. In the second run each turn was given a fresh block of random text at the very front, which changes the first token and so defeats the cache completely while keeping everything else identical.</p>
+  <div class="scroll"><table>
+    <caption>fp8 weights, fp16 cache, 16k context, no guessing. One conversation, 300 tokens of reply per turn. Both runs identical apart from the random block at the front of the cold one.</caption>
+    <thead><tr><th class="n">Turn</th><th class="n">Conversation length</th><th class="n">Cache warm</th><th class="n">Cache defeated</th><th class="n">Ratio</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">62 tokens</td><td class="n">28.4 ms</td><td class="n">32.4 ms</td><td class="n">1.1&times;</td></tr>
+      <tr><td class="n">10</td><td class="n">2,947</td><td class="n m">128.5 ms</td><td class="n">820.2 ms</td><td class="n">6.4&times;</td></tr>
+      <tr><td class="n">25</td><td class="n">7,761</td><td class="n m">165.7 ms</td><td class="n x">2,290.8 ms</td><td class="n x">13.8&times;</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>By turn 25 the same question answers 13.8&times; sooner.</strong> Per token of conversation history, a cached token costs 0.0100 ms and an uncached one 0.2912 &mdash; <strong>29&times; less</strong>. The warm curve is not flat, and should not have been predicted flat: caching removes the need to <em>recompute</em> the history, but each new token must still attend over all of it. That residual is what the shallow slope measures.</p>
+  </div>
+  <p>The same technique is therefore worth 0&times;, 2.9&times; or 13.8&times; depending on nothing but how much the traffic repeats itself. A benchmark of unique prompts says it is useless; a benchmark with one shared system prompt says it is transformative; a real conversation says something larger than both.</p>
+
+  <div class="concept">
+    <span class="tag">The control failed twice first</span>
+    <h4>A control that does not control produces a null result that reads as a finding</h4>
+    <p>The first two attempts at this measurement returned the two curves lying on top of each other &mdash; 1.0&times; apart, against a prediction of roughly 21&times;. Read plainly that says prefix caching is worth nothing in a conversation, which would have been a genuinely surprising result and was entirely an artifact.</p>
+    <p>The random text had been attached to the <em>new user message</em> at the end of each turn. But the conversation history is rendered <em>before</em> that message, so every token up to it still matched what was cached, and the cache hit exactly as it did in the warm run. The arm intended to defeat the cache was not touching the part of the prompt the cache reads first.</p>
+    <p>The fix was to move the random block to the very front. The lasting fix was to make the control prove itself: it now reads the engine's own report of how much of the prompt it recognised, checks it at turn 3, and refuses to collect data if the cache is hitting. It measured <strong>0.000 across all 25 turns</strong>. A control that cannot demonstrate it is controlling is worse than no control at all, because its null result looks like knowledge.</p>
+    <p>That left one arm proving itself and the other not: the warm run had recorded no cache figures at all, so "the cache was working" was an inference from its flat curve rather than a recorded fact. The pair was therefore run again, on one server with both arms reporting. <strong>The warm arm goes 0.000 at turn 1 to 0.957 by turn 25; the cold arm holds 0.000 throughout.</strong> The separation reproduced at 13.76&times; against the original 13.83&times;, and the cold curve landed on the same 2,290.8&nbsp;ms at turn 25 both times.</p>
+  </div>
+
+  <h3>What the cache actually holds is not what you would assume</h3>
+  <p>Reading the warm arm's cache figures turn by turn shows something the first run could not have revealed, because it recorded none. The number of tokens recognised at each turn is <em>the previous turn's prompt</em>, and nothing beyond it:</p>
+  <div class="scroll"><table>
+    <caption>Warm arm. vLLM stores its cache in blocks of 16 tokens, so the recognised count lands on a block boundary. The pattern holds on 24 of 24 turns.</caption>
+    <thead><tr><th class="n">Turn</th><th class="n">Prompt sent</th><th class="n">Recognised</th><th class="n">Previous prompt</th></tr></thead>
+    <tbody>
+      <tr><td class="n">3</td><td class="n">668</td><td class="n m">336</td><td class="n">345</td></tr>
+      <tr><td class="n">10</td><td class="n">2,912</td><td class="n m">2,576</td><td class="n">2,590</td></tr>
+      <tr><td class="n">25</td><td class="n">7,724</td><td class="n m">7,392</td><td class="n">7,403</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>The model's own reply is not in the cache.</strong> Each turn the server re-reads the roughly 300 tokens it generated a moment earlier, having already computed every one of them. The recognised span stops exactly where the previous reply begins, every time.</p>
+  </div>
+  <p>Two explanations fit that signature and this data cannot separate them. Either the engine discards the blocks holding generated tokens once a request finishes, or the reply is being <em>rewritten</em> before it goes back in &mdash; the chat format wraps each turn in marker tokens that were never part of the generated stream, so the text no longer matches what was stored. The second predicts the break lands precisely at the end of the previous prompt, which is what all twenty-four turns show, and it is the one under this project's control rather than the engine's.</p>
+  <p>Either way it is a live cost in the thing being built next. It also explains why the warm curve rises at all rather than staying flat: part of that slope is not attention over history, it is prefill being paid twice.</p>
+</section>
+
+<section id="tax">
+  <h2>The tax on making the model smaller</h2>
+  <p>One more result fell out of data already collected, with no additional GPU time. Each configuration must read a known number of bytes to produce one token, and the measured time per token was recorded. Divide one by the other and you get the memory bandwidth actually achieved, against the 600 GB/s this card is capable of.</p>
+  <div class="scroll"><table>
+    <caption>Derived from the sweep above. Qwen3-8B, 8,190,735,360 parameters, one request at a time.</caption>
+    <thead><tr><th>Weights</th><th class="n">Bytes read per token</th><th class="n">Time per token</th><th class="n">Bandwidth achieved</th><th class="n">Of peak</th></tr></thead>
+    <tbody>
+      <tr><td>bf16</td><td class="n">16.38 GB</td><td class="n">34.2 ms</td><td class="n">479 GB/s</td><td class="n m">79.8%</td></tr>
+      <tr><td>fp8</td><td class="n">8.19 GB</td><td class="n">18.9 ms</td><td class="n">433 GB/s</td><td class="n">72.2%</td></tr>
+      <tr><td>int4</td><td class="n">4.10 GB</td><td class="n">11.9 ms</td><td class="n">344 GB/s</td><td class="n x">57.4%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>The smaller the weights, the less of the card's bandwidth you get to use.</strong> This is the cost of unpacking compressed weights back into numbers the arithmetic units can consume, and this card has no hardware support for it &mdash; the work is done in software, spending compute inside an operation that is supposed to be limited by memory. It is why fp8 is worth 1.81&times; rather than the 2.0&times; that halving the bytes implies, and why int4's 4&times; fewer bytes returns under 3&times; the speed.</p>
+  </div>
+  <p>The same tax shows up independently in prefill, which is compute-bound rather than memory-bound and where it costs 14%. Two measurements of one mechanism, from unrelated runs. A card one generation newer handles this format in hardware and should recover most of it, which turns a vague suspicion carried since Part four into a specific and cheap experiment.</p>
+
+  <div class="concept">
+    <span class="tag">A correction to Part four</span>
+    <h4>The noise floor belongs to the question set, not to the model</h4>
+    <p>Part four established that the model disagrees with itself 1.8% of the time, and used that as the threshold below which nothing counts as damage. Part five tested against the same 1.8%, legitimately, because it reused the same questions.</p>
+    <p>Running the identical configuration against itself on a <em>harder</em> mixture of questions gives <strong>7.8%</strong>. The disagreement concentrates exactly where the model is near the edge of what it can do: 25.7% churn on a category it solves about two thirds of the time, and <strong>0.0%</strong> both where it scores 100% and where it scores 0%. A model that is sure of an answer gives the same one twice; a model that is guessing gives a different one.</p>
+    <p>So the floor is a property of what you asked, not of the model, and carrying a floor between experiments with different question sets is invalid. This document did that once and the claim it supported has been withdrawn. The 1.8% figures in Parts four and five stand, because those experiments measured their own floor on their own questions.</p>
+  </div>
+</section>
+
+<p class="part">Part seven &middot; The product, not the engine</p>
+
+<section id="wait">
+  <h2>What a person actually waits for</h2>
+  <p>Every part so far measured the engine. This one measures the thing built on top of it: a chat application that searches the web before answering. The question it exists to settle is embarrassingly basic and had never been asked here &mdash; when someone waits for an answer, how much of that wait is the model at all?</p>
+  <div class="scroll"><table>
+    <caption>Median across twelve search turns. Qwen3-8B, fp8 weights, 16k context, one A10G, live Brave search.</caption>
+    <thead><tr><th>Stage</th><th class="n">Time</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td>Search</td><td class="n">626 ms</td><td>asking a search engine for links</td></tr>
+      <tr><td>Fetch</td><td class="n">741 ms</td><td>downloading those pages, in parallel</td></tr>
+      <tr><td>Extract</td><td class="n">39 ms</td><td>stripping them to readable text</td></tr>
+      <tr><td><strong>Before the GPU does anything</strong></td><td class="n x"><strong>1,406 ms</strong></td><td></td></tr>
+      <tr><td>Reading the question</td><td class="n">1,178 ms</td><td>the model taking in the whole prompt</td></tr>
+      <tr><td>Writing the answer</td><td class="n">~5,700 ms</td><td>300 tokens, one at a time</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Inference is 81% of the turn and 46% of the wait before the first word appears.</strong> Both numbers are correct. Which one is the headline depends entirely on how long the answer is &mdash; on a short answer retrieval dominates, on a long one it disappears into the writing. This document's recurring lesson, that a technique has no number without a workload attached, applies to its own summary statistic.</p>
+  </div>
+  <p>Two of the twelve turns retrieved <em>nothing</em>: some sites refuse automated readers outright. Those turns were answered anyway, from the model's own knowledge, which is the degradation path working rather than a fault.</p>
+</section>
+
+<section id="fourtokens">
+  <h2>Four tokens that made every conversation 2.3&times; slower</h2>
+  <p>A chat is not a series of independent questions. Turn 30 re-sends the whole conversation, about 9,300 tokens, before adding anything new. Part three showed the engine can skip re-reading text it has already processed, which is what makes long chats survivable at all. So the layout of that prompt is the single most important thing about a chat product.</p>
+  <p>Something was quietly breaking it. Reading the engine's own report of how much of each prompt it recognised, the answer was always the same: <em>everything up to the previous reply, and nothing after</em>. The model's own last answer was being re-read from scratch every single turn.</p>
+
+  <div class="concept">
+    <span class="tag">The mechanism</span>
+    <h4>An empty box that appears in one place and not the other</h4>
+    <p>This model can be asked to reason before answering, or to skip it. When reasoning is switched off, its prompt format inserts an empty pair of thinking markers &mdash; <code>&lt;think&gt;&lt;/think&gt;</code>, nothing between them &mdash; into the prompt the model is asked to continue.</p>
+    <p>But when that same turn is later replayed as history, the markers are left out. So the text of turn 29, as rebuilt during turn 30, is not what was actually sent during turn 29. It differs by four tokens, near the end. Matching stops at the first difference, so everything after those four tokens is thrown away and recomputed.</p>
+  </div>
+
+  <p>Rendering the prompts offline, without a GPU, made it exact: the stock format broke the match at <strong>5 of 5</strong> turn transitions, and a corrected one at <strong>0 of 5</strong>. On the real server the correction is worth this:</p>
+  <div class="scroll"><table>
+    <caption>Same conversation, same server, same settings. The only change is four tokens of prompt formatting.</caption>
+    <thead><tr><th class="n">Turn</th><th class="n">Before</th><th class="n">After</th><th class="n">Recognised</th></tr></thead>
+    <tbody>
+      <tr><td class="n">5</td><td class="n">123.8 ms</td><td class="n m">42.5 ms</td><td class="n">0.98</td></tr>
+      <tr><td class="n">25</td><td class="n">175.0 ms</td><td class="n m">73.4 ms</td><td class="n m">1.00</td></tr>
+      <tr><td class="n">30</td><td class="n">188.0 ms</td><td class="n m">81.7 ms</td><td class="n m">1.00</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>2.3&times; faster to the first word, across an entire conversation, from a four-token formatting fix.</strong> And it was a known open bug in the model's published prompt format, written up with its remedy. It was found here by measurement, over an afternoon, when a web search would have taken minutes. The rule adopted afterwards: measure what is specific to this setup, look up what belongs to somebody else's library.</p>
+  </div>
+
+  <p>With that fixed, the value of remembering a conversation can finally be measured cleanly. The same chat, run once normally and once with the memory deliberately defeated:</p>
+  <div class="scroll"><table>
+    <caption>30 turns, 300 tokens of reply each. fp8 weights, 16,384-token window, cache budget pinned to 69,264 tokens.</caption>
+    <thead><tr><th class="n">Turn</th><th class="n">Conversation length</th><th class="n">Remembering</th><th class="n">Starting fresh</th><th class="n">Ratio</th></tr></thead>
+    <tbody>
+      <tr><td class="n">10</td><td class="n">2,948</td><td class="n m">51.7 ms</td><td class="n">830.8 ms</td><td class="n">16.1&times;</td></tr>
+      <tr><td class="n">20</td><td class="n">6,197</td><td class="n m">66.0 ms</td><td class="n">1,808.5 ms</td><td class="n">27.4&times;</td></tr>
+      <tr><td class="n">30</td><td class="n">9,445</td><td class="n m">81.7 ms</td><td class="n x">2,895.7 ms</td><td class="n x">35.4&times;</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>35&times; by turn 30, and the gap widens the longer the conversation runs.</strong> That is larger than anything else in this document &mdash; larger than quantization, larger than guessing ahead. For a chat product, keeping this intact matters more than every engine optimisation in Parts four and five combined. Which is uncomfortable, because it is also the most fragile thing here: it breaks on four tokens of formatting, on dropping old messages from the front, on putting a search result in the wrong place. Silently, every time.</p>
+  <p>Reopening an old chat is the other side of it. Nothing is remembered, so the whole history is re-read: <strong>5.1 seconds</strong> for a conversation near the size limit. It is the worst delay the product can produce, and no ordinary benchmark ever sees it, because a benchmark has no yesterday.</p>
+</section>
+
+<section id="twobugs">
+  <h2>Two experiments that came back as bugs</h2>
+  <p>Two measurements were designed to settle product decisions. Neither did. Both instead found a defect, which is the more useful outcome and worth showing rather than tidying away.</p>
+
+  <h3>Should the model's old reasoning be kept in the conversation?</h3>
+  <p>Reasoning text is long, and keeping it makes the history grow much faster. Before the formatting fix, keeping it looked <strong>2.4&times; slower</strong>, which reads like a clear product decision. After the fix:</p>
+  <pre>reasoning stripped   74.3 ms      reasoning kept   74.3 ms</pre>
+  <p><strong>Identical.</strong> The entire difference had been the formatting bug, appearing in one arm and not the other. There was no tradeoff to decide; there was a defect to fix. The project's own specification had written this up as a decision to be measured.</p>
+
+  <h3>What to do when a conversation outgrows the window</h3>
+  <p>Eventually a chat is too long to send. Two options: drop the oldest messages, or compress them into a summary and keep that. Dropping should be terrible, because removing text from the front shifts the position of everything after it and nothing matches any more. Summarising should be good: one expensive turn, then a new stable opening the engine can recognise again.</p>
+  <div class="scroll"><table>
+    <caption>First run, 160 turns. Both strategies past the overflow point.</caption>
+    <thead><tr><th>Strategy</th><th class="n">Before overflow</th><th class="n">After overflow</th><th class="n">Recognised</th></tr></thead>
+    <tbody>
+      <tr><td>Drop the oldest</td><td class="n">2,951.6 ms</td><td class="n x">2,956.0 ms</td><td class="n x">0.000</td></tr>
+      <tr><td>Summarise and restart</td><td class="n">2,954.7 ms</td><td class="n x">2,960.8 ms</td><td class="n x">0.000</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>Both came back equally broken, and the summary was supposed to be the fix.</strong> Dropping behaved as predicted. But the summary written here embedded a count of how many messages it had replaced, and that count rises every turn. So the summary text changed on every single request, the match broke at the very start of the prompt, and the clever strategy performed within 5&nbsp;ms of the naive one it was meant to beat.</p>
+  </div>
+  <p>That is a bug, not a result, and it took four attempts to fix &mdash; three of which were caught by a check that runs on a laptop in a second, asserting the summary text holds steady from turn to turn. The first fix changed nothing because the code recomputes the boundary from the whole conversation every turn, so it advanced one message pair at a time no matter what. The second left a clamp that collapsed whenever fewer than a block of messages remained. The third was a <em>second</em> piece of code deciding the same boundary and fighting the first.</p>
+  <p>The shape that finally works advances the summarised boundary in <em>jumps</em> rather than continuously, so the same text is reused for many turns at a stretch. Measured again with that in place:</p>
+  <div class="scroll"><table>
+    <caption>Second run, same 160 turns, after the summary was made stable between re-summarisations.</caption>
+    <thead><tr><th>Strategy</th><th class="n">Median</th><th class="n">Recognised</th><th>Shape</th></tr></thead>
+    <tbody>
+      <tr><td>Drop the oldest</td><td class="n x">2,951 ms</td><td class="n x">0.000</td><td>every turn cold, forever</td></tr>
+      <tr><td><strong>Summarise and restart</strong></td><td class="n m"><strong>63.6 ms</strong></td><td class="n m"><strong>0.993</strong></td><td>one cold turn per block</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>20&times; better once the summary stops moving, and 46&times; between the re-summarisation points.</strong> Dropping the oldest messages is not a cheaper option with a latency cost &mdash; it is 20&times; worse with nothing to show for it, because shifting every position forfeits the reuse permanently while summarising forfeits it once per block.</p>
+  </div>
+  <p>The periodic spike is not overhead either. At each re-summarisation the conversation is trimmed to about 2,924 tokens and re-read from scratch, and at the cost-per-token measured three parts earlier that predicts 852&nbsp;ms against 817 measured. The same constant, taken in a different experiment weeks before, lands within 4% on a number it was never fitted to.</p>
+  <p><strong>The general rule is worth more than the bug: summarising only helps if the summary is identical, character for character, from one turn to the next.</strong> Regenerate it each turn &mdash; from a counter, a timestamp, or a fresh model call that varies at all &mdash; and the entire benefit is given up while still paying to produce it.</p>
+</section>
+
+<section id="regime">
+  <h2>The mistake underneath four of these</h2>
+  <p>Four measurements in this part first came back as clean, confident nulls. No cache contention as conversations pile up. No difference between the two overflow strategies. Every configuration equally bad under load.</p>
+  <p>All four were wrong in the same way, and none of them were wrong predictions. <strong>The experiment never entered the range where the effect it measures exists.</strong> The contention test ran 4% past the limit where contention begins. The overflow test used a conversation that never actually overflowed. The load test used arrival rates already past the point where everything fails equally.</p>
+  <div class="concept">
+    <span class="tag">Why this appeared now</span>
+    <h4>A protocol that was complete for five parts and not for the sixth</h4>
+    <p>Every number in this document was predicted in writing beforehand. That discipline asks one question: what will the number be? For Parts one through five it was enough, because those measured things that exist wherever you point the instrument &mdash; how fast tokens come out, how much memory the weights take.</p>
+    <p>This part measures <em>thresholds</em>. Cache contention only exists past the cache's size. An overflow strategy only exists past the window. Saturation only exists near capacity. Outside those ranges you do not get a wrong number, you get a confident null &mdash; and a confident null reads exactly like a finding.</p>
+  </div>
+  <p>The fix was to stop relying on remembering. The measurement runner now states what each experiment must cross and what its configuration actually produces, and refuses to run when the two do not line up:</p>
+  <pre>contention   needs to exceed   69,264   this config  148,944   2.15&times;   OK
+cold open    needs to stay under 16,384   this config   15,064   0.92&times;   OK
+overflow     needs to exceed   16,384   this config   25,760   1.57&times;   OK</pre>
+  <p>Fed the original broken settings, it refuses them: <code>0.59&times; REFUSED</code>. It also refused the first attempt at a fix, at 1.28&times;, as too close to the boundary to observe anything after it &mdash; which is how the overflow test ended up at 160 turns rather than 130. <strong>That is the same move as every other guard in this document</strong>: the benchmark that validates itself against a fake server, the control that reads the engine's counters before trusting its own null. Written rules did not survive the sixth hour of a session; the ones that hold are the ones a program checks.</p>
+</section>
+
+<p class="part">Part eight &middot; Thinking as a scheduling knob</p>
+
+<section id="budget">
+  <h2>The reasoning nobody was waiting for</h2>
+  <p>A reasoning model spends its first several seconds writing a hidden thought the user never sees. On this hardware that is not a detail &mdash; it is most of the wait. So the question is whether that silence buys anything, and it is answerable: this model exposes a cap on how many reasoning tokens it may spend, and the cap can be swept.</p>
+  <p>Seven settings from zero to unbounded, on grade-school word problems, run twice for 400 graded answers per setting:</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV cache, gsm8k, 400 answers per row pooled over two runs, concurrency 32</caption>
+    <thead><tr><th>Reasoning budget</th><th class="n">Accuracy</th><th class="n">Silence before first output</th></tr></thead>
+    <tbody>
+      <tr><td>0 (thinking off)</td><td class="n">93.2%</td><td class="n"><span class="m">0.11 s</span></td></tr>
+      <tr><td>128 tokens</td><td class="n">91.5%</td><td class="n">3.1 s</td></tr>
+      <tr><td>512 tokens</td><td class="n">94.0%</td><td class="n">11.7 s</td></tr>
+      <tr><td>2048 tokens</td><td class="n">94.8%</td><td class="n">19.2 s</td></tr>
+      <tr><td>unbounded</td><td class="n">93.6%</td><td class="n">17.9 s</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>0.4 points for a 160&times; cut in silence.</strong> Turning thinking off entirely costs 0.4 points against letting it run &mdash; and 0.4 points is inside the &plusmn;2 the repeat-run control puts on this sample. On these questions the hidden reasoning trace buys nothing measurable and costs the user nearly eighteen seconds.</p>
+  </div>
+  <p>There is a second argument for a cap that has nothing to do with the average. Between two identical runs the unbounded setting scored 95.8% and then 91.5%, while every capped setting moved at most one point. The answers were not the unstable part &mdash; accuracy among replies that finished was 96.8% and 95.8%, a point apart. What moved was how often a reply ran away and never finished at all, and that rose from 1.0% to 4.5% purely because the ceiling had been raised from 3,000 tokens to 4,096, letting a runaway run further before being cut off. <strong>A budget does not only cut latency. It caps variance, by removing the request that thinks until it is killed and returns nothing.</strong></p>
+</section>
+
+<section id="trough">
+  <h2>Halfway is the worst place to stop</h2>
+  <p>The same sweep on harder competition-style problems does not produce the same flat line. It produces a trough, and the trough is deep:</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV cache, math slice, 180 answers per cell, concurrency 32, sampling as labelled</caption>
+    <thead><tr><th>Reasoning budget</th><th class="n">Accuracy, greedy</th><th class="n">Accuracy, vendor's sampling</th></tr></thead>
+    <tbody>
+      <tr><td>128 tokens</td><td class="n">93.9%</td><td class="n">93.9%</td></tr>
+      <tr><td>1024 tokens</td><td class="n"><span class="x">88.9%</span></td><td class="n"><span class="x">82.8%</span></td></tr>
+      <tr><td>unbounded</td><td class="n">99.4%</td><td class="n">98.9%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>A middling budget is 11.1 points worse than a tiny one.</strong> Give the model room or give it almost none; the setting in between is the one to avoid. The same shape appeared at 11.6 and 11.1 points in two earlier runs, so it is not a sampling accident.</p>
+  </div>
+  <div class="concept">
+    <span class="tag">Read the label on the box</span>
+    <h4>Four parts of this document used a setting the model's own card forbids</h4>
+    <p>Everything from part four onward sent temperature 0 &mdash; greedy decoding, the obvious choice for a reproducible measurement. The Qwen3 model card says, twice, not to: <em>"DO NOT use greedy decoding, as it can lead to performance degradation and endless repetitions."</em> That warning names precisely the runaway tail the previous section attributes to unbounded reasoning.</p>
+    <p>So the trough was re-measured under the vendor's recommended sampling, because if it vanished the finding had to be withdrawn rather than amended. It did not vanish; it deepened. The comparisons survive because every setting shared the configuration. The causal story about unbounded reasoning does not fully survive, and the honest correction is that the vendor documented the failure mode before it was ever measured here.</p>
+    <p>One surprise came back with it. Three greedy measurements of the same 1024-token setting read 82.8, 83.3 and 88.9 &mdash; a six-point spread at identical configuration, twice the noise floor. The single measurement under the card's sampling landed at 82.8. <strong>Greedy is supposed to be the deterministic setting and behaved as the erratic one</strong>, which is what a per-item coin flip between repeating and not repeating looks like when averaged over 180 problems.</p>
+  </div>
+</section>
+
+<section id="position">
+  <h2>It is not how long it thinks. It is where you cut</h2>
+  <p>A trough needs a mechanism, and the records carry one. Split every capped answer by a single question: at the moment the cap bit, had the model already reached an answer inside its own reasoning?</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, math slice, 1024-token budget, the two runs that reproduced the trough</caption>
+    <thead><tr><th>Where the cut landed</th><th class="n">Share of capped answers</th><th class="n">Accuracy, run 1</th><th class="n">Accuracy, run 2</th></tr></thead>
+    <tbody>
+      <tr><td>After it had an answer</td><td class="n">68&ndash;70%</td><td class="n"><span class="m">91.0%</span></td><td class="n"><span class="m">92.3%</span></td></tr>
+      <tr><td>Before it had an answer</td><td class="n">30&ndash;32%</td><td class="n"><span class="x">53.2%</span></td><td class="n"><span class="x">51.1%</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Interrupted before it reaches an answer, the model scores a coin flip &mdash; twice, 53.2% then 51.1%.</strong> Interrupted after, it scores 91 to 92%. The budget is not a dial on quality. It is a bet on whether the cut lands past the model's natural solution length, and a middling budget is simply the setting that loses that bet most often.</p>
+  </div>
+  <p>That also explains why a very small budget is safe. Cut at 128 tokens and the model has barely started, emits its reasoning-closing tag, and then re-derives the whole solution in the open where the grader can see it. The answer still gets computed; it just gets computed visibly. The danger zone is the middle, where there is enough hidden work to look complete and not enough to be complete.</p>
+</section>
+
+<section id="stopword">
+  <h2>Forty-two points of politeness</h2>
+  <p>Cutting a thought off requires putting words in the model's mouth. Qwen's own technical report gives the phrase it was trained to accept: <em>"Considering the limited time by the user, I have to give the solution based on the thinking directly now."</em> The obvious alternative is to say nothing at all and just close the tag. Two servers, identical but for that string:</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, math slice, 180 answers per cell, vendor sampling, servers differing only in the reasoning stop string</caption>
+    <thead><tr><th>Budget</th><th class="n">Bare tag</th><th class="n">Vendor's trained phrase</th><th class="n">Visible reply length, bare tag</th><th class="n">&hellip; trained phrase</th></tr></thead>
+    <tbody>
+      <tr><td>128 tokens</td><td class="n"><span class="m">93.3%</span></td><td class="n"><span class="x">50.6%</span></td><td class="n">1,983 ch</td><td class="n">338 ch</td></tr>
+      <tr><td>2048 tokens</td><td class="n">98.9%</td><td class="n">99.4%</td><td class="n">&mdash;</td><td class="n">&mdash;</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The vendor's own interrupt phrase costs 42.7 points at a small budget.</strong> The prediction said it would be worth zero to five points <em>in its favour</em>, on the reasoning that the model was trained on that exact sentence. It was, and that is the problem.</p>
+  </div>
+  <p>The phrase is an instruction, and the model obeys it. "Give the solution based on the thinking directly now" is a command to answer from whatever partial state exists &mdash; which forbids exactly the recovery that makes small budgets safe. One record was cut mid-sentence and did as it was told:</p>
+  <pre>...Day 1: 78 - 39 = 39.\n\nDay 2[Considering the limited time by the user, I have to
+give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  ".\n\nANSWER: 18"</pre>
+  <p>It stopped mid-"Day 2", was told to answer immediately, and answered &mdash; wrongly, from three lines of arithmetic it had not finished. The general statement: <strong>a trained interrupt designed for "you are out of time, wrap up" is correct when the thought is nearly complete and destructive when it has barely started.</strong> It is safe only where the budget already lands past the model's natural solution length, which is precisely where it makes no difference at all.</p>
+</section>
+
+<section id="adaptive">
+  <h2>The clever policy lost to the simple one</h2>
+  <p>If a small budget is cheap and a large one is occasionally worth it, the obvious system is a policy that watches the queue and switches: spend 2048 tokens while the server is quiet, drop to 128 when the backlog grows past eight, return only when it falls below two. That policy was built, and measured against the two fixed settings it switches between, under the same offered load.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, math slice, 180 requests per arm, open-loop Poisson arrivals at 0.6 req/s, 16 sequence slots, vendor sampling</caption>
+    <thead><tr><th>Policy</th><th class="n">Accuracy</th><th class="n">Silence p50</th><th class="n">Silence p95</th><th>What it issued</th></tr></thead>
+    <tbody>
+      <tr><td>Fixed 2048</td><td class="n">98.9%</td><td class="n">118.1 s</td><td class="n">213.2 s</td><td>2048 &times;180</td></tr>
+      <tr><td>Queue-adaptive</td><td class="n">94.4%</td><td class="n">48.1 s</td><td class="n">87.6 s</td><td>2048 &times;46, 128 &times;134</td></tr>
+      <tr><td>Fixed 128</td><td class="n"><span class="m">95.0%</span></td><td class="n"><span class="m">11.1 s</span></td><td class="n"><span class="m">73.6 s</span></td><td>128 &times;180</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The fixed small budget beats the adaptive policy on both axes &mdash; 95.0% against 94.4%, and 11.1 s of silence against 48.1 s.</strong> There is no trade being made. The clever thing is simply worse than the dumb thing it was built to improve on.</p>
+  </div>
+  <p>The reason is queueing, not modelling. Under sustained overload the backlog is deep almost all the time, so the policy issues the small budget on 74% of requests anyway. The other 26% are 2048-token requests that each occupy one of only sixteen sequence slots for about two minutes. Those requests do not merely cost themselves latency &mdash; <strong>they hold slots that the cheap requests behind them need, so the whole queue drains slower.</strong> The policy pays the full latency price of the expensive setting on a quarter of its traffic and buys 0.6 points of accuracy with it, which is inside the noise. The hysteresis does not save it; the hysteresis is what lets it sit at the expensive setting long enough to do the damage.</p>
+  <p>One caveat is load-bearing, and it is the experiment that could still rescue the idea: this is one constant arrival rate. An adaptive policy exists to handle load that <em>varies</em>, and a constant offered load tests only its behaviour in permanent overload. A bursty pattern where the queue genuinely empties between bursts is a different question and was not asked here.</p>
+</section>
+
+<section id="priority">
+  <h2>Priority needs a queue to reorder</h2>
+  <p>The other scheduling knob is ranking: mark a request urgent and have the engine serve it first. Matched pairs of identical requests, one marked high and one low, fired into a backlog held open by a separate load generator.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, matched high/low pairs against a backlog, vLLM 0.27.1</caption>
+    <thead><tr><th>Scheduler</th><th class="n">Peak backlog</th><th class="n">High priority</th><th class="n">Low priority</th><th>Reading</th></tr></thead>
+    <tbody>
+      <tr><td>Default (first come, first served)</td><td class="n">27</td><td class="n">33.63 s</td><td class="n">33.65 s</td><td>accepted and ignored</td></tr>
+      <tr><td>Priority scheduling</td><td class="n">27</td><td class="n"><span class="m">31.06 s</span></td><td class="n"><span class="x">178.04 s</span></td><td><span class="m">5.7&times;</span>, on one pair</td></tr>
+      <tr><td>Priority scheduling</td><td class="n">10, drains in ~1 s</td><td class="n">1.27 s</td><td class="n">1.27 s</td><td>no effect</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The priority field is accepted and silently ignored unless the server is started with a flag that is off by default.</strong> The first run set priorities, got a clean null, and the null was the scheduler discarding them &mdash; 33.63 s against 33.65 s, which is two requests being treated identically, not a weak effect.</p>
+  </div>
+  <p>With the flag on and a genuine backlog, priority moved a request from 178 s to 31 s. With a shallow backlog that drains in about a second there is nothing to reorder and the effect is exactly zero, which is the same shape as every other result in this document: <strong>the technique has no number, only a number given something pressing against the limit it relieves.</strong> The honest weakness is that the 5.7&times; rests on a single valid pair; the other pairs in that run fired with no backlog, where priority cannot act by construction.</p>
+</section>
+
+<section id="overlap">
+  <h2>A six-second win that was not the search</h2>
+  <p>The last experiment is the one the whole gateway existed for. When an answer needs a web search, the search is a round trip the user waits through. But a reasoning model has something to do during that wait: it can start thinking against the un-retrieved question, and the results can be spliced into its own half-finished thought when they land. Three orderings, on 67 real questions a search engine actually answers.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV cache, prefix caching on, 2048-token budget, retrieval slice n=60, concurrency 8, vendor sampling, gateway search on every request</caption>
+    <thead><tr><th>Ordering</th><th class="n">Accuracy</th><th class="n">Tokens produced</th><th class="n">First token</th><th class="n">Total</th></tr></thead>
+    <tbody>
+      <tr><td>Search, then think</td><td class="n">98.3%</td><td class="n">236</td><td class="n">2.11 s</td><td class="n">13.07 s</td></tr>
+      <tr><td>Think <em>during</em> the search, then splice</td><td class="n">98.3%</td><td class="n"><span class="x">55</span></td><td class="n"><span class="m">1.23 s</span></td><td class="n"><span class="m">7.05 s</span></td></tr>
+      <tr><td>Think, then search</td><td class="n">100.0%</td><td class="n">305</td><td class="n"><span class="x">10.43 s</span></td><td class="n">13.25 s</td></tr>
+    </tbody>
+  </table></div>
+  <p>Six seconds faster, same accuracy. It reads as a clean win for overlapping, and it is not one.</p>
+  <div class="finding">
+    <p><strong>The overlapping arm produced 55 tokens where the baseline produced 236.</strong> At its own measured decode rate of 46.6 ms per token, those 181 missing tokens are worth 8.4 seconds &mdash; more than the entire six-second gap. The search round trip actually available to hide was 753 ms. The arithmetic leaves no room for latency-hiding to be the cause.</p>
+  </div>
+  <p>What happened instead is that splicing results into a running thought <em>interrupts</em> it. The cue reads "Wait, the search results just arrived&hellip; I should use these to answer", and the model does exactly that: it stops reasoning and answers. This is part eight's first finding arriving by a different road &mdash; the thinking it skipped was worth nothing, because accuracy is identical either way.</p>
+  <p>One prediction in that run was right for the right reason, and it is the one worth keeping. First-token time was predicted to improve by 700 to 1000&nbsp;ms, on the grounds that the baseline must read a 3,000-token block of search results before it can say anything, at a cost-per-token measured two parts earlier: <span class="p">3,000 &times; 0.2915 ms = 875 ms</span>. Measured: <span class="m">882 ms</span>. Agreement to 0.8% on a constant taken from an unrelated experiment weeks before &mdash; and note what it means. <strong>Overlapping does not hide the search from the first token either.</strong> Both orderings wait for it. What overlapping buys is that it has already done the reading.</p>
+  <p>The third ordering is the cautionary one. Thinking first and searching afterwards costs almost nothing end to end &mdash; 172&nbsp;ms &mdash; but 8.3 seconds at the first token, because the relay runs the entire first generation before it starts the search. <strong>Ordering is nearly free in total time and decisive in the only latency a person actually perceives.</strong></p>
+</section>
+
+<p class="part">Part nine &middot; Conclusions</p>
+
+<section id="attrib">
+  <h2>The attribution</h2>
+  <p>Adding it up on traffic where users send different prompts:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Technique</th><th class="n">Effect on capacity</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Prefix caching</td><td class="n">0%</td><td>2.9&times; on shared prompts; nothing to cache otherwise</td></tr>
+      <tr><td>Chunked prefill</td><td class="n">~2%</td><td>but 34% better ITL p95 — a latency fix</td></tr>
+      <tr><td>fp8 KV cache</td><td class="n">+11%</td><td>1.57&times; the budget; workload is prefill-bound</td></tr>
+      <tr><td><code>--max-num-batched-tokens</code></td><td class="n">0%</td><td>never binding: 9% utilised at the smallest setting</td></tr>
+      <tr><td><strong>Unexplained by any flag</strong></td><td class="n m">3.5&times;</td><td>kernels and core engine</td></tr>
+    </tbody>
+  </table></div>
+  <p>That last row is the finding. <strong>vLLM's advantage on realistic traffic is not its two most famous scheduling features.</strong> It is FlashAttention's varlen path — no padding, no mask, exactly the 1.24&times; tax measured in step 4 — CUDA graphs replacing per-step Python, <code>torch.compile</code>, and a paged allocator that packs far more sequences into the same memory.</p>
+  <p>We went in expecting the gap to be the techniques with names. It is mostly the parts with no marketing. That answer only exists because the engine was written first: without it there would have been no 1.24&times; mask tax to recognise, no 0.674 bandwidth figure to compare against 0.803, and no reason to suspect the kernels at all.</p>
+  <div class="scroll"><table>
+    <caption>Predictions were written with their arithmetic before each measurement. Eight correct, three wrong, in the vLLM phase alone.</caption>
+    <thead><tr><th>Prediction</th><th class="n">Predicted</th><th class="n">Measured</th></tr></thead>
+    <tbody>
+      <tr><td>Capacity, unique prompts</td><td class="n p">4.5-6 req/s</td><td class="n m">5.7</td></tr>
+      <tr><td>Capacity, cached prompts</td><td class="n p">12-16 req/s</td><td class="n x">18.6</td></tr>
+      <tr><td>Prefix caching off = no change</td><td class="n p">no change</td><td class="n m">+4%</td></tr>
+      <tr><td>Chunked prefill off</td><td class="n p">-10 to -20%</td><td class="n x">-2%</td></tr>
+      <tr><td>fp8 barely helps</td><td class="n p">5.7-6.5</td><td class="n m">6.44</td></tr>
+      <tr><td>Chunk size 1024 vs 8192</td><td class="n p">24% spread</td><td class="n x">1.8%</td></tr>
+      <tr><td>max-num-seqs 16/32/64</td><td class="n p">3.5 / 4.6 / 5.5</td><td class="n m">3.65 / 5.01 / 5.35</td></tr>
+    </tbody>
+  </table></div>
+  <p>The three misses share one shape. <strong>Each predicted the effect of raising a ceiling without first checking whether anything was pressing against it.</strong> <code>--max-num-seqs 64</code> was capped at 39 by memory. <code>--max-num-batched-tokens 1024</code> ran at 9% utilisation. Prefix caching had nothing to cache. One line of arithmetic on budget utilisation would have caught all three before the prediction was written.</p>
+</section>
+
+<section id="method">
+  <h2>The bugs, and why the method caught them</h2>
+  <p>Every measurement was preceded by a written prediction with its arithmetic. That is not ceremony — it is the only thing that makes a wrong number visible. A selection of what it caught:</p>
+  <ul>
+    <li><strong>A missing <code>torch.inference_mode()</code></strong> made the engine build a training graph on every forward pass and run out of memory at 21.7 GiB on a workload needing 16. Sixty-seven passing tests against a mock could not see it — a fake tensor library has no autograd to leak.</li>
+    <li><strong><code>.generate()</code> silently applies a repetition penalty</strong> even under greedy decoding. Left in place, the correctness gate would have failed on a difference that was not a bug in our code.</li>
+    <li><strong>Warming up at the wrong shape warms nothing.</strong> A 6-token warmup before a 412-token measurement left a 36% outlier on the first run, because the GPU selects kernels per problem shape.</li>
+    <li><strong>A sweep's step size is the measurement's precision.</strong> Testing batch 4 and 8 gives an answer with &plusmn;3 error bars — which is how "dies above 4" entered the record when the truth was 7. The same mistake was then repeated in our own sweep.</li>
+    <li><strong>vLLM's KV cache size varies 28% between identical launches</strong>, because it profiles free memory at startup. A capacity difference between two configurations is not attributable to a flag until their budgets are confirmed equal — an ablation was re-run with memory pinned for exactly this reason.</li>
+    <li><strong>The grader was defeated by the model agreeing with it.</strong> The quality harness reported 84% accuracy with 16% of replies unreadable — and <em>zero</em> replies that were readable but wrong. Those two facts together are the diagnosis: every answer the model gave was correct and the grader could not find them. It was writing <code>\boxed{72}</code>, its trained habit, rather than the format demanded of it. Quantization changes formatting, so a version reaching for that habit slightly more often would have scored lower for reasons having nothing to do with reasoning.</li>
+    <li><strong>A pattern that swallowed a newline.</strong> The model put its answer under a <code>Final Answer:</code> heading; the pattern matched the heading itself, consumed the line break and captured the following line whole. Correct answers scored as unreadable with the right number sitting one line below. Both grading bugs were repaired and every saved reply re-scored offline at no GPU cost, because the harness had been built to write out the full text of every answer for exactly this eventuality.</li>
+    <li><strong>22% of requests died mid-answer, and the first diagnosis was wrong.</strong> Long streaming requests were failing, which was blamed on the network before checking — and the data contradicted that within one query: four-minute requests failed 1% while thirty-second ones failed 36%. The real cause was connection reuse under fast turnover. It is this section's own lesson turned on its author: state a cause only after testing it against the evidence already in hand.</li>
+    <li><strong>The benchmark counted chunks and called them tokens, and it inverted the headline.</strong> For four phases the server sent one token per network message, so counting messages was counting tokens. Guessing ahead sends a whole accepted run in one message, so the count came in low by exactly the speed-up &mdash; and the tool reported the technique as <em>1.5&times; slower</em> when it is 1.43&times; faster. Nothing crashed and every figure looked reasonable. What exposed it was not the timing but the word count: the control produced exactly its maximum on every request while the guessing runs produced half as much, and at zero randomness a technique that changes nothing cannot halve the amount of text. A second instrument then rebuilt the true count from an unrelated source and landed on it exactly.</li>
+    <li><strong>An out-of-memory crash the server's own memory check could not see.</strong> The verification step briefly builds a scratch buffer sized by the concurrency limit, the guess depth and the vocabulary &mdash; 594 MB at the defaults. That allocation happens after the server has measured free memory and sized its cache to fill the GPU, so the server starts, reports itself healthy, and dies on its first request. Whether a given launch survives is decided by how much slack the startup measurement happened to leave. Worse, the default concurrency limit was 256 on a machine that can hold at most 17, so it was reserving 594 MB for a crowd that could never arrive &mdash; taken out of the cache, making the real limit lower still.</li>
+    <li><strong>A rate that looked like a count.</strong> While testing the acceptance meter against plausible alternative metric names, a series measuring an <em>average</em> was matched by a pattern meant for a <em>total</em>, and would have been added to a token tally. No error &mdash; just an acceptance rate a few tenths too high. Found by testing the tool against names it had never seen, before it ever touched the real server.</li>
+    <li><strong>An accuracy column that was a truncation rate.</strong> Three reasoning settings scored 56.5%, 56.0% and 52.5% and were written down as a finding about budgets. They were a finding about a token ceiling: 44 to 47.5% of replies hit it, and the 69 that never closed their reasoning scored <em>zero</em>, because a reply cut off mid-thought has no answer to grade. Among replies that finished, all three scored 99&ndash;100%. The settings differed only in how often the cap bit. Every run now reports accuracy beside its truncation rate, and any run whose reply-length p95 sits on the ceiling is unusable for an absolute number.</li>
+    <li><strong>A field that had been renamed out from under the client.</strong> Turning on the reasoning parser routed every reasoning token into a field the measurement client did not read, because the server had renamed it one version earlier. Accuracy stayed valid, so the arms looked fine &mdash; but &ldquo;time to first token&rdquo; quietly became time-to-first-<em>visible</em>-token for 89% of records and time-to-first-token for the 11% whose tags leaked, two different quantities averaged together inside one column. Enabling a feature can activate a client bug that was harmless while the feature was off.</li>
+    <li><strong>A control that did not perturb what it claimed to.</strong> A cold-cache comparison prefixed random noise to the user&rsquo;s new message &mdash; but the conversation history renders <em>before</em> that message, so every earlier token still matched and the cache hit normally. Warm and cold came out identical against a predicted 21&times;. A control that does not move the thing it names is worse than no control: it returns a null that reads as a finding.</li>
+    <li><strong>An actuator that was never wired up.</strong> The gateway&rsquo;s budget policy set the flag that enables thinking and never forwarded the budget itself, so every budget it chose was a no-op. Caught by a test asserting the value reaches the outgoing request &mdash; without it the policy experiment would have returned three identical arms and concluded, reasonably and wrongly, that the policy does nothing.</li>
+    <li><strong>The right answer for the wrong reason is more dangerous than a wrong one.</strong> The prediction tool guessed 7.08 concurrent requests and measurement said 7 — but its safety margin only coincidentally equalled the fragmentation and activations it does not model. Trusting that match would have broken silently the moment any term changed.</li>
+  </ul>
+  <p>The pattern across all of them: <strong>bugs that raise exceptions are cheap. Bugs that produce plausible numbers are the ones that quietly destroy work like this.</strong></p>
+</section>
+
+<details>
+  <summary>Table view &mdash; every point plotted above</summary>
+  <div class="scroll"><table id="tbl"><thead><tr><th>Configuration</th><th class="n">Throughput (req/s)</th><th class="n">TTFT p95 (ms)</th><th class="n">TTFT p50 (ms)</th><th class="n">ITL p50 (ms)</th></tr></thead><tbody></tbody></table></div>
+</details>
+
+<footer>
+  Qwen3-8B on a single NVIDIA A10G (g5.2xlarge), vLLM 0.27.1. Parts one to three run bfloat16;
+  parts four to eight run fp8 unless a table says otherwise; parts one to seven sample greedily and part eight uses the vendor&rsquo;s recommended sampling, for the reason part eight gives, and every table states the configuration
+  it was measured under. All three engines speak the same streaming protocol on the same port and were
+  measured by the same benchmark client with no modifications — the constraint that makes
+  <code>0.332 &rarr; 1.60 &rarr; 5.70</code> a ladder rather than three unrelated numbers.
+</footer>
+</main>
+</div>
+
+<script>
+const DATA = {
+  a:{title:"engine ladder",series:[
+    {name:"Naive server", c:"--s1", pts:[[0.07,4289,354,44.6],[0.17,2429,346,43.7],[0.26,3512,974,44.2],[0.33,25122,7293,44.7]]},
+    {name:"Our engine", c:"--s2", pts:[[0.45,336,315,45],[0.90,1454,335,52],[1.24,1593,336,55],[1.59,23350,12446,58],[1.62,31399,14136,58]]},
+    {name:"vLLM, unique prompts", c:"--s3", pts:[[1.03,429,340,36],[1.85,457,356,37],[2.41,611,368,39],[3.69,733,454,41],[5.12,900,569,48],[5.67,1641,848,56],[5.79,7730,4981,90]]},
+    {name:"vLLM, cached prompts", c:"--s4", dash:1, pts:[[2.01,265,247,37],[3.83,273,256,39],[5.54,281,257,40],[7.56,292,265,41],[9.54,305,272,42],[11.00,315,282,44],[14.64,353,308,58],[18.62,431,361,77]]}
+  ]},
+  b:{title:"feature ablations",series:[
+    {name:"vLLM defaults", c:"--s1", pts:[[1.03,429,340,36],[1.85,457,356,37],[2.41,611,368,39],[3.69,733,454,41],[5.12,900,569,48],[5.67,1641,848,56],[5.79,7730,4981,90]]},
+    {name:"no chunked prefill", c:"--s2", pts:[[3.10,713,409,39],[3.87,810,462,42],[4.26,750,478,42],[5.31,3328,813,49],[5.66,13969,3680,49]]},
+    {name:"no prefix caching (control)", c:"--s3", dash:1, pts:[[3.10,701,379,40],[3.63,689,436,41],[4.77,844,546,47],[5.59,6608,1722,58],[6.05,12685,7356,56]]},
+    {name:"fp8 KV cache", c:"--s4", pts:[[2.87,543,370,39],[3.89,777,448,41],[4.83,829,490,49],[5.58,956,577,58],[6.44,3025,844,70]]}
+  ]},
+  c:{title:"concurrency cap",series:[
+    {name:"max-num-seqs 16", c:"--s1", pts:[[1.95,620,360,38],[2.79,1331,447,39],[3.57,5406,1348,39],[3.65,18367,7241,40]]},
+    {name:"max-num-seqs 32", c:"--s2", pts:[[2.91,619,387,39],[4.07,1781,502,41],[4.71,3144,1211,42],[5.01,7670,4124,42]]},
+    {name:"max-num-seqs 64", c:"--s3", pts:[[3.78,857,460,41],[4.97,2696,627,45],[5.35,4222,2223,46],[5.32,13792,8149,46]]},
+    {name:"default (128, KV-capped 70)", c:"--s4", pts:[[1.03,429,340,36],[2.41,611,368,39],[3.69,733,454,41],[5.12,900,569,48],[5.79,7730,4981,90]]}
+  ]}
+};
+const W=860,H=340,M={t:14,r:124,b:44,l:56},PW=W-M.l-M.r,PH=H-M.t-M.b;
+function build(key,chartId,legendId){
+  const d=DATA[key],S=d.series;
+  const xs=S.flatMap(s=>s.pts.map(p=>p[0])),ys=S.flatMap(s=>s.pts.map(p=>p[1]));
+  const xmax=Math.max(...xs)*1.05,ymin=Math.min(...ys)*0.8,ymax=Math.max(...ys)*1.28;
+  const X=v=>M.l+(v/xmax)*PW,ly=v=>Math.log10(Math.max(v,1));
+  const Y=v=>M.t+PH-((ly(v)-ly(ymin))/(ly(ymax)-ly(ymin)))*PH;
+  const ticks=[];for(let e=2;e<=5;e++)for(const m of [1,2,5]){const v=m*Math.pow(10,e);if(v>=ymin&&v<=ymax)ticks.push(v);}
+  const xt=[],step=xmax>15?5:(xmax>6?2:0.5);for(let v=0;v<=xmax;v+=step)xt.push(+v.toFixed(1));
+  let g=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${d.title}: time to first token versus achieved throughput">`;
+  for(const t of ticks)g+=`<line class="gl" x1="${M.l}" x2="${M.l+PW}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>`;
+  g+=`<line class="ax" x1="${M.l}" x2="${M.l+PW}" y1="${M.t+PH}" y2="${M.t+PH}"/>`;
+  for(const t of ticks)g+=`<text class="tk" x="${M.l-8}" y="${(Y(t)+3.5).toFixed(1)}" text-anchor="end">${t>=1000?(t/1000)+'s':t}</text>`;
+  for(const v of xt)g+=`<text class="tk" x="${X(v).toFixed(1)}" y="${M.t+PH+18}" text-anchor="middle">${v}</text>`;
+  g+=`<text class="al" x="${M.l+PW/2}" y="${H-6}" text-anchor="middle">throughput achieved (req/s)</text>`;
+  g+=`<text class="al" transform="translate(13,${M.t+PH/2}) rotate(-90)" text-anchor="middle">TTFT p95</text>`;
+  S.forEach(s=>{
+    const col=`var(${s.c})`;
+    g+=`<path d="${s.pts.map((p,j)=>`${j?'L':'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${s.dash?' stroke-dasharray="6 4"':''}/>`;
+    s.pts.forEach(p=>{g+=`<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="4" fill="${col}" stroke="var(--surface)" stroke-width="2"><title>${s.name}: ${p[0].toFixed(2)} req/s, TTFT p95 ${p[1]} ms, ITL p50 ${p[3]} ms</title></circle>`;});
+    const last=s.pts[s.pts.length-1];
+    g+=`<text class="dl" x="${(X(last[0])+10).toFixed(1)}" y="${(Y(last[1])+4).toFixed(1)}" fill="${col}">${s.name}</text>`;
+  });
+  document.getElementById(chartId).innerHTML=g+`</svg>`;
+  document.getElementById(legendId).innerHTML=S.map(s=>`<span class="lg"><span class="sw" style="background:var(${s.c})${s.dash?';opacity:.55':''}"></span>${s.name}</span>`).join('');
+}
+build('a','ch-a','lg-a');build('b','ch-b','lg-b');build('c','ch-c','lg-c');
+const tb=document.querySelector('#tbl tbody');
+for(const k of ['a','b','c'])for(const s of DATA[k].series)for(const p of s.pts)
+  tb.insertAdjacentHTML('beforeend',`<tr><td>${s.name}</td><td class="n">${p[0].toFixed(2)}</td><td class="n">${p[1].toLocaleString()}</td><td class="n">${p[2].toLocaleString()}</td><td class="n">${p[3]}</td></tr>`);
+</script>
