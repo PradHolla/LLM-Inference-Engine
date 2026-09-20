@@ -240,7 +240,16 @@ def main() -> int:
     ap.add_argument("--url", default="http://localhost:8000")
     ap.add_argument("--model", default=None)
     ap.add_argument("--out", default="results/p7-validate.jsonl")
+    ap.add_argument("--counters", action="store_true",
+                    help="print 'hits queries' in tokens and exit; for per-arm deltas")
     a = ap.parse_args()
+    if a.counters:
+        async def _c():
+            async with httpx.AsyncClient() as c:
+                return await prefix_counters(c, a.url)
+        h, q = asyncio.run(_c())
+        print(f"{h:.0f} {q:.0f}")
+        return 0
     return asyncio.run(run(a))
 
 

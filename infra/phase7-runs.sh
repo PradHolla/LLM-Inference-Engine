@@ -150,9 +150,12 @@ z = sum(1 for x in r if x["n_sources"] == 0)
 print(f"  probe: {len(r)} items, {z} zero-source ({z/max(1,len(r)):.1%})")
 sys.exit(0 if r and z / len(r) <= 0.10 else 1)
 PY
+    # /v1/completions carries no prompt_tokens_details, so the overlap path can never fill
+    # reissue_cached_tokens. The splice's cache cost is only visible in vLLM's own counters.
     for order in retrieve_then_generate overlap generate_then_retrieve; do
         restart_gateway "q3-$order" --setenv=GW_ORDER="$order" --setenv=GW_ALWAYS_SEARCH=1
         echo "  [$(ts)] arm $order"
+        before=$("$UV" run tools/p7validate.py --url http://localhost:8000 --counters)
         # concurrency 8 is safe only because the probe read x-ratelimit-policy off a live
         # response: this key is 50;w=1, not the documented free tier's 1/s.
         "$UV" run tools/qualeval.py run --url http://localhost:8080 \
@@ -162,6 +165,9 @@ PY
             --limit-pass retrieval:think:60,retrieval:nothink:0 \
             "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
         echo "    rc=$?"
+        after=$("$UV" run tools/p7validate.py --url http://localhost:8000 --counters)
+        echo "    prefix-cache tokens  before[$before]  after[$after]" \
+            | tee -a results/p7q3-cache.txt
     done
     ;;
 

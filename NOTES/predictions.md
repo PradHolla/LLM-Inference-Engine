@@ -6261,3 +6261,23 @@ into BOTH phases of the two-phase relay. At the 6144 the other P7 runs use, gene
 reaches 40 + 6144 + 4500 + 6144 = 16,828 tokens against `--max-model-len 16384`. This run uses
 **3072**, which caps the worst case at 10,684. The thinking budget of 2048 binds first, so the
 cap costs nothing -- P7-Q3R-7 is the check that this is true and not merely argued.
+
+**Smoke test before the run, 4 items, overlap arm.** Recorded here because it changes what
+some rows can be measured with, not to narrow any prediction -- the rows above stand as
+written and will be scored as written.
+
+- Accuracy 4/4, nothing truncated, answers parsed. `think_path` is `inline_tags`, which is
+  correct and not the incident-49 bug: the overlap relay talks to `/v1/completions`, which
+  does not run the reasoning parser, so the tags arrive in the content stream by design.
+- **`reissue_cached_tokens` was null on all four.** `/v1/completions` returns no
+  `prompt_tokens_details` at vLLM 0.27.1 -- confirmed with a direct curl, `usage` carries
+  only `prompt_tokens`, `completion_tokens`, `total_tokens`. The field cannot be filled on
+  this path at all, and P7V hit the same wall (`usage.cached_tokens=None`) and worked around
+  it. P7-Q3R-4 is therefore measured from `vllm:prefix_cache_hits_total` /
+  `vllm:prefix_cache_queries_total`, sampled per arm, not from the trace.
+- `overlap_pre_tokens` came in at 5, 6, 20, 23 against the 30-40 of P7-Q3R-5. The pre phase
+  spends its own prefill and queue wait inside the search window before it emits anything,
+  which the derivation ignored.
+- One of four searches reported **15,336 ms** against a probe max of 752 ms. `search_ms` is
+  wall time on a loop that is also streaming from vLLM, so under concurrency it measures
+  contention as well as network. The 887 ms anchor is a FLOOR for the loaded case.
