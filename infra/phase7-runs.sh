@@ -153,11 +153,11 @@ PY
     for order in retrieve_then_generate overlap generate_then_retrieve; do
         restart_gateway "q3-$order" --setenv=GW_ORDER="$order" --setenv=GW_ALWAYS_SEARCH=1
         echo "  [$(ts)] arm $order"
-        # concurrency 1: Brave's free plan is 1 query/second and answers a burst with 429,
-        # which degrades to zero sources indistinguishably from a genuine miss.
+        # concurrency 8 is safe only because the probe read x-ratelimit-policy off a live
+        # response: this key is 50;w=1, not the documented free tier's 1/s.
         "$UV" run tools/qualeval.py run --url http://localhost:8080 \
             --config "p7q3-$order" --slices retrieval \
-            --items results/p7-retrieval-items.jsonl --concurrency 1 \
+            --items results/p7-retrieval-items.jsonl --concurrency 8 \
             --max-tokens-think 6144 --max-tokens-nothink 512 \
             --limit-pass retrieval:think:60,retrieval:nothink:0 \
             "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
