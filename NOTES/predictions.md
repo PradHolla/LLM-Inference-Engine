@@ -6195,3 +6195,69 @@ would have produced six clean arms of 0% across every budget and read as "retrie
 insensitive to thinking budget" -- a plausible, publishable, entirely false result. Same family
 as the Phase 6 truncation artefact. A 10-item eyeball before any sweep is now the rule for any
 new task, not a nicety.
+
+## P7-Q2/Q3 REVISED, 2026-09-19: the anchor re-derived, and three TTFT rows that were backwards
+
+The P7-RUNS rows for Q2 and Q3 are **void**, for two independent reasons found before the run.
+
+**1. The anchor was wrong and so was the slice.** Those rows derived from M1's 1,406 ms
+search+fetch+extract, measured on a different question set. Q2 then ran the MATH slice with
+search attached and Brave returned no pages for 50 of 60 items, so `fetch_ms` and `extract_ms`
+were 0.0, `injected_tokens_est` was 0, and the splice never fired. The run measured nothing.
+
+The replacement is `results/p7-retrieval-items.jsonl`: 67 real questions with integer answers,
+so the existing grader needs no new code. `tools/p7search.py` probed all 67 through the real
+search path **on the box**, serially, before any GPU time:
+
+    search_ms    p50   476.8   p95   622.4
+    fetch_ms     p50   311.9   p95  1456.5
+    extract_ms   p50   127.8   p95   318.0
+    wall_ms      p50   886.9   p95  2096.6   max 2776.9
+    sources      mean 2.33     zero-source 0/67 (0.0%)
+    block tokens p50  3000      p95  4500
+
+**S = 887 ms p50** is the anchor every row below uses. It is 37% below M1's 1,406 ms, and it
+is measured on the machine and the questions the run will use.
+
+The probe also read `x-ratelimit-policy: 50;w=1` off a live Brave response. The published
+free plan is 1 query/second, which at `--concurrency 8` would have 429d seven of every eight
+searches and degraded to zero sources **indistinguishably from a genuine miss** -- the exact
+null that voided Q2, from a different cause. This key is not on that plan. Read, not assumed.
+
+**2. Three TTFT rows were backwards, because the relay buffers.** `_relay_overlap` collects
+the pre-generation into `generated` and only emits it *after* `await search_task`. So the
+client's first non-empty content arrives when the SEARCH lands, not when generation starts.
+P7-Q2-1 predicted retrieve_then_generate's TTFT would exceed generate_then_retrieve's by
+1.0-1.8 s; generate_then_retrieve passes `stop_when=None`, runs its whole first generation
+before it searches at all, and must therefore have the WORST TTFT of the three.
+
+### The mechanism, written out so the rows are arithmetic and not vibes
+
+With S = 887 ms, block B = 3,000 tokens, cold prefill **0.2915 ms/token** (P6L-2R, fp8, 16k)
+so prefill(B) = 875 ms, and ITL 24-28 ms/token (the silence rates measured across P7):
+
+| arm | TTFT | E2E |
+|---|---|---|
+| retrieve_then_generate | S + prefill(B) | S + prefill(B) + N x ITL |
+| overlap | ~S (the buffer flushes when the search lands) | prefill(B) + N x ITL |
+| generate_then_retrieve | full first-phase generation | that + S + prefill(B) + N2 x ITL |
+
+The overlap saving falls out as exactly S: during the search it generates N_pre tokens that
+it does not regenerate, and N_pre x ITL = S by construction.
+
+| # | prediction | derivation |
+|---|---|---|
+| **P7-Q3R-0** | every arm records `n_sources >= 1` on **>= 90%** of items and `search_error` null throughout | the gate. Q2 died here once; checked FIRST, and every row below is void without it |
+| P7-Q3R-1 | overlap TTFT **below** retrieve_then_generate, by 700-1000 ms | RTG waits S=887 ms before it prefills; overlap flushes its buffer at S having already prefilled. The gap is RTG's prefill(B)=875 ms, less whatever overlap's own small prefill costs |
+| P7-Q3R-2 | generate_then_retrieve has the **largest** TTFT of the three, by more than 2x | it generates to completion before searching. This CONTRADICTS P7-Q2-1, which had it fastest; the cause is the relay's buffering, found by reading the code and not by running it |
+| P7-Q3R-3 | overlap E2E beats retrieve_then_generate by **600-1100 ms**, i.e. within 25% of S | it hides exactly one search round trip and nothing else. A saving far above S means something other than the search moved |
+| P7-Q3R-4 | overlap strands at most **15 tokens** of prefix cache: `reissue_cached_tokens` = `reissue_prompt_tokens` - B - (prefix mod 16) | the splice appends, so the continuation is a strict extension. P7V measured exactly 1 stranded of 209 |
+| P7-Q3R-5 | `overlap_pre_tokens` lands in **30-40** | S / ITL = 887 / 26. If it is near zero the overlap hid nothing and P7-Q3R-3 must fail with it -- this row is what makes that one interpretable |
+| P7-Q3R-6 | all three arms within **5 points** of each other on accuracy | guard, not a retrieval measurement: the splice must not break the model. Qwen3-8B knows most of these facts parametrically, so this cannot show that search HELPS |
+| P7-Q3R-7 | `usage_completion` p99 stays **below** max_tokens 3072 in every arm | incident 50: an arm whose p99 sits on the ceiling is measuring the budget, not the model, and its accuracy is a truncation rate |
+
+**A context hazard caught while reading, not by a 400.** `_completion_body` carries `max_tokens`
+into BOTH phases of the two-phase relay. At the 6144 the other P7 runs use, generate_then_retrieve
+reaches 40 + 6144 + 4500 + 6144 = 16,828 tokens against `--max-model-len 16384`. This run uses
+**3072**, which caps the worst case at 10,684. The thinking budget of 2048 binds first, so the
+cap costs nothing -- P7-Q3R-7 is the check that this is true and not merely argued.

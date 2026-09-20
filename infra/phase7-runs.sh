@@ -158,7 +158,7 @@ PY
         "$UV" run tools/qualeval.py run --url http://localhost:8080 \
             --config "p7q3-$order" --slices retrieval \
             --items results/p7-retrieval-items.jsonl --concurrency 8 \
-            --max-tokens-think 6144 --max-tokens-nothink 512 \
+            --max-tokens-think 3072 --max-tokens-nothink 512 \
             --limit-pass retrieval:think:60,retrieval:nothink:0 \
             "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
         echo "    rc=$?"
