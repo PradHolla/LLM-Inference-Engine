@@ -34,6 +34,8 @@ PASSES = [
     ("gsm8k",   True,  1024),
     ("gsm8k",   False, 256),
     ("longctx", False, 64),
+    ("retrieval", True,  2048),
+    ("retrieval", False, 512),
 ]
 
 # [ \t]* not \s*, and [^\n]+ not [^\n]*: \s crosses newlines, so a "### Final Answer:"
@@ -161,6 +163,10 @@ async def _one(client, url, item, cfg, think, max_tokens, seed):
     # VLLM_USE_V2_MODEL_RUNNER=0. Verified binding exactly in P7V.
     if THINKING_BUDGET is not None and think:
         payload["thinking_token_budget"] = THINKING_BUDGET
+    # The gateway otherwise searches on the whole user turn, which for a graded slice ends
+    # in 90 chars of answer-format instruction. Items that carry a query send it explicitly.
+    if item.get("query"):
+        payload["gw_query"] = item["query"]
     t0 = time.perf_counter()
     reasoning, content = [], []
     try:

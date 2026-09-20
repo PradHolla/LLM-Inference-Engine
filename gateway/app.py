@@ -70,6 +70,7 @@ class GatewayTrace(Trace):
     fetch_ms: float | None = None
     extract_ms: float | None = None
     n_sources: int = 0
+    search_error: str | None = None
     trim_ms: float | None = None
     trim_strategy: str = "none"
     dropped_turns: int = 0
@@ -160,16 +161,20 @@ async def _trim(messages: list[dict], budget_tokens: int, strategy: str):
     return await context.apply(messages, budget_tokens, strategy=strategy)
 
 
-async def _do_search(messages: list[dict], tr: GatewayTrace) -> str:
+async def _do_search(messages: list[dict], tr: GatewayTrace,
+                     query: str | None = None) -> str:
     """Run search and render its block. A raising search still answers the turn."""
-    query = _last_user_text(messages)
+    query = query or _last_user_text(messages)
     try:
         outcome = await run_search(query, CLIENT)
-    except Exception:
-        tr.n_sources = 0
+    except Exception as e:
+        tr.n_sources, tr.search_error = 0, f"{type(e).__name__}"
         return ""
     tr.search_ms, tr.fetch_ms, tr.extract_ms = outcome.search_ms, outcome.fetch_ms, outcome.extract_ms
     tr.n_sources = outcome.n_sources
+    # Brave degrades to zero sources on a 429 as quietly as on a genuine miss, and the
+    # free plan allows 1 query/second. Without this the two are indistinguishable.
+    tr.search_error = outcome.error
     return render_block(outcome)
 
 
@@ -353,6 +358,7 @@ async def chat(req: Request):
     order = body.get("gw_order", ORDER_DEFAULT)
     priority = body.get("gw_priority")
     budget = body.get("gw_thinking_budget")
+    squery = body.get("gw_query") or None
     for k in [k for k in body if k.startswith("gw_")]:
         body.pop(k, None)
 
@@ -381,7 +387,7 @@ async def chat(req: Request):
         # overlap starts the search now; generate_then_retrieve starts it only after the
         # model has had its turn. Same relay, same splice, different ordering.
         deferred = tr.order == "generate_then_retrieve"
-        task = None if deferred else asyncio.ensure_future(_do_search(messages, tr))
+        task = None if deferred else asyncio.ensure_future(_do_search(messages, tr, squery))
         trimmed_first = await _trim(messages, BUDGET_TOKENS, strategy)
         tr.trim_ms, tr.trim_strategy, tr.dropped_turns = (
             trimmed_first.trim_ms, trimmed_first.strategy, trimmed_first.dropped_turns)
@@ -389,10 +395,10 @@ async def chat(req: Request):
         return StreamingResponse(
             _relay_overlap(body, tr, trimmed_first.messages, task,
                            enable_thinking=(budget is None or budget > 0),
-                           defer_search=(lambda: _do_search(messages, tr)) if deferred else None),
+                           defer_search=(lambda: _do_search(messages, tr, squery)) if deferred else None),
             media_type="text/event-stream")
 
-    retrieved_block = await _do_search(messages, tr) if do_search and messages else ""
+    retrieved_block = await _do_search(messages, tr, squery) if do_search and messages else ""
 
     trimmed = await _trim(messages, BUDGET_TOKENS, strategy)
     tr.trim_ms, tr.trim_strategy, tr.dropped_turns = (trimmed.trim_ms, trimmed.strategy,
@@ -672,11 +678,16 @@ def selftest() -> int:
                     b"data: [DONE]\n\n"]
             CLIENT = _FakeUpstream(stream_chunks=comp)
 
-            async def _fixed_search(*a, **kw):
-                class O:
-                    search_ms = fetch_ms = extract_ms = 1.0
-                    n_sources = 2
-                return O()
+            # The REAL dataclass, not a stand-in: a hand-rolled fake silently lacks any
+            # field added later, and _do_search reads them outside its try. Incident 41.
+            from gateway.search import SearchOutcome
+
+            seen_q = []
+
+            async def _fixed_search(q, *a, **kw):
+                seen_q.append(q)
+                return SearchOutcome(query=q, search_ms=1.0, fetch_ms=1.0,
+                                     extract_ms=1.0, n_sources=2)
             _orig_rs = run_search
             run_search = _fixed_search
             _orig_render_block = render_block
@@ -691,6 +702,7 @@ def selftest() -> int:
             chk("overlap emits chat-shaped SSE", b'"object": "chat.completion.chunk"' in got)
             chk("overlap terminates the stream", got.rstrip().endswith(b"data: [DONE]"))
             chk("overlap did not error", t.status == "ok")
+            chk("search query defaults to the user turn", seen_q == ["who won"])
 
             sent = [json.loads(b) for b in CLIENT.bodies if b'"prompt"' in b]
             chk("overlap made two upstream calls", len(sent) == 2)
@@ -703,6 +715,20 @@ def selftest() -> int:
                 chk("upstream is /v1/completions, not chat", "messages" not in sent[0])
             chk("cached tokens recorded from usage", t.reissue_cached_tokens == 8)
             chk("splice length recorded", t.splice_chars > 0)
+
+            # Proves the actuator BINDS. A query field the gateway ignores would leave the
+            # answer-format instruction in every search string and nothing would say so.
+            seen_q.clear()
+            CLIENT = _FakeUpstream(stream_chunks=comp)
+            with client.stream("POST", "/v1/chat/completions", json={
+                    "model": "m", "messages": [{"role": "user", "content": "who won\n\nANSWER: <integer>"}],
+                    "gw_search": True, "gw_order": "overlap", "stream": True,
+                    "gw_query": "who won the 1998 final"}) as r:
+                b"".join(r.iter_bytes())
+            chk("gw_query overrides the user turn as the search query",
+                seen_q == ["who won the 1998 final"])
+            chk("gw_query is stripped before the upstream call",
+                b"gw_query" not in CLIENT.last_body)
 
             # A failing search must not take the turn down; it just never splices.
             async def _boom(*a, **kw):

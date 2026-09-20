@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 7 runs, one sub-command each. Every run gates its own preconditions and flushes
 # per request, so a failure costs one arm rather than the session.
-#   ./infra/phase7-runs.sh q4b | q1b | q2 | q3 | q4
+#   ./infra/phase7-runs.sh q4b | q1b | probe | q3 | q4
 # Always under systemd-run, never a foreground ssh session.
 set -uo pipefail
 cd /opt/llm || exit 1
@@ -119,35 +119,47 @@ q1b)
     done
     ;;
 
-# ---- Q2: search-then-think against think-then-search -------------------------------
-q2)
-    echo "[$(ts)] Q2 retrieval order"
-    require_vllm
-    [ -s /opt/llm/.brave-key ] || die "no /opt/llm/.brave-key; both arms would skip the search"
-    for order in retrieve_then_generate generate_then_retrieve; do
-        restart_gateway "q2-$order" --setenv=GW_ORDER="$order" --setenv=GW_ALWAYS_SEARCH=1
-        echo "  [$(ts)] arm $order"
-        "$UV" run tools/qualeval.py run --url http://localhost:8080 \
-            --config "p7q2-$order" --slices math --concurrency 8 \
-            --max-tokens-think 6144 --max-tokens-nothink 2048 \
-            --limit-pass math:think:60,math:nothink:0 \
-            "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q2-$order.jsonl"
-        echo "    rc=$?"
-    done
+# ---- Q2/Q3: does the order of retrieval and generation matter? ---------------------
+# One run, three arms. Q3 is overlap against retrieve_then_generate; Q2 is
+# retrieve_then_generate against generate_then_retrieve. Same records serve both.
+probe)
+    echo "[$(ts)] search probe on the retrieval slice"
+    [ -s /opt/llm/.brave-key ] || die "no /opt/llm/.brave-key"
+    [ -s results/p7-retrieval-items.jsonl ] || "$UV" run tools/mkretrieval.py \
+        --out results/p7-retrieval-items.jsonl || die "could not build the slice"
+    rm -f results/p7-search-probe.jsonl
+    "$UV" run tools/p7search.py --items results/p7-retrieval-items.jsonl \
+        --out results/p7-search-probe.jsonl
+    echo "  probe rc=$?"
     ;;
 
-# ---- Q3: can the thinking overlap the search round-trip? ---------------------------
 q3)
-    echo "[$(ts)] Q3 overlap"
+    echo "[$(ts)] Q2/Q3 retrieval order and overlap"
     require_vllm
     [ -s /opt/llm/.brave-key ] || die "no /opt/llm/.brave-key; overlap has nothing to hide"
-    for order in retrieve_then_generate overlap; do
+    [ -s results/p7-retrieval-items.jsonl ] || die "no retrieval slice; run: $0 probe"
+    # The probe is the gate, not a formality: Q2 was voided once by a slice that returned
+    # no pages, and a 1 qps plan produces the same null from 429s. Refuse to spend the GPU.
+    "$PY" - <<'PY' || die "probe missing or too many zero-source items; run: $0 probe"
+import json, sys
+try:
+    r = [json.loads(l) for l in open("results/p7-search-probe.jsonl") if l.strip()]
+except OSError:
+    sys.exit(1)
+z = sum(1 for x in r if x["n_sources"] == 0)
+print(f"  probe: {len(r)} items, {z} zero-source ({z/max(1,len(r)):.1%})")
+sys.exit(0 if r and z / len(r) <= 0.10 else 1)
+PY
+    for order in retrieve_then_generate overlap generate_then_retrieve; do
         restart_gateway "q3-$order" --setenv=GW_ORDER="$order" --setenv=GW_ALWAYS_SEARCH=1
         echo "  [$(ts)] arm $order"
+        # concurrency 1: Brave's free plan is 1 query/second and answers a burst with 429,
+        # which degrades to zero sources indistinguishably from a genuine miss.
         "$UV" run tools/qualeval.py run --url http://localhost:8080 \
-            --config "p7q3-$order" --slices math --concurrency 8 \
-            --max-tokens-think 6144 --max-tokens-nothink 2048 \
-            --limit-pass math:think:60,math:nothink:0 \
+            --config "p7q3-$order" --slices retrieval \
+            --items results/p7-retrieval-items.jsonl --concurrency 1 \
+            --max-tokens-think 6144 --max-tokens-nothink 512 \
+            --limit-pass retrieval:think:60,retrieval:nothink:0 \
             "${QSAMP[@]}" --thinking-budget 2048 --out "results/p7q3-$order.jsonl"
         echo "    rc=$?"
     done
@@ -186,7 +198,7 @@ samp)
     done
     ;;
 
-*) echo "usage: $0 q4b|q1b|q2|q3|q4|samp"; exit 2 ;;
+*) echo "usage: $0 q4b|q1b|probe|q3|q4|samp"; exit 2 ;;
 esac
 
 echo "[$(ts)] ${1} DONE"
