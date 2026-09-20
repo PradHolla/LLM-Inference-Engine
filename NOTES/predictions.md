@@ -6281,3 +6281,84 @@ written and will be scored as written.
 - One of four searches reported **15,336 ms** against a probe max of 752 ms. `search_ms` is
   wall time on a loop that is also streaming from vLLM, so under concurrency it measures
   contention as well as network. The 887 ms anchor is a FLOOR for the loaded case.
+
+## P7-Q2/Q3 ACTUALS, 2026-09-20: the overlap wins for a reason that is not the overlap
+
+    Qwen3-8B fp8, KV fp8, prefix caching on, thinking budget 2048, max_tokens 3072,
+    slice retrieval (n=60 of 67), concurrency 8, temp 0.6 / top_p 0.95 / top_k 20 / min_p 0,
+    gateway search always on, vLLM 0.27.1 with VLLM_USE_V2_MODEL_RUNNER=0
+
+| arm | n | acc | trunc | tok p50 | tok p99 | ttft p50 | ttft p95 | e2e p50 | e2e p95 |
+|---|---|---|---|---|---|---|---|---|---|
+| retrieve_then_generate | 60 | 98.3% | 0.0% | 236 | 370 | 2112 | 6401 | 13073 | 18566 |
+| overlap | 60 | 98.3% | 0.0% | 55 | 110 | 1230 | 5909 | 7047 | 16060 |
+| generate_then_retrieve | 60 | 100.0% | 0.0% | 305 | 1220 | 10433 | 26466 | 13245 | 29393 |
+
+| arm | mean sources | zero-source | search errors | search+fetch+extract p50 | pre tokens | prefix cache hit |
+|---|---|---|---|---|---|---|
+| retrieve_then_generate | 2.32 | 1/60 | 0 | 577 ms | - | 0 of 184,026 tok (0.0%) |
+| overlap | 2.28 | 0/60 | 0 | 753 ms | 13 | 3,008 of 185,109 tok (1.6%) |
+| generate_then_retrieve | 2.33 | 0/60 | 0 | 488 ms | 267 | 23,184 of 208,500 tok (11.1%) |
+
+### Scoring
+
+| # | predicted | measured | verdict |
+|---|---|---|---|
+| P7-Q3R-0 | every arm >= 90% retrieved, no search errors | 59/60, 60/60, 60/60; zero errors | **PASS**, the gate Q2 died on |
+| P7-Q3R-1 | overlap TTFT below retrieve_then_generate by 700-1000 ms | **-882 ms** | **HIT**, and for the stated reason |
+| P7-Q3R-2 | generate_then_retrieve has the largest TTFT, by > 2x | 10,433 vs 2,112 = **4.9x** | **HIT** |
+| P7-Q3R-3 | overlap E2E beats retrieve_then_generate by 600-1100 ms | **-6,026 ms** | **MISS, 6x** |
+| P7-Q3R-4 | overlap strands at most 15 tokens of prefix cache | 50.1 tok/request cached of a ~53-60 token prefix | **HIT**, and the row was framed misleadingly |
+| P7-Q3R-5 | `overlap_pre_tokens` 30-40 | **13** | **MISS** |
+| P7-Q3R-6 | all arms within 5 points on accuracy | 98.3 / 98.3 / 100.0, spread 1.7 | **HIT** |
+| P7-Q3R-7 | `usage_completion` p99 below 3072 | 370 / 110 / 1220 | **HIT**, nothing truncated |
+
+### The model that was validated
+
+P7-Q3R-1 is the one worth keeping. The derivation said TTFT(retrieve_then_generate) =
+S + prefill(B) and TTFT(overlap) = S, so the gap should be prefill(B) alone: 3,000 block
+tokens x 0.2915 ms/token = **875 ms**. Measured **882 ms**. The arithmetic and the box agree
+to 0.8%, and note what that means -- the overlap does NOT hide the search from TTFT. Both
+arms wait S. What overlap buys at first token is that it has already prefilled.
+
+### The miss, which is the actual finding
+
+**Overlap's 6.0 s E2E win is not hidden latency. It is 181 fewer tokens.**
+
+retrieve_then_generate generated 236 tokens at p50; overlap generated **55**. Its own decode
+rate is (13,073 - 2,112) / 235 = **46.6 ms/token** loaded at concurrency 8, so 181 tokens is
+worth **8.4 s** -- more than the entire 6.0 s gap. The search round trip actually available
+to hide was 753 ms. The arithmetic does not leave room for the overlap to be winning on
+latency; it is winning because the splice cue
+
+    "\n\nWait, the search results just arrived:\n\n{block}\n\nI should use these to answer.\n"
+
+stops the chain of thought and makes the model answer. `overlap_pre_tokens` of 13 says the
+same thing from the other side: in a 1,194 ms window the pre-phase spent nearly all of it on
+its own prefill and queue wait and emitted 13 tokens. There was never 887 ms of useful
+generation to hide behind, which is P7-Q3R-5's miss and P7-Q3R-3's miss in one mechanism.
+
+Accuracy is flat at 98.3% against 98.3%, so the truncated reasoning cost nothing here. That
+is consistent with the phase's own budget result -- gsm8k was null across a 160x range of
+silence -- and it means the cue is doing cheaply what an explicit thinking budget does.
+
+**The anchor was 1.2-1.8x high for the loaded case.** The probe measured S = 887 ms p50
+serially on cold queries; in-run it was 577 / 753 / 488 ms per arm. The same 60 queries were
+issued four times over (probe plus three arms), so Brave and the origin sites were warm and
+connections were reused. A serial cold probe is an upper bound on a warm concurrent run, and
+should have been labelled as one when it was written down.
+
+### Q2 falls out, and its old row was also wrong
+
+`generate_then_retrieve` E2E is **+172 ms** against retrieve_then_generate, not the 0.5-3 s
+P7-Q2-2 predicted -- its second phase is short because the first phase already answered. But
+its TTFT is **8.3 s worse**, because the relay runs the whole first generation before it
+searches. Ordering costs almost nothing end to end and everything at first token.
+
+**What the prefix cache says about the splice.** The overlap re-issue reuses only the prompt
+plus what it generated -- about 50 tokens, 1.6% of what it queries -- while the 3,000-token
+block is new every time and must be prefilled whichever arm pays for it. The splice's cache
+property is real and was verified (50 of ~53-60 prefix tokens hit, the remainder stranded in
+a partial 16-token block, exactly as designed), but at these proportions it is worth ~15 ms.
+generate_then_retrieve hits 11.1% for the same reason inverted: it has 267 generated tokens
+to reuse, not 13. **The prefix cache rewards the arm that generated more before splicing.**

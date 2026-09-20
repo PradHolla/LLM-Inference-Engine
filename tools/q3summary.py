@@ -31,7 +31,7 @@ def main(a):
     print(f"  slice retrieval (n={a.n}), concurrency {a.concurrency}, "
           f"temp 0.6 top_p 0.95 top_k 20, gateway search always on")
 
-    print(f"\n  {'arm':<24} {'n':>4} {'acc':>7} {'trunc':>7} {'tokp99':>7} "
+    print(f"\n  {'arm':<24} {'n':>4} {'acc':>7} {'trunc':>7} {'tok p50':>8} {'tokp99':>7} "
           f"{'ttft p50':>9} {'ttft p95':>9} {'e2e p50':>9} {'e2e p95':>9}")
     rows = {}
     for arm in arms:
@@ -43,6 +43,7 @@ def main(a):
         acc = sum(bool(r.get("correct")) for r in recs) / len(recs)
         tru = sum(r.get("finish_reason") == "length" for r in recs) / len(recs)
         print(f"  {arm:<24} {len(recs):>4} {acc:>6.1%} {tru:>6.1%} "
+              f"{pct([r.get('usage_completion') for r in recs], 50):>8.0f} "
               f"{pct([r.get('usage_completion') for r in recs], 99):>7.0f} "
               f"{pct([r.get('ttft') for r in recs], 50) * 1e3:>9.0f} "
               f"{pct([r.get('ttft') for r in recs], 95) * 1e3:>9.0f} "
