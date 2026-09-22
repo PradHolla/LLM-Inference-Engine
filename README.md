@@ -37,7 +37,7 @@ Every claim above links to a number in `NOTES/predictions.md`, which records the
 prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
 third of the predictions were wrong; those are the entries worth reading.
 
-## Status: phases 0-5 of 7 complete, phase 6a measured
+## Status: phases 0-5 and 7 complete; 6a measured, 6b built and awaiting its end-to-end run
 
 ### How each step moved the number
 
@@ -378,6 +378,55 @@ M4   needs under    16,384   this config   15,064   0.92x  OK
 M6   needs exceed   16,384   this config   25,760   1.57x  OK
 ```
 
+### Phase 7: more thinking is not better, and the middle is the worst place to be
+
+A thinking budget caps how many tokens the model may spend reasoning before it is forced to
+stop and answer. The obvious expectation is a monotonic curve: more budget, more accuracy,
+more latency. Measured on a maths slice, 180 items per pass, two runs pooled to n=360 per
+arm against a +/-3 point noise floor:
+
+| thinking budget | accuracy | silence before the answer |
+|---|---|---|
+| 0 | 86.4% | 0.2 s |
+| **128** | **94.4%** | **3.9 s** |
+| 256 | 92.2% | 7.4 s |
+| 512 | 84.2% | 14.6 s |
+| 1024 | 83.1% | 28.2 s |
+| **2048** | **99.4%** | **44.7 s** |
+| unbounded | 99.4% | 45.7 s |
+
+*Qwen3-8B fp8, A10G, temp 0.6 / top_p 0.95 / top_k 20.*
+
+**256, 512 and 1024 are each worse than 128 on both axes at once.** Not a tradeoff, simply
+dominated. The mechanism is what generalises: among responses where the budget actually
+bound, the fraction that had already reached an answer was 30% at 512, 70% at 1024, and 98%
+at 2048 — and the ones that had *not* reached an answer scored **51%**. A budget near the
+task's natural reasoning length is the worst available setting, because it is enough to
+commit the model to a chain of thought and not enough to finish it.
+
+The product consequence is direct. A conventional low / medium / high control puts "medium"
+in that trough, so the chat app ships three levels — off, 128, and unbounded — with nothing
+in between, and maps the OpenAI-standard `reasoning_effort: medium` *upward* rather than to
+a middle value.
+
+### Phase 7: overlapping the search with generation wins 6 seconds, for the wrong reason
+
+Three orderings of "search the web, then answer": retrieve-then-generate,
+generate-then-retrieve, and an overlap that starts generating while the search is still in
+flight. Overlap beat retrieve-then-generate by **6.0 s** end to end, against a prediction of
+600-1,100 ms.
+
+Missing by 6x is the useful part. The win is not hidden latency. Overlap generated **55**
+tokens at p50 against retrieve-then-generate's **236**, and at its own measured decode rate
+of 46.6 ms/token those 181 tokens are worth **8.4 s** — more than the entire gap. The search
+round trip actually available to hide behind was 753 ms. What the overlap does is splice a
+cue into the context saying the results have arrived, and that cue interrupts the chain of
+thought and makes the model answer. Accuracy was identical either way, 98.3% against 98.3%.
+
+The technique works and the explanation written into the design document was wrong. One
+prediction in the same run did land: the TTFT gap was derived as
+prefill(3,000 tokens) x 0.2915 ms/token = **875 ms**, and measured **882 ms**.
+
 ## What is here
 
 ```
@@ -401,6 +450,10 @@ engine/               Phase 2: manual KV cache, static then continuous batching,
 labbench/             Phase 6a: the instrument surface -- byte-faithful streaming
                       proxy, backend switcher, live Prometheus and journal probes,
                       React UI showing every stage of a request
+gateway/              Phase 6a: the inference gateway -- prompt assembly, web search,
+                      context overflow strategy, thinking budget, request tracing
+app/                  Phase 6b: the chat app -- SQLite branching message tree, SSE
+                      streaming, three-level thinking control, cream/dark themes
 infra/                provisioning, cost guardrails, spot interruption handling,
                       one-command session lifecycle, pinned-KV vLLM launcher
 NOTES/predictions.md  the prediction log
@@ -450,8 +503,8 @@ is true forever and would disable the guardrail entirely.
 | 3 | vLLM as an object of study; ablate every flag | done |
 | 4 | Quantization: throughput, capacity, and quality | done |
 | 5 | Speculative decoding | done |
-| 6 | The chat app and web search | in progress |
-| 7 | Thinking budget as a scheduling policy | next |
+| 6 | The chat app and web search | 6a measured; 6b built, not yet run on a GPU |
+| 7 | Thinking budget as a scheduling policy | done |
 
 Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth
 as much as the positive ones: a paged block allocator was **designed, costed, and not
