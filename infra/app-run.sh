@@ -15,11 +15,13 @@ ts() { date -u +%H:%M:%S; }
 die() { echo "ABORT: $*"; exit 1; }
 
 # The Phase 7 server exactly, so 6b numbers sit beside the budget ladder. phase7-runbook.md.
+# --enable-prompt-tokens-details only adds usage.prompt_tokens_details.cached_tokens per request.
 launch_vllm() {
     VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh p6b \
         --model "$MODEL" --quantization fp8 --max-model-len 16384 \
         --kv-cache-dtype fp8 --enable-prefix-caching --reasoning-parser qwen3 \
         --reasoning-config '{"reasoning_start_str": "<think>", "reasoning_end_str": "</think>"}' \
+        --enable-prompt-tokens-details \
         || die "vllm launch failed"
 }
 
