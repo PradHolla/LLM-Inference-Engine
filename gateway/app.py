@@ -66,6 +66,8 @@ def write_trace(tr: GatewayTrace, path: str | None = None) -> None:
 @dataclass
 class GatewayTrace(Trace):
     """Extends the proxy Trace with the non-inference spans. Same jsonl file shape plus these."""
+    chat_id: int | None = None
+    turn_index: int | None = None
     search_ms: float | None = None
     fetch_ms: float | None = None
     extract_ms: float | None = None
@@ -359,11 +361,15 @@ async def chat(req: Request):
     priority = body.get("gw_priority")
     budget = body.get("gw_thinking_budget")
     squery = body.get("gw_query") or None
+    chat_id = body.get("gw_chat_id")
+    turn_index = body.get("gw_turn_index")
     for k in [k for k in body if k.startswith("gw_")]:
         body.pop(k, None)
 
     tr.order = order if order in ORDERS else ORDER_DEFAULT
     tr.order_honoured = tr.order in BUILDABLE_ORDERS
+    tr.chat_id = chat_id
+    tr.turn_index = turn_index
     if priority is not None:
         try:
             tr.priority = int(priority)
