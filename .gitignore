@@ -37,3 +37,6 @@ data/
 results/gateway-traces-A.jsonl
 results/labbench-traces.jsonl
 NOTES/phase7-budget-design.md
+
+# macOS
+.DS_Store
