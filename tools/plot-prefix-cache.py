@@ -37,12 +37,12 @@ ax.annotate("", xy=(x[-1], w[-1]["ttft_ms"]), xytext=(x[-1], c[-1]["ttft_ms"]),
 
 ax.set_xlabel("conversation length (prompt tokens)", fontsize=12)
 ax.set_ylabel("time to first token (ms)", fontsize=12)
-ax.set_title("Same conversation, same model, same box.\nThe only difference is whether the prefix cache works.",
+ax.set_title("Same conversation\nThe only difference is whether the prefix cache works",
              fontsize=14, fontweight="bold", loc="left", pad=14)
 ax.legend(fontsize=12, frameon=False, loc="upper left")
 ax.grid(alpha=0.25, lw=0.7); ax.set_ylim(0, 2550); ax.set_xlim(0, 8200)
 for s in ("top", "right"): ax.spines[s].set_visible(False)
-fig.text(0.01, 0.015, "Qwen3-8B fp8, A10G 24GB, vLLM 0.27.1, 16k context, 25 turns. "
+fig.text(0.01, 0.015, "Qwen3-8B fp8 on A10G 24GB, vLLM 0.27.1, 16k context, 25 turns. "
          "Cold arm verified: prefix cache hit rate 0.000 on every turn.",
          fontsize=8.5, color="#666666")
 fig.tight_layout(rect=(0, 0.035, 1, 1))
