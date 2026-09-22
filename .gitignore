@@ -9,6 +9,7 @@ NOTES/phase6-app-design.md
 NOTES/phase6a-labbench-design.md
 NOTES/code-notes.md
 NOTES/inference-engineering-book.md
+NOTES/phase6b-implementer-prompt.md
 
 # Python
 __pycache__/
@@ -16,6 +17,9 @@ __pycache__/
 .venv/
 venv/
 .uv/
+app/chats.db
+app/chats.db-wal
+app/chats.db-shm
 
 # Secrets / local overrides
 .env

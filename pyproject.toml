@@ -11,6 +11,7 @@ dependencies = [
 # Phase 1+ (the deliberately-bad baseline and beyond). Not needed for Phase 0.
 serve = [
     "fastapi>=0.115",
+    "sse-starlette",
     "uvicorn>=0.34",
     # labbench/server.py and gateway/prompt.py render the chat template locally.
     # jinja2 is what apply_chat_template needs and transformers does not pull it in.
