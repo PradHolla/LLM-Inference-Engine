@@ -6516,3 +6516,103 @@ the same defect and got the same fix.
 - Concurrency 1 only, as the header says. Nothing here says how the app behaves under load.
 - P6B-2 asks each question once per level (12 x 3 = 36 sends). With n = 12 per level the
   report gives p50 and max, **not p95** -- a p95 needs 20 samples (incident 11).
+
+### P6B actuals, 2026-09-22
+
+Qwen3-8B, fp8 weights, **fp8 KV**, vLLM 0.27.1 V1 runner, `--max-model-len 16384`, prefix caching
+on, `--reasoning-parser qwen3` with bare `</think>`, `--enable-prompt-tokens-details`, A10G 24 GB,
+concurrency 1, search on (Brave, 3 results), driven through the app's own API by
+`tools/appdrive.py`. 46/46 app turns joined to gateway traces. Thinking and answer tokens split
+with Qwen's tokenizer; the split sums to 0.997 of `usage.completion_tokens`. No preemptions.
+Raw: `results/p6b-app.jsonl`, `results/p6b-gw.jsonl`, `results/p6b-report.txt`.
+
+#### P6B-1, the 10-turn conversation at Brief
+
+| turn | prompt tok | cached | uncached | retrieval ms | engine TTFT ms | ms per uncached tok | user TTFT ms | retrieval share | inference share of E2E |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1,386 | 0 | 1,386 | 1,438 | 411 | 0.296 | 1,896 | 75.8% | 94.2% |
+| 3 | 2,346 | 1,136 | 1,210 | 749 | 374 | 0.309 | 1,166 | 64.2% | 96.2% |
+| 5 | 7,098 | 3,264 | 3,834 | 993 | 1,223 | 0.319 | 2,262 | 43.9% | 96.0% |
+| 7 | 11,376 | 5,280 | 6,096 | 2,218 | 2,129 | 0.349 | 4,394 | 50.5% | 94.1% |
+| 9 | 13,597 | 8,560 | 5,037 | 3,572 | 1,915 | 0.380 | 5,531 | 64.6% | 90.1% |
+| **10** | **14,805** | **9,648** | **5,157** | **1,221** | **2,052** | **0.398** | **3,320** | **36.8%** | **91.0%** |
+
+*Same config as the header. Every turn is in `results/p6b-report.txt`.*
+
+| # | predicted | measured | verdict |
+|---|---|---|---|
+| P6B-1a | TTFT at turn 10: 1,200-1,700 ms | **3,320 ms**; turns 6-10 p50 also 3,320 | **wrong, 2x high**. The structure was right and every input was wrong, see below |
+| P6B-1b | retrieval share of TTFT 50-60% | turn 10 **36.8%**, turns 6-10 p50 **46.7%**, all 10 turns p50 50.5% | **right early, wrong late**. Search stays flat; prefill grows with the conversation |
+| P6B-1c | inference share of E2E 88-94% | turn 10 **91.0%**, turns 6-10 p50 94.1%, range 90.1-98.0% | **correct** |
+| P6B-1d | search > prefill at turn 10 | 1,221 < **2,052** ms | **wrong**, exactly as the entry warned: it flips if the block is ~3,000 tokens, and it was ~3,900 |
+
+**Why 1a missed by 2x -- the inputs, term by term.** Rebuilding the turn-10 prediction with
+measured inputs gives 1,221 + 5,157 x 0.398 = **3,273 ms** against 3,320 measured, so the
+additive model holds. What was wrong:
+
+1. **History was 10k tokens, not 3k.** Answers ran ~1,000-1,900 tokens, not 250.
+2. **The search block was ~3,900 real tokens, not 2,000.** The gateway's chars/4 estimate reads
+   4,596, so it also overstates.
+3. **The previous answer is never cached.** This is the real finding. Per turn, the uncached part
+   is the previous answer plus the new search block. Turns 3 and 4 isolate it: search returned
+   nothing (`n_sources` 0, no block), yet 1,210 and 938 tokens were still re-prefilled -- the
+   previous answer. The reason is that the answer's KV was computed right after its `<think>`
+   block, and the chat template strips thinking from history, so the re-rendered turn diverges
+   at the first answer token. **P6L-2's 13.8x multi-turn win was measured with thinking OFF and
+   does not carry to a thinking chat.** With search on too, the previous block also leaves.
+4. **Prefill per new token rises with context,** 0.296 ms at 1.4k to 0.398 ms at 14.8k, because
+   every new token attends over the cached prefix. The prediction used the flat 0.2912 slope
+   from P6L-2's short context.
+
+**What the cache does when the prompt repeats exactly** (P6B-2, identical search results on
+the second and third asks of a question):
+
+| ask | n | prompt p50 | cached p50 | engine TTFT p50 | retrieval p50 | user TTFT p50 |
+|---|---|---|---|---|---|---|
+| first | 12 | 2,748 | 0 | 771 ms | 1,129 ms | 1,951 ms |
+| repeat | 24 | 2,748 | 2,744 | **53 ms** | 571 ms | 668 ms |
+
+*Same config. Brave also answered twice as fast on repeats.*
+
+**A latent context bug, found in passing.** Turn 10's prompt was 14,805 tokens with `trim` =
+`none`, although `GW_BUDGET_TOKENS` is 12,000. The trim runs on history BEFORE the search
+block is added, so the block is outside the budget. That left 1,579 tokens of the 16,384 window
+for thinking plus answer; one more turn, or Full thinking, would truncate or be rejected.
+
+#### P6B-2, 12 ordinary chat questions x 3 levels, turn 1
+
+| level | n | E2E p50 | E2E max | first ANSWER token p50 | thinking tok p50 | thinking tok max | answer tok p50 |
+|---|---|---|---|---|---|---|---|
+| off | 12 | 13.9 s | 24.7 s | 0.8 s | 0 | 0 | 622 |
+| brief | 12 | 13.9 s | 22.7 s | 3.3 s | 128 | 128 | 477 |
+| full | 12 | 29.4 s | 126.8 s | 11.6 s | 570 | 5,776 | 605 |
+
+*Same config. Per question, Full thinking tokens: 719, 311, 635, 520, 570, 367, 309, **5,776**
+(monthly-investment arithmetic), 1,143 (React vs Vue), **1,803** (a weeknight dinner), 519, 665.*
+
+| # | predicted | measured | verdict |
+|---|---|---|---|
+| P6B-2a | Off E2E 6-8 s | **13.9 s** | **wrong**. Answers were 622 tokens, not 250 |
+| P6B-2b | Brief E2E 8-12 s | **13.9 s** | **wrong**, same cause |
+| P6B-2c | Full E2E on ordinary chat 16-27 s | **29.4 s** | **wrong, slightly high** |
+| P6B-2d | Full reasoning on chat questions < 1,000 tokens | p50 **570**; 9/12 under 1,000 | **correct at the median, with a tail**: 3/12 over, and the tail is not only arithmetic |
+| P6B-2e | Brief remains the right default | Full costs 2.1x Brief; accuracy not measured | **unresolved, and leaning no**, see below |
+
+**The finding that matters for the product: Brief cut off every chain.** Full's shortest chain
+on these 12 questions was 309 tokens. **12 of 12 exceed 128**, so Brief truncated every single
+one mid-thought. The entry's own falsification clause triggers: measured reasoning length
+landed in 500-1,500 at the median, which is where "Brief at 128 is cutting off a chain that was
+going somewhere". Whether that costs chat answer quality is not measured -- no grader ran --
+but Phase 7 showed that a cut mid-chain is the worst place to stop on maths. It argues for an
+Auto mode that picks Off or unbounded and never a cap.
+
+**Brief bought nothing in end-to-end time.** Off and Brief both land at 13.9 s p50, because
+Brief's answers ran shorter (paired brief/off answer length p50 0.91, range 0.52-1.15, n = 12,
+weak). What Brief does cost is 2.5 s more before the first ANSWER token, though the thinking
+streams visibly during it.
+
+**The headline for Phase 6's question.** "What fraction of the user's wait is my inference?"
+At end of answer, **90-98%** -- decode dominates because answers are long. At first token, it
+depends on the turn: search is 64-76% early in a conversation and 37-47% by turn 10, because
+the part that grows is prefill of the previous answer and the new search block, and the
+previous answer is recomputed only because thinking is on.

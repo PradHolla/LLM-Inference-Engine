@@ -1,0 +1,25 @@
+config: Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 16k ctx, prefix cache on, A10G, via app + gateway
+joined 46/46 app turns to gateway traces; thinking split in tokens
+
+## P6B-1  one conversation, level brief, search on, concurrency 1  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 16k ctx, prefix cache on, A10G, via app + gateway]
+turn | prompt tok | cached | sources | injected est | retrieval ms | upstream TTFT ms | user TTFT ms | retrieval share of TTFT | first answer ms | user E2E ms | inference share of E2E
+   1 | 1,386 | 0 | 1 | 1,542 | 1,438 | 411 | 1,896 | 75.8% | 4,362 | 25,867 | 94.2%
+   2 | 2,403 | 0 | 1 | 1,458 | 908 | 681 | 1,632 | 55.6% | 4,121 | 26,727 | 96.4%
+   3 | 2,346 | 1,136 | 0 | 0 | 749 | 374 | 1,166 | 64.2% | 3,655 | 21,163 | 96.2%
+   4 | 3,274 | 2,336 | 0 | 0 | 874 | 318 | 1,239 | 70.5% | 3,749 | 21,972 | 95.7%
+   5 | 7,098 | 3,264 | 3 | 3,415 | 993 | 1,223 | 2,262 | 43.9% | 4,845 | 26,167 | 96.0%
+   6 | 8,123 | 4,208 | 2 | 3,067 | 746 | 1,292 | 2,083 | 35.8% | 4,697 | 40,042 | 98.0%
+   7 | 11,376 | 5,280 | 3 | 4,635 | 2,218 | 2,129 | 4,394 | 50.5% | 7,065 | 38,285 | 94.1%
+   8 | 10,155 | 7,040 | 2 | 1,642 | 1,042 | 1,145 | 2,232 | 46.7% | 4,879 | 27,136 | 95.9%
+   9 | 13,597 | 8,560 | 3 | 4,612 | 3,572 | 1,915 | 5,531 | 64.6% | 8,245 | 36,805 | 90.1%
+  10 | 14,805 | 9,648 | 3 | 4,596 | 1,221 | 2,052 | 3,320 | 36.8% | 6,050 | 14,204 | 91.0%
+turns 6-10 p50 (n=5): user TTFT 3,320 ms, retrieval share 46.7%, inference share of E2E 94.1%
+
+## P6B-2  12 chat questions x 3 levels, turn 1, search on  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 16k ctx, prefix cache on, A10G, via app + gateway]
+level | n | E2E p50 s | E2E max s | first answer token p50 s | thinking tok p50 | thinking tok max | answer tok p50 | usage tok p50
+off   | 12 | 13.9 | 24.7 | 0.8 | 0 | 0 | 622 | 623
+brief | 12 | 13.9 | 22.7 | 3.3 | 128 | 128 | 477 | 609
+full  | 12 | 29.4 | 126.8 | 11.6 | 570 | 5,776 | 605 | 1,412
+full thinking over 128 tok (brief cut it off): 12/12; over 1,000 tok: 3/12
+per question, full thinking tokens: q0=719, q1=311, q2=635, q3=520, q4=570, q5=367, q6=309, q7=5776, q8=1143, q9=1803, q10=519, q11=665
+check: (thinking + answer) / usage.completion_tokens p50 = 0.997 (should sit just under 1.0; the </think> and newlines are not in either text)
