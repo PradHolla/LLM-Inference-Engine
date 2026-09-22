@@ -17,7 +17,8 @@ ARGS = None
 active = 0
 
 
-async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens: int) -> None:
+async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens: int,
+                   reasoning: int = 0) -> None:
     global active
 
     def chunk(payload: dict) -> bytes:
@@ -31,14 +32,16 @@ async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens:
     async with SEM:                      # capacity limit -> queueing -> the knee
         active += 1
         try:
-            while emitted < max_tokens:
+            while emitted < reasoning + max_tokens:
                 # One sleep per STEP, not per token: a speculative step emits several
                 # tokens for the price of one, which is what --tokens-per-chunk models.
                 itl = ARGS.itl_ms * (1 + (active - 1) / ARGS.batch) / 1000
                 await asyncio.sleep(itl)
-                n = min(per, max_tokens - emitted)
+                field = "reasoning" if emitted < reasoning else "content"
+                limit = reasoning if field == "reasoning" else reasoning + max_tokens
+                n = min(per, limit - emitted)
                 text = "".join(f"tok{emitted + j} " for j in range(n))
-                writer.write(chunk({"choices": [{"delta": {"content": text},
+                writer.write(chunk({"choices": [{"delta": {field: text},
                                                  "index": 0, "finish_reason": None}]}))
                 await writer.drain()
                 emitted += n
@@ -78,8 +81,14 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                          b"Transfer-Encoding: chunked\r\nCache-Control: no-cache\r\n\r\n")
             await writer.drain()
+            # Reasoning follows vLLM's switches: enable_thinking off gives none, a
+            # thinking_token_budget caps it.
+            think = (req.get("chat_template_kwargs") or {}).get("enable_thinking", True)
+            budget = req.get("thinking_token_budget")
+            reasoning = 0 if not think else ARGS.reasoning if budget is None \
+                else min(ARGS.reasoning, int(budget))
             await generate(writer, max(1, len(prompt) // 4),
-                           int(req.get("max_tokens", 128)))
+                           int(req.get("max_tokens", 128)), reasoning)
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
         pass
     finally:
@@ -96,6 +105,8 @@ async def main() -> None:
     ap.add_argument("--prefill-ms-per-token", type=float, default=0.25)
     ap.add_argument("--tokens-per-chunk", type=int, default=1,
                     help="tokens per SSE chunk; >1 simulates speculative decoding")
+    ap.add_argument("--reasoning", type=int, default=0,
+                    help="reasoning tokens emitted as delta.reasoning before the content")
     ap.add_argument("--usage", action="store_true",
                     help="emit a final usage chunk, as stream_options.include_usage does")
     ap.add_argument("--cached-tokens", type=int, default=0,

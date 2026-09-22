@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command each way, correct flags baked in. Written because hand-typed rsync and ssh
 # invocations failed three times this week for reasons unrelated to the work.
-#   ./sync.sh push          code up (labbench, tools, infra)
+#   ./sync.sh push          code up (labbench, gateway, tools, infra, app)
 #   ./sync.sh pull          results down
 #   ./sync.sh run '<cmd>'   run a command on the box, from /opt/llm
 set -uo pipefail
@@ -12,11 +12,11 @@ IP=$(aws ec2 describe-instances --region "$REGION" \
      --filters "Name=tag:Project,Values=$PROJECT" "Name=instance-state-name,Values=running" \
      --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null)
 [ -n "$IP" ] && [ "$IP" != "None" ] || { echo "no running instance"; exit 1; }
-RS=(rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache__')
+RS=(rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache__' --exclude 'chats.db*')
 
 case "${1:-}" in
   push)
-    for d in labbench gateway tools infra; do
+    for d in labbench gateway tools infra app; do
         "${RS[@]}" "$d/" "ubuntu@$IP:/opt/llm/$d/" || exit 1
     done
     # Record which commit the box is running, so a result can be traced to a source state.
