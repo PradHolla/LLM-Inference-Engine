@@ -13,6 +13,24 @@ const {
 const html = htm.bind(React.createElement);
 
 const MOCK = new URLSearchParams(location.search).get("mock") === "1";
+const THEME_KEY = "llm-ui-theme";
+
+function initialTheme() {
+  try {
+    const saved = window.localStorage.getItem(THEME_KEY);
+    if (saved === "cream" || saved === "dark") return saved;
+  } catch (_) { /* local storage can be unavailable in private contexts */ }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "cream";
+}
+
+function Icon({ name, className }) {
+  const common = { className, viewBox: "0 0 24 24", width: "17", height: "17", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+  if (name === "sun") return html`<svg ...${common}><circle cx="12" cy="12" r="3.5" /><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" /></svg>`;
+  if (name === "moon") return html`<svg ...${common}><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" /></svg>`;
+  if (name === "send") return html`<svg ...${common}><path d="m4 4 16 8-16 8 3-8-3-8Z" /><path d="M7 12h13" /></svg>`;
+  if (name === "stop") return html`<svg ...${common}><rect x="7" y="7" width="10" height="10" rx="1" /></svg>`;
+  return html`<svg ...${common}><path d="m7 10 5 5 5-5" /></svg>`;
+}
 
 // ---- formatting helpers -- every "may be null" field routes through these ----
 
@@ -290,12 +308,17 @@ function ThinkingToggle({ checked, onChange }) {
 }
 
 function TopBar({ conn, config, backend, quantValue, quantFocused, onQuantFocusChange,
-                   onQuantCommit, onBackendSwitch, thinkingEnabled, onThinkingChange }) {
+                   onQuantCommit, onBackendSwitch, thinkingEnabled, onThinkingChange, theme, onThemeChange }) {
   return html`
     <header id="topbar" class="topbar">
       <div class="topbar-row topbar-row-status">
         <${ConnIndicator} ok=${conn.ok} />
         <${ConfigSummary} config=${config} />
+        <span class="topbar-spacer"></span>
+        <button class="theme-toggle" type="button" onClick=${onThemeChange}
+          aria-label=${theme === "dark" ? "Use cream theme" : "Use dark theme"} title=${theme === "dark" ? "Use cream theme" : "Use dark theme"}>
+          <${Icon} name=${theme === "dark" ? "sun" : "moon"} />
+        </button>
       </div>
       <div class="topbar-row topbar-controls">
         <${BackendGroup} backend=${backend} onSwitch=${onBackendSwitch} />
@@ -409,14 +432,14 @@ function ChatPane({ messages, streamingActive, streamRef, onSend, onStop, inputD
         <${MessageList} messages=${messages} />
         ${streamingActive ? html`<${StreamingMessage} ref=${streamRef} containerRef=${containerRef} pinnedRef=${pinnedRef} />` : null}
       </div>
-      <button id="jumpLatest" class="jump-latest" hidden=${!showJump} type="button" onClick=${jumpToLatest}>jump to latest ↓</button>
+      <button id="jumpLatest" class="jump-latest" hidden=${!showJump} type="button" onClick=${jumpToLatest}><${Icon} name="chevron" /> <span>Latest</span></button>
       <div class="composer">
         <div class="composer-field">
           <textarea id="chatInput" ref=${inputRef} disabled=${inputDisabled}
             placeholder="message... (enter to send, shift+enter for newline)" onKeyDown=${handleKeyDown}></textarea>
           <div class="composer-buttons">
-            <button id="sendBtn" class="btn btn-primary" type="button" disabled=${inputDisabled || sending} onClick=${handleSend}>send</button>
-            <button id="stopBtn" class="btn btn-stop" type="button" hidden=${!sending} onClick=${onStop}>stop</button>
+            <button id="sendBtn" class="btn btn-primary" type="button" disabled=${inputDisabled || sending} onClick=${handleSend}><${Icon} name="send" /> <span>Send</span></button>
+            <button id="stopBtn" class="btn btn-stop" type="button" hidden=${!sending} onClick=${onStop}><${Icon} name="stop" /> <span>Stop</span></button>
           </div>
         </div>
       </div>
@@ -747,7 +770,7 @@ function Drawer({ open, onToggle, activeTab, onTabClick, tabProps }) {
     <section class="drawer ${open ? "open" : ""}" id="drawer">
       <div class="drawer-bar">
         <button id="drawerToggle" class="drawer-toggle" type="button" onClick=${onToggle}>
-          <span class="drawer-toggle-chevron">▲</span>drawer
+          <${Icon} name="chevron" className="drawer-toggle-chevron" /><span>Drawer</span>
         </button>
         <nav class="drawer-tabs" id="drawerTabs">
           ${TAB_LABELS.map((t) => html`
@@ -768,6 +791,7 @@ function Drawer({ open, onToggle, activeTab, onTabClick, tabProps }) {
 // ---- root component ----
 
 function App() {
+  const [theme, setTheme] = useState(initialTheme);
   const [conn, setConn] = useState({ ok: null, error: null });
   const [pollState, setPollState] = useState(null);
   const [requestDisplay, setRequestDisplay] = useState({ kind: "pending" });
@@ -799,6 +823,11 @@ function App() {
   const abortCtrlRef = useRef(null);
   const streamingActiveRef = useRef(false);
   const pollStateRef = useRef(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { window.localStorage.setItem(THEME_KEY, theme); } catch (_) { /* preference remains for this visit */ }
+  }, [theme]);
 
   useEffect(() => { streamingActiveRef.current = streamingActive; }, [streamingActive]);
   useEffect(() => { pollStateRef.current = pollState; }, [pollState]);
@@ -1081,7 +1110,8 @@ function App() {
       <${TopBar} conn=${conn} config=${config} backend=${backend}
         quantValue=${quantValue} quantFocused=${quantFocused} onQuantFocusChange=${setQuantFocused}
         onQuantCommit=${handleQuantCommit} onBackendSwitch=${handleBackendSwitch}
-        thinkingEnabled=${thinkingEnabled} onThinkingChange=${setThinkingEnabled} />
+        thinkingEnabled=${thinkingEnabled} onThinkingChange=${setThinkingEnabled}
+        theme=${theme} onThemeChange=${() => setTheme((current) => current === "dark" ? "cream" : "dark")} />
       <main class="main">
         <${ChatPane} messages=${messages} streamingActive=${streamingActive} streamRef=${streamHandleRef}
           onSend=${handleSend} onStop=${handleStop} inputDisabled=${controlsDisabled} sending=${sending} />

@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>lab bench</title>
+<script>
+try {
+  const saved = localStorage.getItem("llm-ui-theme");
+  document.documentElement.dataset.theme = saved === "cream" || saved === "dark"
+    ? saved : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "cream");
+} catch (_) {}
+</script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
