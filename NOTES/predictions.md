@@ -6474,3 +6474,45 @@ but never persisted. The gateway does write its own trace, now tagged with `chat
 `turn_index`, so **the data needed to score P6B-1 exists in the gateway's JSONL and not in
 the app's database.** Score P6B-1 from `GW_TRACE`, joined on `chat_id` and `turn_index`.
 Do not read the app's `traces` table and conclude the spans are missing.
+
+### P6B correction, 2026-09-22, before the run: what server, what instrument, what gets scored
+
+No prediction value changes. Three things about how they will be measured do, and each is
+recorded here rather than edited above.
+
+**The server is Phase 7's, not the one the header describes.** The header says fp16 KV. The
+run uses `infra/app-run.sh`, which launches the Phase 7 runbook recipe exactly: fp8 weights,
+**fp8 KV**, `--max-model-len 16384`, prefix caching, `--reasoning-parser qwen3`, the bare
+`</think>` `--reasoning-config`, `VLLM_USE_V2_MODEL_RUNNER=0`, `KV_PIN=10213733807`. The thinking
+levels were calibrated on that server, so it wins. The prefill slopes P6B-1 is built from
+(0.0100 / 0.2912 ms/token) were measured at fp16 KV and have not been re-measured at fp8 KV.
+If P6B-1a lands high, that is the first suspect, and the gateway's `upstream_ttft_ms` against
+`prompt_tokens - cached_tokens` separates it from the search span.
+
+**The instrument is the app itself.** `tools/appdrive.py` drives `POST /api/chats/{id}/send`
+as the browser does. `tools/convo.py` could not: no thinking levels, no `chat_id`, no search
+switch. Definitions, fixed now so they cannot drift after the numbers arrive:
+
+| quantity | measured as |
+|---|---|
+| user TTFT | driver clock, request sent to the first `reasoning` OR `content` event from the app |
+| retrieval span | gateway `search_ms + fetch_ms + extract_ms`, joined on `(chat_id, turn_index)` |
+| P6B-1b | retrieval span / user TTFT |
+| P6B-1c | gateway `upstream_e2e_ms` / user E2E -- both durations on one box, no cross-clock subtraction |
+| P6B-1a scenario | turn 10 of a 10-turn conversation at Brief, search on; also reported as the p50 of turns 6-10 |
+| thinking tokens (P6B-2d) | Qwen's own `tokenizer.json` over the stored reasoning text; checked against `usage.completion_tokens` |
+
+**An instrument bug was found and fixed first (incident 56).** `labbench/proxy.py`, which the
+gateway's trace is built on, still read `reasoning_content`. With the parser on, the gateway's
+`ttft_ms` would have been time to first ANSWER token -- after Brief's 128 thinking tokens --
+and P6B-1d, search against prefill, would have compared the search span to prefill plus
+three seconds of decode. It now reads `reasoning`. `tools/bench.py` and the lab bench UI had
+the same defect and got the same fix.
+
+**Scope, stated as cuts.**
+- P6B-2's "Full, hard maths" row is **not scored**. The question set is ordinary chat; one item
+  is compound-interest arithmetic, and it is reported per question but is not hard maths.
+  Phase 7 already measured that regime directly (P7-Q1m).
+- Concurrency 1 only, as the header says. Nothing here says how the app behaves under load.
+- P6B-2 asks each question once per level (12 x 3 = 36 sends). With n = 12 per level the
+  report gives p50 and max, **not p95** -- a p95 needs 20 samples (incident 11).
