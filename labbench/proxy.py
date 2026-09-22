@@ -108,7 +108,8 @@ class StreamAccounting:
         if not ch:
             return ""
         d = ch[0].get("delta") or {}
-        return (d.get("content") or d.get("reasoning_content") or "") or ""
+        # vLLM 0.27.1 emits `reasoning`; `reasoning_content` is the deprecated name (incident 49).
+        return (d.get("content") or d.get("reasoning") or d.get("reasoning_content") or "") or ""
 
     def _usage(self, u: dict | None) -> None:
         if not u:
@@ -318,6 +319,12 @@ def selftest() -> int:
     acc3.feed(half[:9], 0.05)
     acc3.feed(half[9:], 0.06)
     chk("split across byte chunks", tr3.n_content_events, 1)
+
+    tr5 = Trace(request_id="t5", t_wall=0.0, upstream="test")
+    acc5 = StreamAccounting(tr5, 0.0)
+    acc5.feed(b'data: {"choices":[{"delta":{"reasoning":"hmm"}}]}\n\n', 0.080)
+    acc5.feed(ev("answer"), 0.300)
+    chk("reasoning delta is the first token", round(acc5.finish(0.3).ttft_ms, 1), 80.0)
 
     print("\n".join(fails) if fails else "labbench/proxy.py selftest: all checks passed")
     return 1 if fails else 0

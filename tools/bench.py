@@ -162,7 +162,8 @@ async def one_request(client: httpx.AsyncClient, args, rate: float,
                 if not choices:
                     continue
                 delta = choices[0].get("delta", {})
-                text = delta.get("content") or delta.get("reasoning_content") or ""
+                text = (delta.get("content") or delta.get("reasoning")
+                        or delta.get("reasoning_content") or "")
                 if not text:
                     continue
                 now = time.perf_counter()

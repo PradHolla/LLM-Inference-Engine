@@ -946,7 +946,8 @@ function App() {
     function applyDelta(delta) {
       const handle = streamHandleRef.current;
       if (!handle) return;
-      if (delta.reasoning_content) handle.appendReasoning(delta.reasoning_content);
+      const thought = delta.reasoning || delta.reasoning_content;
+      if (thought) handle.appendReasoning(thought);
       if (delta.content) {
         if (firstContentAt === null) {
           firstContentAt = performance.now();
