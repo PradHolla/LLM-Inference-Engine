@@ -1108,6 +1108,44 @@ overflow     needs to exceed   16,384   this config   25,760   1.57&times;   OK<
   <div class="finding">
     <p><strong>A middling budget is 11.1 points worse than a tiny one.</strong> Give the model room or give it almost none; the setting in between is the one to avoid. The same shape appeared at 11.6 and 11.1 points in two earlier runs, so it is not a sampling accident.</p>
   </div>
+
+  <p>Run twice more and pool to 360 answers per cell, and the full ladder shows the trough is not a two-point artefact of the budgets that happened to be sampled. Adding the silence column &mdash; how long the user waits with nothing on screen &mdash; shows something stronger than a trough:</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, math slice, vendor sampling, two runs pooled to 360 answers per cell, noise floor &plusmn;3 points</caption>
+    <thead><tr><th>Reasoning budget</th><th class="n">Accuracy</th><th class="n">Silence before the answer</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td class="n">86.4%</td><td class="n">0.2 s</td></tr>
+      <tr><td>128</td><td class="n p">94.4%</td><td class="n p">3.9 s</td></tr>
+      <tr><td>256</td><td class="n x">92.2%</td><td class="n x">7.4 s</td></tr>
+      <tr><td>512</td><td class="n x">84.2%</td><td class="n x">14.6 s</td></tr>
+      <tr><td>1024</td><td class="n x">83.1%</td><td class="n x">28.2 s</td></tr>
+      <tr><td>2048</td><td class="n p">99.4%</td><td class="n">44.7 s</td></tr>
+      <tr><td>unbounded</td><td class="n">99.4%</td><td class="n">45.7 s</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>256, 512 and 1024 are each worse than 128 on both axes at once.</strong> Not a trade of accuracy against latency &mdash; simply dominated. They are less accurate <em>and</em> slower. Three of the seven settings available are choices no one should ever make.</p>
+  </div>
+
+  <h3>It is not the length of the budget. It is whether the model got to an answer</h3>
+  <p>Splitting the results by whether the model had already reached an answer at the moment the budget cut it off explains the whole shape:</p>
+  <div class="scroll"><table>
+    <caption>Among answers where the budget actually bound. Same runs as above</caption>
+    <thead><tr><th>Budget</th><th class="n">Had reached an answer</th><th class="n">Accuracy if it had</th><th class="n">Accuracy if it had not</th></tr></thead>
+    <tbody>
+      <tr><td>512</td><td class="n">30%</td><td class="n">90.6 &rarr; 94.3%</td><td class="n x">79.4 &rarr; 81.9%</td></tr>
+      <tr><td>1024</td><td class="n">70%</td><td class="n">91.0 &rarr; 92.3%</td><td class="n x">53.2 &rarr; 51.1%</td></tr>
+      <tr><td>2048</td><td class="n">98%</td><td class="n">100.0%</td><td class="n m">&mdash;</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>A response cut off before it reaches an answer scores 51%.</strong> That is the whole mechanism. A budget near the task&rsquo;s natural reasoning length is the worst available setting, because it is enough to commit the model to a chain of thought and not enough to let it finish one. 128 tokens is safe precisely because it is far below: the model never starts a long chain, so there is none to truncate.</p>
+  </div>
+  <div class="concept">
+    <span class="tag">Why this changed the product</span>
+    <p>A conventional reasoning control offers low, medium and high. On this model and this hardware, <strong>medium lands in the trough.</strong> So the chat application built on top of this engine offers three settings &mdash; off, 128 tokens, and unbounded &mdash; with nothing in between, and maps the OpenAI-standard <code>reasoning_effort: medium</code> <em>upward</em> to unbounded rather than to a middle value. It is the one place in this project where a measurement overruled an industry convention outright.</p>
+    <p>The honest caveat: every reasoning-length number here comes from mathematics problems. Whether an ordinary conversational question behaves the same way is untested, and until it is, those three settings are provisional.</p>
+  </div>
   <div class="concept">
     <span class="tag">Read the label on the box</span>
     <h4>Four parts of this document used a setting the model's own card forbids</h4>
