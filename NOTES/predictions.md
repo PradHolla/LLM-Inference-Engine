@@ -6362,3 +6362,115 @@ property is real and was verified (50 of ~53-60 prefix tokens hit, the remainder
 a partial 16-token block, exactly as designed), but at these proportions it is worth ~15 ms.
 generate_then_retrieve hits 11.1% for the same reason inverted: it has 267 generated tokens
 to reuse, not 13. **The prefix cache rewards the arm that generated more before splicing.**
+
+## P6B  The app end to end, written 2026-09-21 with the box STOPPED and no 6b code run on a GPU
+
+Phase 6b is built and verified against `tools/mock_server.py` only. Nothing in `app/` has
+ever spoken to a real engine. Two numbers are worth pre-registering before the box comes
+up; the rest of 6b is functional testing, where a prediction adds nothing.
+
+**Config these assume:** Qwen3-8B fp8, KV fp16, `--max-model-len 16384`, prefix caching on,
+no speculation, A10G 24 GB, vLLM 0.27.1 with `VLLM_USE_V2_MODEL_RUNNER=0`, gateway and app
+both on the box, app reached over localhost, **concurrency 1** (one human), search ON,
+`gw_order` default `retrieve_then_generate`, sampling temp 0.6 / top_p 0.95 / top_k 20.
+
+### The constants these are built from, and where each was measured
+
+| constant | value | source |
+|---|---|---|
+| warm prefill slope | 0.0100 ms/token | P6L-2 |
+| cold prefill slope | 0.2912 ms/token | P6L-2 |
+| search + fetch + extract, p50 | 577 / 753 / 488 ms in the three arms; 887 ms serial cold | P7-Q2/Q3 ACTUALS |
+| ITL, single stream | ~22 ms/token (fp8 realistic 45 tok/s) | `PROJECT.md` section 3 |
+| ITL, concurrency 8 | 46.6 ms/token | P7-Q2/Q3 ACTUALS |
+| natural reasoning, maths | median ~1,800 tok, p95 3,531 | P7-Q1m |
+
+**Scenario for P6B-1 and P6B-2:** turn 10 of a conversation, ~3,000 tokens of history
+already cached, search returns a ~2,000-token block, answer ~250 tokens.
+
+### P6B-1  At first token, MOST of the wait is not inference. At end-to-end, almost all of it is.
+
+This is `PROJECT.md` section 8's stated Phase 6 question -- "what fraction of user wait is
+now actually *your* inference?" -- and the answer should depend on which metric you ask
+about. That is the prediction.
+
+    search + fetch + extract                       800 ms   (between the 753 ms in-run p50
+                                                              and the 887 ms serial probe)
+    prefill, cached history   3,000 x 0.0100 =      30 ms
+    prefill, NEW search block 2,000 x 0.2912 =     582 ms
+    prefill, new user turn       20 x 0.2912 =       6 ms
+    render + queue + app localhost hop            ~ 10 ms
+    ------------------------------------------------------
+    TTFT                                        ~1,430 ms
+
+    decode  128 thinking + 250 answer = 378 x 22 = 8,320 ms
+    ------------------------------------------------------
+    E2E                                         ~9,750 ms
+
+| # | prediction | value |
+|---|---|---|
+| **P6B-1a** | TTFT p50 on that turn | **1,200 - 1,700 ms** |
+| **P6B-1b** | fraction of TTFT that is NOT inference (the search round trip) | **50 - 60%** |
+| **P6B-1c** | fraction of E2E that IS inference (prefill + decode) | **88 - 94%** |
+| **P6B-1d** | the single largest span in TTFT is the search, not the prefill | **search > prefill** |
+
+The point of stating it as two fractions: the same system is 8% search when measured
+end to end and over half search when measured at first token. Section 1 of `PROJECT.md`
+argues TTFT is what users feel, so the honest headline for this phase is P6B-1b, not
+P6B-1c. If only the E2E number gets reported, the phase will look like it proved inference
+dominates, which is true and misleading.
+
+**Most likely to be wrong:** the 2,000-token block size is a guess, not a measurement.
+`gateway/search.py` decides it. If the real block is 3,000 tokens the prefill term becomes
+874 ms and P6B-1d flips. Read the actual `injected_tokens_est` from the trace before
+scoring 1d.
+
+### P6B-2  What the three thinking levels cost a real user
+
+Off sends budget 0, Brief sends 128, Full omits the field. Decode at 22 ms/token,
+TTFT 1,430 ms from P6B-1.
+
+| level | thinking tokens | total tokens | predicted E2E |
+|---|---|---|---|
+| Off | 0 | 250 | **~6.9 s** |
+| Brief | 128 | 378 | **~9.8 s** |
+| Full, ordinary chat question | **400 - 900** | 650 - 1,150 | **~16 - 27 s** |
+| Full, hard maths question | ~1,800 (P7-Q1m median) | ~2,050 | **~46 - 52 s** |
+
+| # | prediction | value |
+|---|---|---|
+| **P6B-2a** | Off E2E | 6 - 8 s |
+| **P6B-2b** | Brief E2E | 8 - 12 s |
+| **P6B-2c** | Full E2E on an ordinary chat question | **16 - 27 s** |
+| **P6B-2d** | Full reasoning length on ordinary chat questions is well below the maths median | **< 1,000 tokens** |
+| **P6B-2e** | `Brief` remains the right default | Off loses accuracy, Full costs > 2x Brief |
+
+**P6B-2d is the one with real information in it, and it is the weakest link in the
+product.** Every thinking-length number this project owns comes from maths and gsm8k. A
+chat question is not those. If ordinary questions turn out to need 1,500+ reasoning tokens,
+Full is a 40-second wait and the levels need rethinking; if they need 300, Full is cheap and
+Brief may be unnecessary. `PROJECT.md` section 10 already carries this as an open question,
+written before Phase 7 ran, and it is still open.
+
+**What would falsify the whole scheme:** if measured reasoning length on chat questions
+lands between roughly 500 and 1,500 tokens, then the *unbounded* setting is itself sitting
+in the trough that section 15.2 of the phase 6 design doc chose it to avoid -- because the
+trough is defined by the chain being cut off mid-thought, and an unbounded chain is never
+cut. Unbounded cannot be in the trough by construction. But it would mean Brief at 128 is
+cutting off a chain that was going somewhere, which is the mirror-image failure and has
+never been tested on chat-shaped input.
+
+### Not predicted, deliberately
+
+Whether Stop works, whether reload persists, whether the banner shows, whether branching
+round-trips. Those are pass/fail behaviours, already verified against the mock, and a
+predicted value for them would be ceremony rather than a check.
+
+### Instrument warning, recorded before the run
+
+`app/db.py` defines a `traces` table and a `save_trace()` function, and **nothing calls
+it.** The app therefore stores no spans of its own, and `app_rtt_ms` is computed and logged
+but never persisted. The gateway does write its own trace, now tagged with `chat_id` and
+`turn_index`, so **the data needed to score P6B-1 exists in the gateway's JSONL and not in
+the app's database.** Score P6B-1 from `GW_TRACE`, joined on `chat_id` and `turn_index`.
+Do not read the app's `traces` table and conclude the spans are missing.
