@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Phase 6b: vLLM, gateway and app on the box, then drive the app through its own API.
 # Runs ON the box, always inside a unit, never a foreground ssh session:
-#   sudo systemd-run --unit=p6b-up --collect /bin/bash /opt/llm/infra/app-run.sh up
-#   ./infra/app-run.sh up | smoke | drive | report | down
+#   sudo systemd-run --unit=app-up --collect /bin/bash /opt/llm/infra/app-run.sh up
+#   ./infra/app-run.sh up | labbench | smoke | drive | report | down
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
 PY=/opt/llm/.venv/bin/python
 MODEL=Qwen/Qwen3-8B
-GWTRACE=results/p6b-gw.jsonl
-APPOUT=results/p6b-app.jsonl
+# P6B's files are scored and committed; later sessions write their own.
+GWTRACE=results/app-gw.jsonl
+APPOUT=results/app-drive.jsonl
 export HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1
 ts() { date -u +%H:%M:%S; }
 die() { echo "ABORT: $*"; exit 1; }
@@ -17,7 +18,7 @@ die() { echo "ABORT: $*"; exit 1; }
 # The Phase 7 server exactly, so 6b numbers sit beside the budget ladder. phase7-runbook.md.
 # --enable-prompt-tokens-details only adds usage.prompt_tokens_details.cached_tokens per request.
 launch_vllm() {
-    VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh p6b \
+    VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh app \
         --model "$MODEL" --quantization fp8 --max-model-len 16384 \
         --kv-cache-dtype fp8 --enable-prefix-caching --reasoning-parser qwen3 \
         --reasoning-config '{"reasoning_start_str": "<think>", "reasoning_end_str": "</think>"}' \
@@ -100,7 +101,7 @@ require_stack() {
 
 smoke() {
     echo "[$(ts)] smoke: one question at each thinking level, search off"
-    "$UV" run tools/appdrive.py run --mode smoke --out results/p6b-smoke.jsonl \
+    "$UV" run tools/appdrive.py run --mode smoke --out results/app-smoke.jsonl \
         || die "smoke failed; the app is not fit to measure"
 }
 
@@ -133,18 +134,32 @@ drive)
     echo "[$(ts)] P6B-2: 12 questions x 3 levels, search on"
     "$UV" run tools/appdrive.py run --mode levels --out "$APPOUT" || echo "  levels had failed sends"
     "$UV" run tools/appdrive.py report --app-out "$APPOUT" --gw-trace "$GWTRACE" \
-        | tee results/p6b-report.txt
+        | tee results/app-report.txt
     echo "DRIVE_DONE"
     ;;
 report)
     "$UV" run tools/appdrive.py report --app-out "$APPOUT" --gw-trace "$GWTRACE" \
-        | tee results/p6b-report.txt
+        | tee results/app-report.txt
+    ;;
+labbench)
+    # :8081 because the gateway holds :8080. Watches the same vLLM the app uses; its backend
+    # switcher would relaunch vLLM without this recipe's flags, so leave it alone.
+    require_vllm
+    sudo systemctl stop llm-labbench >/dev/null 2>&1
+    wait_port_free 8081 || die "port 8081 still bound after the lab bench stopped"
+    sudo systemd-run --unit=llm-labbench --collect --working-directory=/opt/llm \
+        --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
+        --setenv=LABBENCH_UPSTREAM=http://localhost:8000 --setenv=LABBENCH_UV="$UV" \
+        "$PY" -m uvicorn labbench.server:app --host 127.0.0.1 --port 8081 \
+        >/dev/null 2>&1 || die "lab bench unit failed to start"
+    wait_http http://localhost:8081/health 30 || die "lab bench never became ready"
+    echo "LABBENCH_OK  browser: add -L 8081:localhost:8081 to the tunnel, then http://localhost:8081"
     ;;
 down)
-    sudo systemctl stop llm-app gateway vllm >/dev/null 2>&1
-    echo "[$(ts)] app, gateway and vLLM stopped; the box is still running -- ./infra/down.sh"
+    sudo systemctl stop llm-labbench llm-app gateway vllm >/dev/null 2>&1
+    echo "[$(ts)] lab bench, app, gateway and vLLM stopped; the box is still running -- ./infra/down.sh"
     ;;
 *)
-    echo "usage: $0 up | smoke | drive | report | down"; exit 2 ;;
+    echo "usage: $0 up | labbench | smoke | drive | report | down"; exit 2 ;;
 esac
 exit 0
