@@ -1,23 +1,22 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>chat</title>
-<script>
-try {
-  const saved = localStorage.getItem("llm-ui-theme");
-  document.documentElement.dataset.theme = saved === "cream" || saved === "dark"
-    ? saved : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "cream");
-} catch (_) {}
-</script>
-<link rel="stylesheet" href="app.css">
-</head>
-<body>
-<div id="root"></div>
-<script src="vendor/react.production.min.js"></script>
-<script src="vendor/react-dom.production.min.js"></script>
-<script src="vendor/htm.js"></script>
-<script src="app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f2ea" />
+    <title>Inference Chat</title>
+    <script>
+      try {
+        const saved = localStorage.getItem("llm-ui-theme");
+        document.documentElement.dataset.theme = saved === "cream" || saved === "dark"
+          ? saved
+          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "cream";
+      } catch (_) {}
+    </script>
+    <script type="module" crossorigin src="/ui/assets/index-KDlieEuj.js"></script>
+    <link rel="stylesheet" crossorigin href="/ui/assets/index-D6r_ENIv.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>

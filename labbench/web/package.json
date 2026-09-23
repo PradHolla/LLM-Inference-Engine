@@ -1,0 +1,31 @@
+{
+  "name": "inference-labbench-ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shikijs/langs": "^3.23.0",
+    "@shikijs/themes": "^3.23.0",
+    "lucide-react": "^0.468.0",
+    "motion": "^12.23.12",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "shiki": "^3.23.0",
+    "streamdown": "^2.3.0",
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.17",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
+  }
+}

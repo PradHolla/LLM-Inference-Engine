@@ -448,12 +448,13 @@ baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock
 engine/               Phase 2: manual KV cache, static then continuous batching,
                       scheduler with admission control, OpenAI-streaming server
 labbench/             Phase 6a: the instrument surface -- byte-faithful streaming
-                      proxy, backend switcher, live Prometheus and journal probes,
-                      React UI showing every stage of a request
+                      proxy, backend switcher, live Prometheus and journal probes
+labbench/web/         Vite + React source; builds static UI assets into labbench/ui/
 gateway/              Phase 6a: the inference gateway -- prompt assembly, web search,
                       context overflow strategy, thinking budget, request tracing
-app/                  Phase 6b: the chat app -- SQLite branching message tree, SSE
+app/                  Phase 6b: the chat API -- SQLite branching message tree, SSE
                       streaming, three-level thinking control, cream/dark themes
+app/web/              Vite + React source; builds static UI assets into app/ui/
 infra/                provisioning, cost guardrails, spot interruption handling,
                       one-command session lifecycle, pinned-KV vLLM launcher
 NOTES/predictions.md  the prediction log

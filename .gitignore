@@ -10,6 +10,9 @@ NOTES/phase6a-labbench-design.md
 NOTES/code-notes.md
 NOTES/inference-engineering-book.md
 NOTES/phase6b-implementer-prompt.md
+NOTES/frontend-revamp-prompt.md
+NOTES/frontend-revamp-report.md
+NOTES/frontend-backend-requests.md
 
 # Python
 __pycache__/
@@ -17,6 +20,10 @@ __pycache__/
 .venv/
 venv/
 .uv/
+node_modules/
+**/node_modules/
+*.tsbuildinfo
+.vite/
 app/chats.db
 app/chats.db-wal
 app/chats.db-shm
