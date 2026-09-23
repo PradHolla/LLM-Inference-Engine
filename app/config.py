@@ -1,5 +1,8 @@
+import os
+
+
 GATEWAY_URL = "http://127.0.0.1:8080"
-DB_PATH = "app/chats.db"
+DB_PATH = os.environ.get("APP_DB_PATH", "app/chats.db")
 MODEL_ID = "Qwen/Qwen3-8B"   # fallback only, see D4
 HOST = "127.0.0.1"
 PORT = 8090
@@ -12,3 +15,9 @@ THINKING_LEVELS = {
     "full":  None,   # send NO gw_thinking_budget field at all
 }
 DEFAULT_THINKING = "brief"
+THINKING_OPTIONS = {
+    "off": {"label": "Off", "description": "Fast replies without a reasoning block."},
+    "brief": {"label": "Brief", "description": "A short, bounded reasoning pass."},
+    "full": {"label": "Full", "description": "Unbounded reasoning for harder questions."},
+}
+SEARCH_DEFAULT = True

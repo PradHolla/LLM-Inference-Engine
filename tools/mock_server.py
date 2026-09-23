@@ -12,9 +12,12 @@ a genuine knee -- see NOTES/code-notes.md for what that simulation models.
 """
 from __future__ import annotations
 import argparse, asyncio, json, time
+import math
 
 ARGS = None
 active = 0
+REPLAY = []
+REPLAY_CURSOR = 0
 
 
 async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens: int,
@@ -59,7 +62,52 @@ async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens:
     await writer.drain()
 
 
+async def generate_replay(writer: asyncio.StreamWriter, prompt_tokens: int,
+                          max_tokens: int, record: dict, enabled: bool,
+                          budget: int | None) -> None:
+    global active
+
+    def chunk(payload: dict) -> bytes:
+        body = f"data: {json.dumps(payload)}\n\n".encode()
+        return b"%x\r\n%s\r\n" % (len(body), body)
+
+    await asyncio.sleep(prompt_tokens * ARGS.prefill_ms_per_token / 1000)
+    reasoning = record.get("reasoning", "") if enabled else ""
+    if not isinstance(reasoning, str):
+        reasoning = ""
+    if budget is not None:
+        reasoning = reasoning[:max(0, budget) * 4]
+    content = record.get("content", "")
+    if not isinstance(content, str):
+        content = ""
+    content = content[:max(0, max_tokens) * 4]
+    async with SEM:
+        active += 1
+        try:
+            for field, value in (("reasoning", reasoning), ("content", content)):
+                for offset in range(0, len(value), 16):
+                    await asyncio.sleep(ARGS.itl_ms / 1000)
+                    writer.write(chunk({"choices": [{"delta": {field: value[offset:offset + 16]},
+                                                     "index": 0, "finish_reason": None}]}))
+                    await writer.drain()
+        finally:
+            active -= 1
+
+    prompt_count = math.ceil(prompt_tokens)
+    completion_count = math.ceil(len(reasoning) / 4) + math.ceil(len(content) / 4)
+    writer.write(chunk({"choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}]}))
+    if ARGS.usage:
+        writer.write(chunk({"choices": [], "usage": {
+            "prompt_tokens": prompt_count, "completion_tokens": completion_count,
+            "total_tokens": prompt_count + completion_count,
+            "prompt_tokens_details": {"cached_tokens": ARGS.cached_tokens}}}))
+    writer.write(b"%x\r\ndata: [DONE]\n\n\r\n" % len(b"data: [DONE]\n\n"))
+    writer.write(b"0\r\n\r\n")
+    await writer.drain()
+
+
 async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    global REPLAY_CURSOR
     try:
         while True:
             head = await reader.readuntil(b"\r\n\r\n")
@@ -78,6 +126,17 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
 
             req = json.loads(body or b"{}")
             prompt = "".join(m.get("content", "") for m in req.get("messages", []))
+            if not req.get("stream", True):
+                user_text = next((m.get("content", "") for m in reversed(req.get("messages", []))
+                                  if m.get("role") == "user"), "")
+                title = " ".join(str(user_text).split()[:7]).strip(" .!?\n") or "New chat"
+                payload = json.dumps({"choices": [{"message": {
+                    "role": "assistant", "content": title}}]}).encode()
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                             b"Connection: close\r\nContent-Length: "
+                             + str(len(payload)).encode() + b"\r\n\r\n" + payload)
+                await writer.drain()
+                return
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                          b"Transfer-Encoding: chunked\r\nCache-Control: no-cache\r\n\r\n")
             await writer.drain()
@@ -87,8 +146,21 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
             budget = req.get("thinking_token_budget")
             reasoning = 0 if not think else ARGS.reasoning if budget is None \
                 else min(ARGS.reasoning, int(budget))
-            await generate(writer, max(1, len(prompt) // 4),
-                           int(req.get("max_tokens", 128)), reasoning)
+            prompt_tokens = max(1, len(prompt) // 4)
+            replay_record = None
+            if REPLAY:
+                replay_record = REPLAY[REPLAY_CURSOR % len(REPLAY)]
+                REPLAY_CURSOR += 1
+                max_tokens = int(req["max_tokens"]) if req.get("max_tokens") is not None \
+                    else math.ceil(len(str(replay_record.get("content", ""))) / 4)
+            else:
+                max_tokens = int(req.get("max_tokens", 128))
+            if REPLAY:
+                await generate_replay(writer, prompt_tokens, max_tokens, replay_record,
+                                      bool(think), None if not think or budget is None
+                                      else int(budget))
+            else:
+                await generate(writer, prompt_tokens, max_tokens, reasoning)
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
         pass
     finally:
@@ -96,7 +168,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
 
 
 async def main() -> None:
-    global ARGS, SEM
+    global ARGS, SEM, REPLAY
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8000)
@@ -109,13 +181,20 @@ async def main() -> None:
                     help="reasoning tokens emitted as delta.reasoning before the content")
     ap.add_argument("--usage", action="store_true",
                     help="emit a final usage chunk, as stream_options.include_usage does")
+    ap.add_argument("--replay", help="replay real reasoning and content from an app JSONL file")
     ap.add_argument("--cached-tokens", type=int, default=0,
                     help="prompt_tokens_details.cached_tokens reported in that chunk")
     ARGS = ap.parse_args()
+    if ARGS.replay:
+        with open(ARGS.replay, encoding="utf-8") as source:
+            REPLAY = [json.loads(line) for line in source if line.strip()]
+        REPLAY = [row for row in REPLAY if isinstance(row.get("content"), str)]
+        if not REPLAY:
+            raise SystemExit("replay file contains no usable content records")
     SEM = asyncio.Semaphore(ARGS.batch)
     server = await asyncio.start_server(handle, "127.0.0.1", ARGS.port)
     print(f"mock vLLM on :{ARGS.port}  batch={ARGS.batch}  itl={ARGS.itl_ms}ms  "
-          f"prefill={ARGS.prefill_ms_per_token}ms/tok")
+          f"prefill={ARGS.prefill_ms_per_token}ms/tok" + (f"  replay={len(REPLAY)}" if REPLAY else ""))
     async with server:
         await server.serve_forever()
 

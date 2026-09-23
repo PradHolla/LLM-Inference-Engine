@@ -8,6 +8,7 @@ import os
 import sqlite3
 import tempfile
 import time
+import json
 from contextlib import contextmanager
 
 from .config import DB_PATH
@@ -31,7 +32,10 @@ CREATE TABLE IF NOT EXISTS messages (
   content    TEXT    NOT NULL,
   thinking   TEXT,
   tokens     INTEGER,
-  created_at REAL    NOT NULL
+  created_at REAL    NOT NULL,
+  sources_json TEXT,
+  stats_json TEXT,
+  stopped INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS searches (
@@ -79,6 +83,11 @@ def init_db() -> None:
     """Create the SQLite schema if it does not already exist."""
     with _connection() as conn:
         conn.executescript(SCHEMA)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+        for name, declaration in (("sources_json", "TEXT"), ("stats_json", "TEXT"),
+                                  ("stopped", "INTEGER NOT NULL DEFAULT 0")):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {name} {declaration}")
 
 
 def create_chat(title: str, thinking_default: str) -> int:
@@ -119,14 +128,20 @@ def delete_chat(chat_id: int) -> None:
 
 
 def add_message(chat_id: int, parent_id: int | None, role: str, content: str,
-                thinking: str | None, tokens: int | None) -> int:
+                thinking: str | None, tokens: int | None,
+                sources: list[dict] | None = None, stats: dict | None = None,
+                stopped: bool = False) -> int:
     """Append a message to a branch and make it the active leaf."""
     now = time.time()
     with _connection() as conn:
         cur = conn.execute(
-            """INSERT INTO messages (chat_id, parent_id, role, content, thinking, tokens, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (chat_id, parent_id, role, content, thinking, tokens, now),
+            """INSERT INTO messages
+               (chat_id, parent_id, role, content, thinking, tokens, created_at,
+                sources_json, stats_json, stopped)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (chat_id, parent_id, role, content, thinking, tokens, now,
+             json.dumps(sources) if sources is not None else None,
+             json.dumps(stats) if stats is not None else None, int(stopped)),
         )
         message_id = int(cur.lastrowid)
         conn.execute("UPDATE chats SET head_message_id = ?, updated_at = ? WHERE id = ?",
@@ -139,8 +154,13 @@ def get_branch(chat_id: int) -> list[sqlite3.Row]:
     chat = get_chat(chat_id)
     if chat is None or chat["head_message_id"] is None:
         return []
+    return get_path(chat_id, int(chat["head_message_id"]))
+
+
+def get_path(chat_id: int, leaf_id: int) -> list[sqlite3.Row]:
+    """Return one root-to-leaf path, or an empty list for an unrelated message."""
     branch: list[sqlite3.Row] = []
-    message_id = chat["head_message_id"]
+    message_id: int | None = leaf_id
     with _connection() as conn:
         while message_id is not None:
             message = conn.execute("SELECT * FROM messages WHERE id = ? AND chat_id = ?",
@@ -153,10 +173,68 @@ def get_branch(chat_id: int) -> list[sqlite3.Row]:
     return branch
 
 
+def get_message(chat_id: int, message_id: int) -> sqlite3.Row | None:
+    """Return a message only when it belongs to the given chat."""
+    with _connection() as conn:
+        return conn.execute("SELECT * FROM messages WHERE id = ? AND chat_id = ?",
+                            (message_id, chat_id)).fetchone()
+
+
+def sibling_ids(chat_id: int, message_id: int) -> list[int]:
+    """Return messages with the same parent, in creation order."""
+    message = get_message(chat_id, message_id)
+    if message is None:
+        return []
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM messages WHERE chat_id = ? AND parent_id IS ? ORDER BY id",
+            (chat_id, message["parent_id"]),
+        ).fetchall()
+    return [int(row["id"]) for row in rows]
+
+
+def newest_leaf(chat_id: int, message_id: int) -> int | None:
+    """Return the newest leaf in the subtree rooted at a message."""
+    rows = get_messages(chat_id)
+    by_parent: dict[int | None, list[sqlite3.Row]] = {}
+    by_id = {int(row["id"]): row for row in rows}
+    if message_id not in by_id:
+        return None
+    for row in rows:
+        by_parent.setdefault(row["parent_id"], []).append(row)
+    pending = [message_id]
+    leaves: list[sqlite3.Row] = []
+    while pending:
+        current = pending.pop()
+        children = by_parent.get(current, [])
+        if children:
+            pending.extend(int(child["id"]) for child in children)
+        else:
+            leaves.append(by_id[current])
+    return int(max(leaves, key=lambda row: (row["created_at"], row["id"]))["id"])
+
+
+def get_messages(chat_id: int) -> list[sqlite3.Row]:
+    """Return every message in a chat in insertion order."""
+    with _connection() as conn:
+        return conn.execute("SELECT * FROM messages WHERE chat_id = ? ORDER BY id",
+                            (chat_id,)).fetchall()
+
+
 def delete_message(message_id: int) -> None:
     """Remove a message whose upstream request never opened."""
     with _connection() as conn:
         conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+
+
+def rollback_user_message(chat_id: int, message_id: int,
+                          previous_head_id: int | None) -> None:
+    """Atomically remove a user turn whose gateway stream never opened."""
+    with _connection() as conn:
+        conn.execute("DELETE FROM messages WHERE id = ? AND chat_id = ?",
+                     (message_id, chat_id))
+        conn.execute("UPDATE chats SET head_message_id = ?, updated_at = ? WHERE id = ?",
+                     (previous_head_id, time.time(), chat_id))
 
 
 def set_head(chat_id: int, message_id: int | None) -> None:
@@ -208,6 +286,31 @@ def selftest() -> int:
             check("original messages retained", {first, second, third} <= stored_ids)
             chat = get_chat(chat_id)
             check("head is newest message", chat is not None and chat["head_message_id"] == branch)
+            second_branch = add_message(chat_id, first, "assistant", "sibling", None, 1)
+            check("sibling order", sibling_ids(chat_id, branch) ==
+                  [second, branch, second_branch])
+            check("path lookup", [r["content"] for r in get_path(chat_id, third)] ==
+                  ["one", "two", "three"])
+            check("newest leaf", newest_leaf(chat_id, first) == second_branch)
+
+            migration_path = os.path.join(tmp, "old.db")
+            DB_PATH = migration_path
+            with _connection() as conn:
+                conn.executescript("""
+                    CREATE TABLE chats (id INTEGER PRIMARY KEY, title TEXT NOT NULL,
+                      created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                      thinking_default TEXT NOT NULL, head_message_id INTEGER);
+                    CREATE TABLE messages (id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL,
+                      parent_id INTEGER, role TEXT NOT NULL, content TEXT NOT NULL,
+                      thinking TEXT, tokens INTEGER, created_at REAL NOT NULL);
+                    INSERT INTO chats VALUES (9, 'old', 1, 1, 'brief', NULL);
+                    INSERT INTO messages VALUES (7, 9, NULL, 'user', 'kept', NULL, NULL, 1);
+                """)
+            init_db()
+            migrated = get_message(9, 7)
+            check("old schema data preserved", migrated is not None and migrated["content"] == "kept")
+            check("old schema gains metadata columns", migrated is not None and
+                  {"sources_json", "stats_json", "stopped"} <= set(migrated.keys()))
         finally:
             DB_PATH = old_path
 

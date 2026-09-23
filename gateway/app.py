@@ -164,19 +164,24 @@ async def _trim(messages: list[dict], budget_tokens: int, strategy: str):
 
 
 async def _do_search(messages: list[dict], tr: GatewayTrace,
-                     query: str | None = None) -> str:
+                     query: str | None = None, on_sources=None) -> str:
     """Run search and render its block. A raising search still answers the turn."""
     query = query or _last_user_text(messages)
     try:
         outcome = await run_search(query, CLIENT)
     except Exception as e:
         tr.n_sources, tr.search_error = 0, f"{type(e).__name__}"
+        if on_sources is not None:
+            on_sources([])
         return ""
     tr.search_ms, tr.fetch_ms, tr.extract_ms = outcome.search_ms, outcome.fetch_ms, outcome.extract_ms
     tr.n_sources = outcome.n_sources
     # Brave degrades to zero sources on a 429 as quietly as on a genuine miss, and the
     # free plan allows 1 query/second. Without this the two are indistinguishable.
     tr.search_error = outcome.error
+    if on_sources is not None:
+        on_sources([{"title": source.title, "url": source.url}
+                    for source in outcome.sources if source.ok])
     return render_block(outcome)
 
 
@@ -192,6 +197,45 @@ RENDER = _render_prompt
 
 def _sse(obj: dict) -> bytes:
     return b"data: " + json.dumps(obj).encode() + b"\n\n"
+
+
+def _gw_event(event_type: str, **fields: object) -> bytes:
+    return _sse({"object": "gw.event", "type": event_type, **fields})
+
+
+def _gw_stats(tr: GatewayTrace) -> dict:
+    spans = (tr.search_ms, tr.fetch_ms, tr.extract_ms)
+    search_ms = sum(spans) if all(value is not None for value in spans) else None
+    decode_tok_s = 1000.0 / tr.itl_ms_derived if tr.itl_ms_derived else None
+    return {"engine_ttft_ms": tr.upstream_ms, "search_ms": search_ms,
+            "prompt_tokens": tr.prompt_tokens, "cached_tokens": tr.cached_tokens,
+            "completion_tokens": tr.completion_tokens, "decode_tok_s": decode_tok_s}
+
+
+async def _relay_with_events(body: dict, tr: GatewayTrace, messages: list[dict],
+                             do_search: bool, query: str | None, budget,
+                             strategy: str):
+    """Add opt-in progress frames around the default retrieve-then-generate relay."""
+    retrieved_block = ""
+    if do_search and messages:
+        resolved_query = query or _last_user_text(messages)
+        yield _gw_event("search.started", query=resolved_query)
+        sources: list[dict[str, str]] = []
+        retrieved_block = await _do_search(messages, tr, resolved_query,
+                                            on_sources=lambda value: sources.extend(value))
+        yield _gw_event("sources", sources=sources)
+
+    trimmed = await _trim(messages, BUDGET_TOKENS, strategy)
+    tr.trim_ms, tr.trim_strategy, tr.dropped_turns = (
+        trimmed.trim_ms, trimmed.strategy, trimmed.dropped_turns)
+    final_body = {key: value for key, value in body.items() if not key.startswith("gw_")}
+    final_body["messages"] = assemble_messages(trimmed.messages, retrieved_block)
+    tr.injected_tokens_est = int(len(retrieved_block) / CHARS_PER_TOKEN) if retrieved_block else 0
+    apply_thinking_budget(final_body, budget)
+    yield _gw_event("status", stage="generating")
+    async for blob in _relay(json.dumps(final_body).encode(), tr):
+        yield blob
+    yield _gw_event("stats", stats=_gw_stats(tr))
 
 
 def _chunk(cid: str, model: str, delta: dict, finish: str | None = None) -> bytes:
@@ -361,6 +405,7 @@ async def chat(req: Request):
     priority = body.get("gw_priority")
     budget = body.get("gw_thinking_budget")
     squery = body.get("gw_query") or None
+    gw_events = body.get("gw_events") is True
     chat_id = body.get("gw_chat_id")
     turn_index = body.get("gw_turn_index")
     for k in [k for k in body if k.startswith("gw_")]:
@@ -402,6 +447,11 @@ async def chat(req: Request):
             _relay_overlap(body, tr, trimmed_first.messages, task,
                            enable_thinking=(budget is None or budget > 0),
                            defer_search=(lambda: _do_search(messages, tr, squery)) if deferred else None),
+            media_type="text/event-stream")
+
+    if gw_events and body.get("stream"):
+        return StreamingResponse(
+            _relay_with_events(body, tr, messages, do_search, squery, budget, strategy),
             media_type="text/event-stream")
 
     retrieved_block = await _do_search(messages, tr, squery) if do_search and messages else ""
@@ -754,6 +804,50 @@ def selftest() -> int:
 
             run_search, render_block, RENDER = _orig_rs, _orig_render_block, _orig_render
             CLIENT = _FakeUpstream(stream_chunks=chunks)
+
+            absent_body = {"model": "m", "messages": [{"role": "user", "content": "hi"}],
+                           "stream": True}
+            with client.stream("POST", "/v1/chat/completions", json=absent_body) as r:
+                absent_bytes = b"".join(r.iter_bytes())
+            CLIENT = _FakeUpstream(stream_chunks=chunks)
+            with client.stream("POST", "/v1/chat/completions",
+                               json={**absent_body, "gw_events": False}) as r:
+                false_bytes = b"".join(r.iter_bytes())
+            chk("gw_events false preserves exact OpenAI bytes", false_bytes == absent_bytes ==
+                b"".join(chunks))
+
+            from gateway.search import Source
+
+            async def _event_search(q, *a, **kw):
+                return SearchOutcome(query=q, sources=[Source(url="https://example.test/a",
+                    title="Example source", text="source body", ok=True)], search_ms=2.0,
+                    fetch_ms=3.0, extract_ms=1.0, n_sources=1)
+
+            run_search = _event_search
+            CLIENT = _FakeUpstream(stream_chunks=chunks)
+            with client.stream("POST", "/v1/chat/completions", json={
+                    "model": "m", "messages": [{"role": "user", "content": "latest"}],
+                    "stream": True, "gw_search": True, "gw_events": True}) as r:
+                event_bytes = b"".join(r.iter_bytes())
+            run_search = _orig_rs
+            frames = []
+            for line in event_bytes.splitlines():
+                if line.startswith(b"data: ") and line != b"data: [DONE]":
+                    try:
+                        frames.append(json.loads(line[6:]))
+                    except json.JSONDecodeError:
+                        pass
+            gateway_frames = [frame for frame in frames if frame.get("object") == "gw.event"]
+            chk("opt-in stream marks search start", gateway_frames[0].get("type") ==
+                "search.started" and gateway_frames[0].get("query") == "latest")
+            chk("opt-in stream includes prompt sources", any(
+                frame.get("type") == "sources" and frame.get("sources") ==
+                [{"title": "Example source", "url": "https://example.test/a"}]
+                for frame in gateway_frames))
+            chk("opt-in stats follow OpenAI DONE", event_bytes.find(b"data: [DONE]") <
+                event_bytes.find(b'"type": "stats"'))
+            chk("opt-in stream preserves the original OpenAI frames",
+                all(frame in event_bytes for frame in chunks))
 
             r = client.get("/gateway/traces?n=5")
             rows = r.json()["traces"]
