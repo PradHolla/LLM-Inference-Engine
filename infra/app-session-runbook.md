@@ -49,8 +49,11 @@ The deployed commit must be the current `git log -1`, not marked dirty.
     /bin/bash /opt/llm/infra/app-run.sh up'
 ```
 
-Poll `sudo journalctl -u app-up --no-pager -o cat` through `sync.sh run` every 15 s until it
-prints `UP_OK` or `ABORT`, in a background loop with a bound. Model load is 60-105 s and that is
+Poll THIS run's journal only -- `sudo journalctl _SYSTEMD_INVOCATION_ID=<id> --no-pager -o cat`,
+with the invocation ID that `systemd-run` printed -- through `sync.sh run` every 15 s until it
+prints `UP_OK` or `ABORT`, in a background loop with a bound. **Never `journalctl -u app-up`:**
+it returns every earlier run under that unit name too, and on 2026-09-24 it matched the
+previous day's `UP_OK` while the new stack was still installing dependencies. Model load is 60-105 s and that is
 real, not a hang. Expected on the way:
 
 - `GPU KV cache size: 138,528 tokens` (fp8 KV, pinned at 10213733807 bytes)
