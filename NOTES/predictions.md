@@ -6649,3 +6649,58 @@ hand-labelled regression 11 from chats #53 and `qwe`). Think labels are measured
 after a summary jump) are **not measured in this session**. At a 32k window the summary boundary
 sits near 23k tokens of history, which no scripted run here reaches. The summary path is covered
 by selftests with the window forced to 12k; its GPU behaviour waits for a long-conversation run.
+
+### P6C actuals, 2026-09-24
+
+Config as in the P6C header (Qwen3-8B fp8/fp8 KV, vLLM 0.27.1 V1, **32k window**, A10G, one
+user, the 6c agent). Raw: `results/p6c-*.jsonl` and `.txt`. G1 probe: `results/p6c-g1.txt`.
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| G1 | schema enforced, 0 fallbacks / 581 | **enforced** (a prompt that never mentions JSON returned `{"fruit": "Strawberry", "n": 1}`); **1 fallback / 581** | correct in substance; one QReCC item fell back |
+| PA-1 | planner p50 0.6-1.0 s, p95 <= 1.5 s | **p50 831 ms, p95 1,315 ms** over 581; in the app, 0.9-1.4 s on #53's longer turns | correct |
+| PA-2 | search agreement >= 85% | **91.0%** (456/501) | correct |
+| PA-2a | GSM8K search rate <= 10% | **0/60** | correct |
+| PA-2b | MTRAG conversational turns searched <= 3/10 | **5/10** ("ok, diversified is good", "omg.", "all right, see ya" all searched) | **wrong** |
+| PA-2c | FreshQA fast+slow search >= 90% | **97.5%** (78/80) | correct |
+| PA-2d | FreshQA never-changing search rate 40-80% | **82.5%** | slightly high |
+| PA-3 | think agreement 60-80% | **32.4%** (23/71) | **wrong, badly** -- see below |
+| PA-3a | measured "should think": GSM8K 10-30%, FreshQA-never <= 3/40 | **GSM8K 2/39 (5%), FreshQA-never 5/32** | wrong both ways |
+| PA-4 | query hit >= 70% (QReCC + MTRAG) | **64.0%** (QReCC 71.4%, MTRAG 53.4%); named-entity-only rescoring **59.9%** | **wrong** |
+| PA-4a | regression >= 8/10, #53 t5 contains "asml" | **10/10**, t5 -> "risks associated with ASML stock" | correct |
+| PA-5 | Off answer tokens p50 250-450, from 622 | **293**, from 644 in P6B on the same 12 questions (194 words) | correct |
+| PA-6 | Off end-to-end p50 7-11 s, from 13.9 s | **7.0 s**, from 14.4 s | correct, at the fast edge |
+| PA-7 | first visible token on #53's searched turns 2.0-3.5 s | **3.8 s p50** (3.3-5.0) | **wrong, high** |
+| PA-8 | searched answers citing [n] 50-80% | **82%** (36/44) | slightly above the range |
+
+*Planner sets: 581 items (MTRAG 200, QReCC 150, FreshQA 160, GSM8K 60, regression 11); think
+labels measured on 80 (40 GSM8K, 40 FreshQA never-changing), off vs on through the gateway.*
+
+**The system prompt is the biggest single win.** Same 12 questions as P6B-2: Off answers
+halved (644 -> 293 tokens) and end-to-end halved (14.4 -> 7.0 s); Brief 14.0 -> 11.4 s; Full
+30.1 -> 19.4 s. It cost nothing to run.
+
+**The search decision is good; the THINK decision is not.** The planner chose to think on
+**40/40 GSM8K** problems, but Qwen3-8B answers **37/40** of them correctly with thinking off --
+thinking changed the outcome on 2. In #53's replay it chose to think on all 8 turns, stock
+questions included. The rubric line "think for calculation" is too broad for a model this
+capable on easy arithmetic, and every unnecessary think costs seconds before the first answer
+word. Caveat on the labels themselves: GSM8K is easy for Qwen3-8B, so the set is skewed to
+"should not think"; Phase 7 measured a 13-point thinking gain on the harder maths slice, where
+the labels would flip. The fix is a stricter rubric, re-measured on both.
+
+**Reference resolution works on our failures and misses 30-40% of dataset follow-ups.** Every
+turn of #53 and `qwe` resolved correctly, but QReCC and MTRAG follow-ups miss often. Some misses
+are the metric (a gold rewrite that adds "besides Young Love", or swaps "increase" for "enhance");
+some are real ("When was she born?" became "Birth date of Milfield, Northumberland" instead of
+Josephine Butler). The named-entity rescoring puts the real rate near 60%.
+
+**Where the first-token time goes on a searched turn (#53 replay, p50 3.8 s):** planner
+0.9-1.4 s (three queries and a longer history make it slower than the 0.4 s it takes on a bare
+maths question), fan-out search 1.3-2.8 s (bounded by the slowest of up to three queries), engine
+first token 0.8-1.0 s. PA-7 assumed one query and a 0.7-1.2 s search. Levers: at most two queries,
+a speculative search of the raw message started alongside the planner, and a shorter plan.
+
+**Cache in the replay** climbed from 6% to 64% of the prompt (5,312 of 8,289 tokens at turn 8),
+the planner warming the history for the answer as designed. The summary path was not exercised
+(announced as a cut).

@@ -1,0 +1,181 @@
+  think-gsm8k-0002: search=no think=yes fallback=no 329 ms
+  think-gsm8k-0007: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0000: search=no think=yes fallback=no 321 ms
+  think-gsm8k-0009: search=no think=yes fallback=no 415 ms
+  think-gsm8k-0004: search=no think=yes fallback=no 329 ms
+  think-gsm8k-0003: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0010: search=no think=yes fallback=no 414 ms
+  think-gsm8k-0005: search=no think=yes fallback=no 333 ms
+  think-gsm8k-0006: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0013: search=no think=yes fallback=no 319 ms
+  think-gsm8k-0015: search=no think=yes fallback=no 321 ms
+  think-gsm8k-0008: search=no think=yes fallback=no 327 ms
+  think-gsm8k-0012: search=no think=yes fallback=no 319 ms
+  think-gsm8k-0011: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0018: search=no think=yes fallback=no 319 ms
+  think-gsm8k-0019: search=no think=yes fallback=no 328 ms
+  think-gsm8k-0017: search=no think=yes fallback=no 326 ms
+  think-gsm8k-0021: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0020: search=no think=yes fallback=no 415 ms
+  think-gsm8k-0023: search=no think=yes fallback=no 328 ms
+  think-gsm8k-0016: search=no think=yes fallback=no 414 ms
+  think-gsm8k-0001: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0014: search=no think=yes fallback=no 328 ms
+  think-gsm8k-0026: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0024: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0030: search=no think=yes fallback=no 327 ms
+  think-gsm8k-0027: search=no think=yes fallback=no 328 ms
+  think-gsm8k-0028: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0031: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0025: search=no think=yes fallback=no 321 ms
+  think-gsm8k-0033: search=no think=yes fallback=no 329 ms
+  think-gsm8k-0036: search=no think=yes fallback=no 320 ms
+  think-gsm8k-0034: search=no think=yes fallback=no 414 ms
+  think-gsm8k-0022: search=no think=yes fallback=no 328 ms
+  think-freshqa-353: search=yes think=yes fallback=no 877 ms
+  think-gsm8k-0039: search=no think=yes fallback=no 328 ms
+  think-gsm8k-0029: search=no think=yes fallback=no 320 ms
+  think-freshqa-298: search=yes think=no fallback=no 548 ms
+  think-gsm8k-0038: search=no think=yes fallback=no 327 ms
+  think-freshqa-294: search=yes think=yes fallback=no 814 ms
+  think-freshqa-342: search=yes think=yes fallback=no 880 ms
+  think-freshqa-307: search=yes think=no fallback=no 529 ms
+  think-freshqa-310: search=yes think=yes fallback=no 879 ms
+  think-gsm8k-0035: search=no think=yes fallback=no 326 ms
+  think-freshqa-250: search=no think=no fallback=no 385 ms
+  think-freshqa-358: search=yes think=yes fallback=no 1252 ms
+  think-freshqa-296: search=yes think=no fallback=no 498 ms
+  think-freshqa-283: search=yes think=yes fallback=no 775 ms
+  think-freshqa-345: search=yes think=yes fallback=no 670 ms
+  think-freshqa-278: search=no think=no fallback=no 376 ms
+  think-freshqa-272: search=yes think=no fallback=no 479 ms
+  think-freshqa-351: search=yes think=yes fallback=no 1023 ms
+  think-freshqa-309: search=no think=no fallback=no 392 ms
+  think-freshqa-262: search=no think=no fallback=no 377 ms
+  think-freshqa-290: search=no think=no fallback=no 377 ms
+  think-freshqa-366: search=yes think=yes fallback=no 783 ms
+  think-gsm8k-0032: search=no think=yes fallback=no 319 ms
+  think-freshqa-319: search=yes think=yes fallback=no 1277 ms
+  think-gsm8k-0037: search=no think=yes fallback=no 327 ms
+  think-freshqa-313: search=yes think=no fallback=no 756 ms
+  think-freshqa-281: search=yes think=yes fallback=no 935 ms
+  think-freshqa-257: search=yes think=no fallback=no 573 ms
+  think-freshqa-277: search=yes think=no fallback=no 537 ms
+  think-freshqa-284: search=yes think=yes fallback=no 623 ms
+  think-freshqa-322: search=yes think=no fallback=no 745 ms
+  think-freshqa-341: search=yes think=yes fallback=no 1269 ms
+  think-freshqa-335: search=yes think=yes fallback=no 783 ms
+  think-freshqa-306: search=yes think=yes fallback=no 624 ms
+  think-freshqa-338: search=yes think=yes fallback=no 1049 ms
+  think-freshqa-287: search=no think=no fallback=no 385 ms
+  think-freshqa-263: search=yes think=no fallback=no 631 ms
+  think-freshqa-347: search=yes think=yes fallback=no 784 ms
+  think-freshqa-254: search=yes think=no fallback=no 738 ms
+  think-freshqa-316: search=no think=no fallback=no 385 ms
+  think-freshqa-355: search=yes think=yes fallback=no 1212 ms
+  think-freshqa-305: search=yes think=no fallback=no 612 ms
+  think-freshqa-332: search=yes think=no fallback=no 491 ms
+  think-freshqa-324: search=yes think=yes fallback=no 745 ms
+  think-freshqa-300: search=yes think=no fallback=no 699 ms
+  think-freshqa-339: search=yes think=yes fallback=no 999 ms
+config: Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off
+items 80; fallbacks 0 (scored as the pipeline acts: search on the user text, think on)
+search rate (planner chose)    33/80 (41.2%)
+search decision agreement      0/0 (-)  (null search labels skipped)
+think decision agreement       23/71 (32.4%)  (null think labels skipped)
+follow-up query entity hits    0/0 (-)  (history non-empty, labelled search, must_contain non-empty)
+all labelled entity hits       0/0 (-)
+planner latency ms             p50 385, p95 1049, max 1277
+
+| source | n | search rate | search agree | think agree | query hit | fallbacks | ms p50 | ms p95 |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|
+| freshqa | 40 | 33/40 (82.5%) | 0/0 (-) | 21/32 (65.6%) | 0/0 (-) | 0 | 699 | 1252 |
+| gsm8k | 40 | 0/40 (0.0%) | 0/0 (-) | 2/39 (5.1%) | 0/0 (-) | 0 | 326 | 414 |
+
+| category | n | search rate | search agree | think agree | query hit | fallbacks | ms p50 | ms p95 |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|
+| freshqa-never | 40 | 33/40 (82.5%) | 0/0 (-) | 21/32 (65.6%) | 0/0 (-) | 0 | 699 | 1252 |
+| gsm8k | 40 | 0/40 (0.0%) | 0/0 (-) | 2/39 (5.1%) | 0/0 (-) | 0 | 326 | 414 |
+
+| id | turns | label search | got search | label think | got think | fallback | ms | entities | queries |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|---|
+| think-gsm8k-0002 | 0 | - | no | no | yes | no | 329 | - |  |
+| think-gsm8k-0007 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0000 | 0 | - | no | no | yes | no | 321 | - |  |
+| think-gsm8k-0009 | 0 | - | no | no | yes | no | 415 | - |  |
+| think-gsm8k-0004 | 0 | - | no | no | yes | no | 329 | - |  |
+| think-gsm8k-0003 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0010 | 0 | - | no | no | yes | no | 414 | - |  |
+| think-gsm8k-0005 | 0 | - | no | no | yes | no | 333 | - |  |
+| think-gsm8k-0006 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0013 | 0 | - | no | no | yes | no | 319 | - |  |
+| think-gsm8k-0015 | 0 | - | no | no | yes | no | 321 | - |  |
+| think-gsm8k-0008 | 0 | - | no | no | yes | no | 327 | - |  |
+| think-gsm8k-0012 | 0 | - | no | no | yes | no | 319 | - |  |
+| think-gsm8k-0011 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0018 | 0 | - | no | no | yes | no | 319 | - |  |
+| think-gsm8k-0019 | 0 | - | no | no | yes | no | 328 | - |  |
+| think-gsm8k-0017 | 0 | - | no | no | yes | no | 326 | - |  |
+| think-gsm8k-0021 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0020 | 0 | - | no | no | yes | no | 415 | - |  |
+| think-gsm8k-0023 | 0 | - | no | no | yes | no | 328 | - |  |
+| think-gsm8k-0016 | 0 | - | no | no | yes | no | 414 | - |  |
+| think-gsm8k-0001 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0014 | 0 | - | no | no | yes | no | 328 | - |  |
+| think-gsm8k-0026 | 0 | - | no | yes | yes | no | 320 | - |  |
+| think-gsm8k-0024 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0030 | 0 | - | no | no | yes | no | 327 | - |  |
+| think-gsm8k-0027 | 0 | - | no | no | yes | no | 328 | - |  |
+| think-gsm8k-0028 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0031 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0025 | 0 | - | no | no | yes | no | 321 | - |  |
+| think-gsm8k-0033 | 0 | - | no | no | yes | no | 329 | - |  |
+| think-gsm8k-0036 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-gsm8k-0034 | 0 | - | no | no | yes | no | 414 | - |  |
+| think-gsm8k-0022 | 0 | - | no | yes | yes | no | 328 | - |  |
+| think-freshqa-353 | 0 | - | yes | no | yes | no | 877 | - | Primary designer of AlexNet and their birthplace; Where was the primary designer of AlexNet born |
+| think-gsm8k-0039 | 0 | - | no | no | yes | no | 328 | - |  |
+| think-gsm8k-0029 | 0 | - | no | no | yes | no | 320 | - |  |
+| think-freshqa-298 | 0 | - | yes | no | no | no | 548 | - | When did Blackpink make their debut? |
+| think-gsm8k-0038 | 0 | - | no | no | yes | no | 327 | - |  |
+| think-freshqa-294 | 0 | - | yes | yes | yes | no | 814 | - | Typhoon Haiyan first eye landfall municipality; Where did Typhoon Haiyan make its first landfall |
+| think-freshqa-342 | 0 | - | yes | yes | yes | no | 880 | - | Last Ballon d'Or winner before Messi and Ronaldo dominance; Ballon d'Or winner before Messi and Ronaldo era |
+| think-freshqa-307 | 0 | - | yes | - | no | no | 529 | - | UMass Outing Club founding year |
+| think-freshqa-310 | 0 | - | yes | yes | yes | no | 879 | - | Benjamin Franklin certain things in this world; What two things did Benjamin Franklin claim to be certain |
+| think-gsm8k-0035 | 0 | - | no | no | yes | no | 326 | - |  |
+| think-freshqa-250 | 0 | - | no | no | no | no | 385 | - |  |
+| think-freshqa-358 | 0 | - | yes | - | yes | no | 1252 | - | highest-earning woman in music Forbes Celebrity 100 2020; top-earning female musician 2020 Forbes list; most successful female artist in music 2020 Forbes |
+| think-freshqa-296 | 0 | - | yes | no | no | no | 498 | - | Emily Joanna Carey birthplace |
+| think-freshqa-283 | 0 | - | yes | no | yes | no | 775 | - | When did the Tulip mania bubble collapse?; Month and year of Tulip mania collapse |
+| think-freshqa-345 | 0 | - | yes | - | yes | no | 670 | - | capital of California when it became a state; California statehood capital |
+| think-freshqa-278 | 0 | - | no | no | no | no | 376 | - |  |
+| think-freshqa-272 | 0 | - | yes | no | no | no | 479 | - | David Bowie death date |
+| think-freshqa-351 | 0 | - | yes | no | yes | no | 1023 | - | tectonic plate boundary yeti crabs first discovered; where were yeti crabs first found tectonic plate boundary; geological location of yeti crab discovery |
+| think-freshqa-309 | 0 | - | no | no | no | no | 392 | - |  |
+| think-freshqa-262 | 0 | - | no | no | no | no | 377 | - |  |
+| think-freshqa-290 | 0 | - | no | no | no | no | 377 | - |  |
+| think-freshqa-366 | 0 | - | yes | - | yes | no | 783 | - | Who was the King of Soccer and what caused his death?; What killed the King of Soccer? |
+| think-gsm8k-0032 | 0 | - | no | - | yes | no | 319 | - |  |
+| think-freshqa-319 | 0 | - | yes | yes | yes | no | 1277 | - | Famous Brazilian soccer player who passed away in 2022; Brazilian soccer player death 2022; Notable Brazilian footballer who died in 2022 |
+| think-gsm8k-0037 | 0 | - | no | no | yes | no | 327 | - |  |
+| think-freshqa-313 | 0 | - | yes | no | no | no | 756 | - | Which city does Disco Elysium take place in?; Disco Elysium setting location |
+| think-freshqa-281 | 0 | - | yes | no | yes | no | 935 | - | During which Beatles album recording did Ringo Starr temporarily quit the band?; When did Ringo Starr leave the Beatles during an album recording? |
+| think-freshqa-257 | 0 | - | yes | yes | no | no | 573 | - | 2017 Eurovision Song Contest winner |
+| think-freshqa-277 | 0 | - | yes | no | no | no | 537 | - | Who wrote Between the World and Me |
+| think-freshqa-284 | 0 | - | yes | no | yes | no | 623 | - | Which character arrives late to the titular banquet in Plato's Symposium |
+| think-freshqa-322 | 0 | - | yes | no | no | no | 745 | - | When did Elon Musk officially become the owner of Twitter; Elon Musk Twitter ownership date |
+| think-freshqa-341 | 0 | - | yes | no | yes | no | 1269 | - | Which country will host the most matches at the FIFA World Cup 2026; FIFA World Cup 2026 host country with most matches; 2026 World Cup host country and match distribution |
+| think-freshqa-335 | 0 | - | yes | - | yes | no | 783 | - | Taylor Swift honorary Doctor of Fine Arts degree university; University that awarded Taylor Swift Doctor of Fine Arts |
+| think-freshqa-306 | 0 | - | yes | no | yes | no | 624 | - | Number of property cards in Monopoly Deal's dark blue set |
+| think-freshqa-338 | 0 | - | yes | no | yes | no | 1049 | - | first film franchise to gross $28 billion; which movie franchise reached 28 billion in box office revenue; top film franchise with 28 billion gross |
+| think-freshqa-287 | 0 | - | no | no | no | no | 385 | - |  |
+| think-freshqa-263 | 0 | - | yes | no | no | no | 631 | - | 2020 Formula 1 world driver's championship winner |
+| think-freshqa-347 | 0 | - | yes | no | yes | no | 784 | - | Author of 'A Game of Thrones' birthplace; George R. R. Martin birthplace |
+| think-freshqa-254 | 0 | - | yes | no | no | no | 738 | - | tallest mountain in Alaska; highest peak in Alaska; Alaska's tallest mountain |
+| think-freshqa-316 | 0 | - | no | no | no | no | 385 | - |  |
+| think-freshqa-355 | 0 | - | yes | no | yes | no | 1212 | - | Marie Curie first discovered element name origin country; Marie Curie's first discovered element named after country; Which country did Marie Curie name her first discovered element after? |
+| think-freshqa-305 | 0 | - | yes | - | no | no | 612 | - | FIFA World Cup 2026 host countries |
+| think-freshqa-332 | 0 | - | yes | no | no | no | 491 | - | Day of Eight Billion date |
+| think-freshqa-324 | 0 | - | yes | - | yes | no | 745 | - | First operational image taken by James Webb Space Telescope; James Webb Space Telescope first image details |
+| think-freshqa-300 | 0 | - | yes | no | no | no | 699 | - | heaviest reptile in the world; largest living reptile by weight |
+| think-freshqa-339 | 0 | - | yes | - | yes | no | 999 | - | First African American woman on a US quarter; First Black woman featured on US coin; African American woman on US quarter |

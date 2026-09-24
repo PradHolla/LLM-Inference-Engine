@@ -1,0 +1,2 @@
+G1 raw reply: '{\n  "fruit": "Strawberry",\n  "n": 1\n}'
+G1_ENFORCED
