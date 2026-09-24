@@ -135,9 +135,11 @@ async def run(a: argparse.Namespace) -> int:
             return smoke_verdict([json.loads(x) for x in open(a.out)
                                   if json.loads(x).get("phase") == "smoke"][-3:])
         if a.mode == "convo":
-            chat_id = await new_chat(client, a.app, "p6b-convo", a.convo_level)
-            for i, q in enumerate(CONVO[:a.turns], start=1):
-                rec = await send(client, a.app, chat_id, q, a.convo_level, True)
+            prompts = json.load(open(a.prompts)) if a.prompts else CONVO
+            chat_id = await new_chat(client, a.app, a.title, a.convo_level)
+            for i, q in enumerate(prompts[:a.turns], start=1):
+                search = True if a.convo_search == "on" else a.convo_search
+                rec = await send(client, a.app, chat_id, q, a.convo_level, search)
                 rec.update(phase="convo", qid=i, turn_index=i)
                 flush(a.out, rec)
                 print(line(rec), flush=True)
@@ -357,7 +359,11 @@ def main() -> int:
     r.add_argument("--out", default="results/p6b-app.jsonl")
     r.add_argument("--turns", type=int, default=len(CONVO))
     r.add_argument("--questions", type=int, default=len(QUESTIONS))
-    r.add_argument("--convo-level", choices=LEVELS, default="brief")
+    r.add_argument("--convo-level", choices=LEVELS + ["auto"], default="brief")
+    r.add_argument("--convo-search", choices=["on", "auto", "off"], default="on",
+                   help="6c search mode; 'on' is sent as the legacy boolean true")
+    r.add_argument("--prompts", default=None, help="JSON list of user messages replacing CONVO")
+    r.add_argument("--title", default="p6b-convo", help="chat title; not 'New chat', so no title call")
     r.add_argument("--gap-s", type=float, default=1.5, help="pause between sends; Brave rate limits")
     p = sub.add_parser("report")
     p.add_argument("--app-out", default="results/p6b-app.jsonl")

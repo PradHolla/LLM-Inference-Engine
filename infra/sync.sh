@@ -19,6 +19,12 @@ case "${1:-}" in
     for d in labbench gateway tools infra app; do
         "${RS[@]}" "$d/" "ubuntu@$IP:/opt/llm/$d/" || exit 1
     done
+    # Evaluation inputs live in gitignored data/; send the label files, never the dataset caches.
+    ssh -i "$PEM" -o StrictHostKeyChecking=no "ubuntu@$IP" "mkdir -p /opt/llm/data/plansets" || exit 1
+    "${RS[@]}" --include='*.jsonl' --include='*.json' --include='freshqa/' --include='freshqa/*.csv' \
+        --exclude='*' data/plansets/ \
+        "ubuntu@$IP:/opt/llm/data/plansets/" || exit 1
+    "${RS[@]}" data/gsm8k-test.jsonl "ubuntu@$IP:/opt/llm/data/" || exit 1
     # Record which commit the box is running, so a result can be traced to a source state.
     ssh -i "$PEM" -o StrictHostKeyChecking=no "ubuntu@$IP" \
         "mkdir -p /opt/llm/results && echo '$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)' > /opt/llm/results/DEPLOYED_SHA"

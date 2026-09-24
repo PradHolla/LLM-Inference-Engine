@@ -6616,3 +6616,36 @@ At end of answer, **90-98%** -- decode dominates because answers are long. At fi
 depends on the turn: search is 64-76% early in a conversation and 37-47% by turn 10, because
 the part that grows is prefill of the previous answer and the new search block, and the
 previous answer is recomputed only because thinking is on.
+
+## P6C  The chat app as an agent, written 2026-09-24 with the box STOPPED
+
+Config for everything below: Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, bare
+`</think>`, prefix caching, **`--max-model-len 32768`** (was 16,384 for P6B), A10G, one user.
+The app now runs the 6c LangGraph agent (`NOTES/phase6c-agent-design.md`): a planner call with
+thinking off and a JSON schema, parallel search, an answer with the 5a system prompt.
+Planner sets: `data/plansets/all.jsonl`, 581 items (MTRAG 200, QReCC 150, FreshQA 160, GSM8K 60,
+hand-labelled regression 11 from chats #53 and `qwe`). Think labels are measured on the box by
+`planeval label-think` (40 GSM8K + 40 FreshQA never-changing, thinking off vs on).
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| G1 | vLLM 0.27.1 enforces `response_format: json_schema` | yes: **0 fallbacks** over 581 planner calls | structured output is first-class in 0.27; an 8B model cannot break a grammar-masked decode |
+| PA-1 | Planner latency, p50 / p95 | **0.6-1.0 s / <= 1.5 s** | ~40 JSON tokens at ~20 ms, plus ~350 new prefill tokens at 0.35 ms; history warm |
+| PA-2 | Search agreement, all items with a search label | **>= 85%** | explicit rubric; errors should cluster on MTRAG follow-ups |
+| PA-2a | GSM8K search rate | **<= 10%** | maths is named in the rubric as no-search |
+| PA-2b | MTRAG conversational turns searched | **<= 3 of 10** | "Hi" and "thanks" are named in the rubric |
+| PA-2c | FreshQA fast- + slow-changing search rate | **>= 90%** | dated facts are the rubric's first trigger |
+| PA-2d | FreshQA never-changing search rate (unscored) | **40-80%** | the rubric's "specific facts" pulls both ways |
+| PA-3 | Think agreement against measured labels | **60-80%** | "think" is the fuzzier call; measured labels will mostly be "no" |
+| PA-3a | Measured "should think" fraction, GSM8K / FreshQA never | **10-30% / <= 3 of 40** | Qwen3-8B without thinking already solves most GSM8K; recall questions gain nothing |
+| PA-4 | Query hit (>= half the resolved words), QReCC + MTRAG | **>= 70%** | the planner sees the history and is told to resolve references; the metric is noisy (no stemming) |
+| PA-4a | Regression set query hits | **>= 8 of 10** scored items, and #53 t5 ("explain those risks") contains "asml" | this is the failure the planner exists to fix |
+| PA-5 | Answer tokens at thinking Off, P6B-2's 12 questions, p50 | **250-450**, from 622 | the system prompt asks for 150-300 words; an 8B model overshoots |
+| PA-6 | End-to-end at Off, same questions, p50 | **7-11 s**, from 13.9 s | PA-5 at ~20 ms/token, plus search, prefill and PA-1 |
+| PA-7 | First visible token on searching turns of #53's replay, p50 | **2.0-3.5 s** | PA-1 + retrieval 0.7-1.2 s + ~3,000 block tokens at ~0.35 ms |
+| PA-8 | Searched answers with at least one `[n]` citation | **50-80%** | instruction-following on citations is where small models are weakest |
+
+**Scope cut, stated as one:** PA-8 and PA-9 of the design (summary duration, cached fraction
+after a summary jump) are **not measured in this session**. At a 32k window the summary boundary
+sits near 23k tokens of history, which no scripted run here reaches. The summary path is covered
+by selftests with the window forced to 12k; its GPU behaviour waits for a long-conversation run.
