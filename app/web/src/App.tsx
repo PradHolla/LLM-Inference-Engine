@@ -246,6 +246,24 @@ export function App() {
     }
   };
 
+  // After a Stop the server is still cancelling the graph and then saving the partial answer
+  // or dropping the user message; a reload that lands first shows the pre-cleanup state.
+  const reloadAfterStop = async (id: number) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    let previous = "";
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        const result = await refreshChat(id);
+        const last = result.messages[result.messages.length - 1];
+        const key = JSON.stringify([result.chat.head_message_id, result.messages.length, last?.id, last?.stopped]);
+        if (key === previous) break;
+        previous = key;
+      } catch { /* retry */ }
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    await refreshList().catch(() => undefined);
+  };
+
   const runStream = async (path: string, body: Record<string, unknown>, optimistic?: Message) => {
     const thinkingMode = typeof body.thinking === "string" ? body.thinking : thinking;
     if (selectedId == null || stream) return;
@@ -259,7 +277,11 @@ export function App() {
     setStream({ id, pipeline: { stage: "starting", query: null, queries: null, plan: null, thinkingMode,
       sources: null, stats: null, thinkingStreaming: false } });
     pinnedRef.current = true;
+    // The server drops the user message if the answer never started; Stop then returns the text.
+    let answerStarted = false;
     const onEvent = (event: Record<string, unknown>) => {
+      if (event.type === "status" && event.stage === "generating"
+          || event.type === "reasoning" || event.type === "content") answerStarted = true;
       if (event.type === "status") {
         const stage = event.stage === "searching" ? "searching" : event.stage === "planning" ? "planning" : "generating";
         setStream((current) => current ? { ...current, pipeline: {
@@ -309,9 +331,13 @@ export function App() {
     } finally {
       abortRef.current = null;
       replyRef.current?.flush();
-      await reloadAfterStream(chatId);
+      if (stopRequested.current) await reloadAfterStop(chatId);
+      else await reloadAfterStream(chatId);
       setStream(null);
-      if (stopRequested.current) setNotice("Response stopped. The partial answer was saved.");
+      if (stopRequested.current && !answerStarted && optimistic?.role === "user") {
+        setDraft((current) => current.trim() ? current : optimistic.content);
+        setNotice("Stopped before the answer started. Your message is back in the box.");
+      } else if (stopRequested.current) setNotice("Response stopped. The partial answer was saved.");
       else setNotice(null);
       stopRequested.current = false;
       window.setTimeout(() => setNotice(null), 4000);

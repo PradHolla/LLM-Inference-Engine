@@ -45,6 +45,7 @@ export type MessageStats = {
   thinking_level: string;
   searched: boolean;
   think?: boolean | null;
+  queries?: string[] | null;
   plan_ms?: number | null;
   plan_fallback?: boolean | null;
   summary_used?: boolean | null;

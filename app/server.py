@@ -243,6 +243,7 @@ def _base_stats(thinking: str, searched: bool) -> dict:
             "completion_tokens": None, "decode_tok_s": None,
             "thinking_level": thinking, "searched": searched,
             "think": None if thinking == config.AUTO else thinking != "off",
+            "queries": None,
             "plan_ms": None, "plan_fallback": False, "summary_used": False,
             "history_tokens": None, "budget_max_tokens": None}
 
@@ -333,6 +334,7 @@ def _answer_stream(chat_id: int, user_id: int | None, assistant_parent_id: int |
                     elif kind == "plan":
                         stats["searched"] = bool(data["search"])
                         stats["think"] = bool(data["think"])
+                        stats["queries"] = list(data.get("queries") or [])
                     yield {"data": json.dumps(data)}
             await runner
         except asyncio.CancelledError:
@@ -683,6 +685,8 @@ async def _selftest_async() -> list[str]:
                   saved["stats"]["budget_max_tokens"] == answer_request["max_tokens"] and
                   isinstance(saved["stats"]["history_tokens"], int) and
                   isinstance(saved["stats"]["search_ms"], float) and saved["stats"]["searched"])
+            check("planned queries persist with the message", saved["stats"]["queries"] ==
+                  next(e for e in events if e["type"] == "plan")["queries"] and saved["stats"]["queries"])
 
             # Section 3's table, one row at a time. Planner reply: search, one query, no think.
             fake["plan_reply"] = {"search": True, "queries": ["rewritten query"], "think": False}

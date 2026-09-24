@@ -92,6 +92,13 @@ export const ChatMessage = memo(function ChatMessage({
   return <article className={`message-row ${assistant ? "assistant-row" : "user-row"}`}>
     <div className={assistant ? "assistant-message" : "user-message"}>
       {assistant ? <>
+        {message.stats?.queries?.length || (message.stats?.thinking_level === "auto" && message.stats?.think != null)
+          ? <div className="plan-row" aria-label="Plan">
+              {(message.stats?.queries ?? []).map((query, index) =>
+                <span className="query-chip" key={`${index}-${query}`}>{query}</span>)}
+              {message.stats?.thinking_level === "auto" && message.stats?.think != null &&
+                <span className="plan-note">{message.stats.think ? "Decided to think first" : "Decided to answer directly"}</span>}
+            </div> : null}
         {message.sources?.length ? <SourceList sources={message.sources} highlight={cited} /> : null}
         {message.thinking && <Reasoning defaultOpen={false}>
           <ReasoningTrigger />
