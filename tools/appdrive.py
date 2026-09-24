@@ -94,6 +94,10 @@ async def send(client: httpx.AsyncClient, app: str, chat_id: int, content: str,
                     if kind == "content" and rec["ttfc_ms"] is None:
                         rec["ttfc_ms"] = now
                     rec[kind] += ev.get("text") or ""
+                elif kind == "stats":
+                    rec["stats"] = ev.get("stats")
+                elif kind == "plan":
+                    rec["plan"] = {k: ev.get(k) for k in ("search", "queries", "think", "fallback")}
                 elif kind == "done":
                     rec["tokens"], rec["message_id"] = ev.get("tokens"), ev.get("message_id")
                     rec["status"] = "ok"
