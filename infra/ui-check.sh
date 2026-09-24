@@ -21,6 +21,7 @@ run_check() {
 
 run_check "chat TypeScript" npm --prefix app/web run typecheck
 run_check "chat production build" npm --prefix app/web run build
+run_check "chat streaming and citation checks" npm --prefix app/web run check
 run_check "labbench TypeScript" npm --prefix labbench/web run typecheck
 run_check "labbench production build" npm --prefix labbench/web run build
 run_check "UI artifacts and render invariants" node infra/ui-render-check.js

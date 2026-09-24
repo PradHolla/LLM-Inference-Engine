@@ -9,12 +9,35 @@ import { Button } from "./components/ui/button";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { createChat, deleteChat, getChat, getChats, getConfig, getHealth, renameChat,
   switchHead } from "./lib/api";
-import type { AppConfig, Chat, ChatPayload, Message, Source, Theme } from "./types";
+import type { AppConfig, Chat, ChatPayload, Message, Plan, SearchMode, Source, Theme } from "./types";
 
 type StreamState = { id: string; pipeline: PipelineState };
 
 function stored(key: string, fallback: string): string {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+
+const LEGACY_SEARCH: SearchMode[] = [
+  { id: "on", label: "On", description: "Search the web." },
+  { id: "off", label: "Off", description: "Do not search the web." },
+];
+
+function searchModes(config: AppConfig | null): SearchMode[] {
+  return config?.search_modes?.length ? config.search_modes : LEGACY_SEARCH;
+}
+
+function defaultSearch(config: AppConfig | null): string {
+  if (config?.search_modes?.length) return config.default_search_mode ?? config.search_modes[0].id;
+  return config?.search_default === false ? "off" : "on";
+}
+
+function storedSearch(value: string, config: AppConfig | null): string {
+  const mode = value === "true" ? "on" : value === "false" ? "off" : value;
+  return searchModes(config).some((option) => option.id === mode) ? mode : defaultSearch(config);
+}
+
+function stringList(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 }
 
 export function App() {
@@ -34,8 +57,8 @@ export function App() {
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
   const [draft, setDraft] = useState("");
-  const [thinking, setThinking] = useState("brief");
-  const [search, setSearch] = useState(true);
+  const [thinking, setThinking] = useState("auto");
+  const [search, setSearch] = useState("auto");
   const [stream, setStream] = useState<StreamState | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -43,6 +66,7 @@ export function App() {
   const [editingMessage, setEditingMessage] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  const atBottomRef = useRef(true);
   const replyRef = useRef<StreamingReplyHandle | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const stopRequested = useRef(false);
@@ -93,8 +117,12 @@ export function App() {
     });
     const prefThinking = stored(`llm-chat-${selectedId}-thinking`, "");
     const prefSearch = stored(`llm-chat-${selectedId}-search`, "");
-    setThinking(prefThinking || chats.find((item) => item.id === selectedId)?.thinking_default || config?.default_thinking || "brief");
-    setSearch(prefSearch ? prefSearch === "true" : config?.search_default ?? true);
+    const levels = config?.thinking_levels ?? [];
+    const known = (value: string | undefined) => value && (!levels.length || levels.some((level) => level.id === value));
+    const chatDefault = chats.find((item) => item.id === selectedId)?.thinking_default;
+    setThinking(known(prefThinking) ? prefThinking : known(chatDefault) ? chatDefault!
+      : config?.default_thinking || levels[0]?.id || "auto");
+    setSearch(storedSearch(prefSearch, config));
     setDraft("");
     setEditingMessage(null);
     editingParentRef.current = undefined;
@@ -108,7 +136,7 @@ export function App() {
     if (selectedId == null) return;
     try {
       localStorage.setItem(`llm-chat-${selectedId}-thinking`, thinking);
-      localStorage.setItem(`llm-chat-${selectedId}-search`, String(search));
+      localStorage.setItem(`llm-chat-${selectedId}-search`, search);
     } catch {}
   }, [selectedId, thinking, search]);
 
@@ -132,6 +160,7 @@ export function App() {
     const element = scrollRef.current;
     if (!element || (!force && !pinnedRef.current)) return;
     element.scrollTop = element.scrollHeight;
+    atBottomRef.current = true;
     setAtBottom(true);
   }, []);
 
@@ -218,6 +247,7 @@ export function App() {
   };
 
   const runStream = async (path: string, body: Record<string, unknown>, optimistic?: Message) => {
+    const thinkingMode = typeof body.thinking === "string" ? body.thinking : thinking;
     if (selectedId == null || stream) return;
     const chatId = selectedId;
     const controller = new AbortController();
@@ -226,27 +256,30 @@ export function App() {
     setStreamError(null);
     if (optimistic) setMessages((current) => [...current, optimistic]);
     const id = `${chatId}-${Date.now()}`;
-    setStream({ id, pipeline: { stage: "starting", query: null, sources: null, stats: null, thinkingStreaming: false } });
+    setStream({ id, pipeline: { stage: "starting", query: null, queries: null, plan: null, thinkingMode,
+      sources: null, stats: null, thinkingStreaming: false } });
     pinnedRef.current = true;
     const onEvent = (event: Record<string, unknown>) => {
       if (event.type === "status") {
-        const stage = event.stage === "searching" ? "searching" : "generating";
+        const stage = event.stage === "searching" ? "searching" : event.stage === "planning" ? "planning" : "generating";
         setStream((current) => current ? { ...current, pipeline: {
           ...current.pipeline, stage, query: typeof event.query === "string" ? event.query : current.pipeline.query,
-          thinkingStreaming: current.pipeline.thinkingStreaming,
+          queries: stringList(event.queries) ?? current.pipeline.queries,
         } } : current);
+      } else if (event.type === "plan") {
+        const plan: Plan = { search: event.search === true, queries: stringList(event.queries) ?? [],
+          think: event.think === true, fallback: event.fallback === true };
+        setStream((current) => current ? { ...current, pipeline: { ...current.pipeline, plan } } : current);
       } else if (event.type === "sources") {
         const sources = Array.isArray(event.sources) ? event.sources as Source[] : [];
         setStream((current) => current ? { ...current, pipeline: { ...current.pipeline, sources } } : current);
       } else if (event.type === "reasoning" && typeof event.text === "string") {
-        setStream((current) => current ? { ...current, pipeline: {
-          ...current.pipeline, stage: "generating", thinkingStreaming: true,
-        } } : current);
+        setStream((current) => current && (current.pipeline.stage !== "generating" || !current.pipeline.thinkingStreaming)
+          ? { ...current, pipeline: { ...current.pipeline, stage: "generating", thinkingStreaming: true } } : current);
         replyRef.current?.appendThinking(event.text);
       } else if (event.type === "content" && typeof event.text === "string") {
-        setStream((current) => current ? { ...current, pipeline: {
-          ...current.pipeline, stage: "generating", thinkingStreaming: false,
-        } } : current);
+        setStream((current) => current && (current.pipeline.stage !== "generating" || current.pipeline.thinkingStreaming)
+          ? { ...current, pipeline: { ...current.pipeline, stage: "generating", thinkingStreaming: false } } : current);
         replyRef.current?.appendContent(event.text);
       } else if (event.type === "stats") {
         setStream((current) => current ? { ...current, pipeline: {
@@ -275,6 +308,7 @@ export function App() {
       }
     } finally {
       abortRef.current = null;
+      replyRef.current?.flush();
       await reloadAfterStream(chatId);
       setStream(null);
       if (stopRequested.current) setNotice("Response stopped. The partial answer was saved.");
@@ -283,6 +317,8 @@ export function App() {
       window.setTimeout(() => setNotice(null), 4000);
     }
   };
+
+  const searchPayload = () => config?.search_modes?.length ? search : search === "on";
 
   const send = () => {
     if (!draft.trim() || selectedId == null || stream) return;
@@ -296,7 +332,7 @@ export function App() {
       sources: null, stats: null,
     };
     void runStream(`/api/chats/${selectedId}/send`, {
-      content, thinking, search, parent_id: parentId,
+      content, thinking, search: searchPayload(), parent_id: parentId,
     }, temporary);
     editingParentRef.current = undefined;
     setEditingMessage(null);
@@ -338,8 +374,13 @@ export function App() {
     if (selectedId == null) return;
     const index = messages.findIndex((item) => item.id === message.id);
     if (index >= 0) setMessages(messages.slice(0, index));
-    void runStream(`/api/chats/${selectedId}/regenerate`, { message_id: message.id, thinking, search });
+    void runStream(`/api/chats/${selectedId}/regenerate`, { message_id: message.id, thinking, search: searchPayload() });
   };
+
+  const thinkingOptions = useMemo(() => {
+    const levels = config?.thinking_levels ?? [];
+    return [...levels.filter((level) => level.id === "auto"), ...levels.filter((level) => level.id !== "auto")];
+  }, [config]);
 
   const titleRename = useMemo(() => chats.find((item) => item.id === renameTarget?.id) ?? renameTarget,
     [chats, renameTarget]);
@@ -373,7 +414,7 @@ export function App() {
           const element = event.currentTarget;
           const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
           pinnedRef.current = nearBottom;
-          setAtBottom(nearBottom);
+          if (atBottomRef.current !== nearBottom) { atBottomRef.current = nearBottom; setAtBottom(nearBottom); }
         }}>
           <div className={`conversation ${messages.length === 0 && !loading ? "empty-conversation" : ""}`}>
             {loading ? <div className="loading-state"><span className="loading-mark" />Opening conversation</div>
@@ -410,8 +451,8 @@ export function App() {
             <button type="button" onClick={cancelEdit}>Cancel</button>
           </div>}
           <Composer value={draft} onChange={setDraft} onSend={send} onStop={stop} busy={Boolean(stream)}
-            thinking={thinking} thinkingOptions={config?.thinking_levels ?? []} onThinkingChange={setThinking}
-            search={search} onSearchChange={setSearch} />
+            thinking={thinking} thinkingOptions={thinkingOptions} onThinkingChange={setThinking}
+            search={search} searchOptions={searchModes(config)} onSearchChange={setSearch} />
         </div>
       </main>
       <RenameDialog chat={titleRename} onOpenChange={(open) => { if (!open) setRenameTarget(null); }} onSave={handleRename} />

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import { Globe2, Send, Square } from "lucide-react";
-import type { ThinkingLevel } from "../types";
+import type { SearchMode, ThinkingLevel } from "../types";
 import { Button } from "./ui/button";
 
 export function Composer({
   value, onChange, onSend, onStop, busy, thinking, thinkingOptions, onThinkingChange,
-  search, onSearchChange,
+  search, searchOptions, onSearchChange,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -15,11 +15,20 @@ export function Composer({
   thinking: string;
   thinkingOptions: ThinkingLevel[];
   onThinkingChange: (value: string) => void;
-  search: boolean;
-  onSearchChange: (value: boolean) => void;
+  search: string;
+  searchOptions: SearchMode[];
+  onSearchChange: (value: string) => void;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const selected = thinkingOptions.find((option) => option.id === thinking);
+  const searchIndex = searchOptions.findIndex((option) => option.id === search);
+  const moveSearch = (step: number) => {
+    if (!searchOptions.length) return;
+    const next = searchOptions[(Math.max(0, searchIndex) + step + searchOptions.length) % searchOptions.length];
+    onSearchChange(next.id);
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(
+      `.search-segments [data-mode="${next.id}"]`)?.focus());
+  };
 
   useEffect(() => {
     const area = areaRef.current;
@@ -41,13 +50,20 @@ export function Composer({
         }} />
       <div className="composer-controls">
         <div className="composer-options">
-          <label className={`search-control ${search ? "selected" : ""}`}>
-            <input type="checkbox" role="switch" checked={search} disabled={busy}
-              onChange={(event) => onSearchChange(event.target.checked)} />
-            <Globe2 size={15} />
-            <span>Search</span>
-            <span className="switch-track" aria-hidden="true"><span /></span>
-          </label>
+          <div className="search-control" role="radiogroup" aria-label="Web search"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); moveSearch(1); }
+              if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); moveSearch(-1); }
+            }}>
+            <Globe2 size={15} aria-hidden="true" />
+            <span className="search-label">Search</span>
+            <span className="search-segments">
+              {searchOptions.map((option, index) => <button key={option.id} type="button" role="radio"
+                data-mode={option.id} aria-checked={option.id === search} title={option.description}
+                tabIndex={index === Math.max(0, searchIndex) ? 0 : -1} disabled={busy}
+                onClick={() => onSearchChange(option.id)}>{option.label}</button>)}
+            </span>
+          </div>
           <label className="thinking-control">
             <span>Thinking</span>
             <select value={thinking} disabled={busy} aria-label="Thinking level"

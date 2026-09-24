@@ -6,10 +6,25 @@ export type ThinkingLevel = {
   description: string;
 };
 
+export type SearchMode = {
+  id: string;
+  label: string;
+  description: string;
+};
+
 export type AppConfig = {
   thinking_levels: ThinkingLevel[];
   default_thinking: string;
   search_default: boolean;
+  search_modes?: SearchMode[];
+  default_search_mode?: string;
+};
+
+export type Plan = {
+  search: boolean;
+  queries: string[];
+  think: boolean;
+  fallback: boolean;
 };
 
 export type Source = {
@@ -29,6 +44,12 @@ export type MessageStats = {
   decode_tok_s: number | null;
   thinking_level: string;
   searched: boolean;
+  think?: boolean | null;
+  plan_ms?: number | null;
+  plan_fallback?: boolean | null;
+  summary_used?: boolean | null;
+  history_tokens?: number | null;
+  budget_max_tokens?: number | null;
 };
 
 export type Message = {
