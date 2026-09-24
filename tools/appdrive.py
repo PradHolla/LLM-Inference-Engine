@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import glob
 import json
+import random
 import sys
 import time
 
@@ -54,6 +55,19 @@ QUESTIONS = [
 SMOKE = "How many times does the letter r appear in the word strawberry? Check carefully."
 
 
+# FreshQA end to end: search always on (thinking Auto/Off/Full) plus a no-search, no-think baseline.
+FRESH_ARMS = [("on", "auto"), ("on", "off"), ("on", "full"), ("off", "off")]
+
+
+def fresh_pick(items: list[dict], per_category: int, seed: int) -> list[dict]:
+    """A fixed-seed, category-stratified sample, in id order within each category."""
+    rng, picked = random.Random(seed), []
+    for category in sorted({it["category"] for it in items}):
+        pool = [it for it in items if it["category"] == category]
+        picked += sorted(rng.sample(pool, min(per_category, len(pool))), key=lambda it: it["id"])
+    return picked
+
+
 def level_order(i: int) -> list[str]:
     """Rotate the level order per question so no level is always first on a cold search."""
     return LEVELS[i % 3:] + LEVELS[:i % 3]
@@ -75,7 +89,7 @@ async def send(client: httpx.AsyncClient, app: str, chat_id: int, content: str,
     """POST one message and time it the way a user would see it."""
     rec: dict = {"chat_id": chat_id, "thinking": thinking, "search": search,
                  "t_wall": time.time(), "ttft_ms": None, "ttfc_ms": None, "e2e_ms": None,
-                 "reasoning": "", "content": "", "tokens": None, "message_id": None,
+                 "reasoning": "", "content": "", "tokens": None, "message_id": None, "sources": None,
                  "status": "incomplete", "error": None}
     t0 = time.perf_counter()
     try:
@@ -98,6 +112,8 @@ async def send(client: httpx.AsyncClient, app: str, chat_id: int, content: str,
                     rec["stats"] = ev.get("stats")
                 elif kind == "plan":
                     rec["plan"] = {k: ev.get(k) for k in ("search", "queries", "think", "fallback")}
+                elif kind == "sources":
+                    rec["sources"] = ev.get("sources")
                 elif kind == "done":
                     rec["tokens"], rec["message_id"] = ev.get("tokens"), ev.get("message_id")
                     rec["status"] = "ok"
@@ -155,6 +171,18 @@ async def run(a: argparse.Namespace) -> int:
                     chat_id = await new_chat(client, a.app, f"p6b-q{i}-{level}", level)
                     rec = await send(client, a.app, chat_id, q, level, True)
                     rec.update(phase="levels", qid=i, turn_index=1)
+                    flush(a.out, rec)
+                    print(line(rec), flush=True)
+                    bad += rec["status"] != "ok"
+                    await asyncio.sleep(a.gap_s)
+        if a.mode == "fresh":
+            items = [json.loads(line_) for line_ in open(a.items) if line_.strip()]
+            for i, it in enumerate(fresh_pick(items, a.per_category, a.seed)):
+                for search, level in FRESH_ARMS[i % 4:] + FRESH_ARMS[:i % 4]:
+                    chat_id = await new_chat(client, a.app, f"fresh-{it['id']}-{search}-{level}", level)
+                    rec = await send(client, a.app, chat_id, it["user"], level, search)
+                    rec.update(phase="fresh", qid=it["id"], category=it["category"], turn_index=1,
+                               arm=f"search-{search}/think-{level}")
                     flush(a.out, rec)
                     print(line(rec), flush=True)
                     bad += rec["status"] != "ok"
@@ -317,6 +345,12 @@ def selftest() -> int:
             fails.append(f"  FAIL {name}: got {got!r}, want {want!r}")
 
     chk("level order rotates", [level_order(i)[0] for i in range(3)], ["off", "brief", "full"])
+    pool = [{"id": f"{c}-{k}", "category": c} for c in ("a", "b") for k in range(5)]
+    pick = fresh_pick(pool, 3, 0)
+    chk("fresh sample is stratified", sorted(it["category"] for it in pick), ["a"] * 3 + ["b"] * 3)
+    chk("fresh sample is reproducible", [it["id"] for it in fresh_pick(pool, 3, 0)], [it["id"] for it in pick])
+    chk("fresh arms: search on x3 thinking levels, plus a no-search baseline",
+        sorted(FRESH_ARMS), [("off", "off"), ("on", "auto"), ("on", "full"), ("on", "off")])
     chk("every level once", sorted(level_order(4)), sorted(LEVELS))
     chk("parse data line", parse_event('data: {"type":"done","tokens":3}'), {"type": "done", "tokens": 3})
     chk("ignore ping", parse_event(": ping"), None)
@@ -359,7 +393,10 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--app", default="http://127.0.0.1:8090")
-    r.add_argument("--mode", choices=["smoke", "convo", "levels"], required=True)
+    r.add_argument("--mode", choices=["smoke", "convo", "levels", "fresh"], required=True)
+    r.add_argument("--items", default="data/plansets/freshqa.jsonl", help="fresh mode: FreshQA label file")
+    r.add_argument("--per-category", type=int, default=20, help="fresh mode: questions per category")
+    r.add_argument("--seed", type=int, default=0)
     r.add_argument("--out", default="results/p6b-app.jsonl")
     r.add_argument("--turns", type=int, default=len(CONVO))
     r.add_argument("--questions", type=int, default=len(QUESTIONS))

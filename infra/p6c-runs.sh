@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 6c session steps, one sub-command each. Runs ON the box after `app-run.sh up`.
 #   sudo systemd-run --unit=p6c-<step> --collect /bin/bash /opt/llm/infra/p6c-runs.sh <step>
-#   steps: wipe | g1 | planeval | replay | levels
+#   steps: wipe | g1 | planeval | replay | levels | fresh
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -85,7 +85,20 @@ levels)
     "$UV" run tools/appdrive.py run --mode levels --out results/p6c-levels.jsonl
     echo "LEVELS_DONE rc=$?"
     ;;
+fresh)
+    # FreshQA end to end: 20 per category x 4 arms, one user, then the Qwen judge on the replies.
+    need_stack
+    rm -f results/p6c-fresh-answers.jsonl
+    "$UV" run tools/appdrive.py run --mode fresh --per-category 20 --gap-s 1.0 \
+        --out results/p6c-fresh-answers.jsonl
+    echo "  answers rc=$? lines=$(wc -l < results/p6c-fresh-answers.jsonl)"
+    "$UV" run tools/freshjudge.py --answers results/p6c-fresh-answers.jsonl \
+        --out results/p6c-fresh-judged.jsonl --disagreements results/p6c-fresh-disagreements.jsonl \
+        > results/p6c-fresh-report.txt 2>&1
+    echo "  judge rc=$?"
+    echo "FRESH_DONE"
+    ;;
 *)
-    echo "usage: $0 wipe | g1 | planeval | replay | levels"; exit 2 ;;
+    echo "usage: $0 wipe | g1 | planeval | replay | levels | fresh"; exit 2 ;;
 esac
 exit 0
