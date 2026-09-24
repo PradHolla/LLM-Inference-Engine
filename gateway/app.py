@@ -68,6 +68,7 @@ class GatewayTrace(Trace):
     """Extends the proxy Trace with the non-inference spans. Same jsonl file shape plus these."""
     chat_id: int | None = None
     turn_index: int | None = None
+    purpose: str = "answer"
     search_ms: float | None = None
     fetch_ms: float | None = None
     extract_ms: float | None = None
@@ -408,6 +409,7 @@ async def chat(req: Request):
     gw_events = body.get("gw_events") is True
     chat_id = body.get("gw_chat_id")
     turn_index = body.get("gw_turn_index")
+    purpose = body.get("gw_purpose")
     for k in [k for k in body if k.startswith("gw_")]:
         body.pop(k, None)
 
@@ -415,6 +417,7 @@ async def chat(req: Request):
     tr.order_honoured = tr.order in BUILDABLE_ORDERS
     tr.chat_id = chat_id
     tr.turn_index = turn_index
+    tr.purpose = purpose if isinstance(purpose, str) and purpose else "answer"
     if priority is not None:
         try:
             tr.priority = int(priority)
@@ -651,6 +654,25 @@ def selftest() -> int:
 
             chk("gw_* stripped from forwarded body", all(not k.startswith("gw_") for k in fwd))
             chk("no search leaves messages unchanged", fwd["messages"] == body["messages"])
+            chk("absent gw_purpose records answer", RECENT[-1].purpose == "answer")
+
+            schema = {"type": "json_schema", "json_schema": {"name": "plan", "strict": True,
+                      "schema": {"type": "object", "properties": {"search": {"type": "boolean"}}}}}
+            client.post("/v1/chat/completions", json={
+                "model": "m", "messages": [{"role": "user", "content": "hi"}], "stream": False,
+                "response_format": schema, "gw_purpose": "plan", "gw_chat_id": 4,
+                "gw_turn_index": 2, "gw_thinking_budget": 0})
+            fwd = json.loads(CLIENT.last_body)
+            chk("response_format passes through the default path untouched",
+                fwd.get("response_format") == schema)
+            chk("gw_purpose is stripped before the upstream call", "gw_purpose" not in fwd)
+            chk("plan purpose and join ids recorded", (RECENT[-1].purpose, RECENT[-1].chat_id,
+                RECENT[-1].turn_index) == ("plan", 4, 2))
+            client.post("/v1/chat/completions", json={
+                "model": "m", "messages": [{"role": "user", "content": "hi"}], "stream": False,
+                "gw_purpose": "summary"})
+            chk("summary purpose recorded without join ids", (RECENT[-1].purpose,
+                RECENT[-1].chat_id, RECENT[-1].turn_index) == ("summary", None, None))
 
             _orig_run_search = run_search
 
@@ -848,6 +870,12 @@ def selftest() -> int:
                 event_bytes.find(b'"type": "stats"'))
             chk("opt-in stream preserves the original OpenAI frames",
                 all(frame in event_bytes for frame in chunks))
+            CLIENT = _FakeUpstream(stream_chunks=chunks)
+            with client.stream("POST", "/v1/chat/completions", json={
+                    **absent_body, "gw_events": True, "response_format": schema}) as r:
+                b"".join(r.iter_bytes())
+            chk("response_format passes through the opt-in events path",
+                json.loads(CLIENT.last_body).get("response_format") == schema)
 
             r = client.get("/gateway/traces?n=5")
             rows = r.json()["traces"]

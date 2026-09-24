@@ -15,11 +15,11 @@ export HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1
 ts() { date -u +%H:%M:%S; }
 die() { echo "ABORT: $*"; exit 1; }
 
-# The Phase 7 server exactly, so 6b numbers sit beside the budget ladder. phase7-runbook.md.
+# The Phase 7 server with a 32k window (6c design O1; Phase 7 and P6B ran 16k). phase7-runbook.md.
 # --enable-prompt-tokens-details only adds usage.prompt_tokens_details.cached_tokens per request.
 launch_vllm() {
     VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh app \
-        --model "$MODEL" --quantization fp8 --max-model-len 16384 \
+        --model "$MODEL" --quantization fp8 --max-model-len 32768 \
         --kv-cache-dtype fp8 --enable-prefix-caching --reasoning-parser qwen3 \
         --reasoning-config '{"reasoning_start_str": "<think>", "reasoning_end_str": "</think>"}' \
         --enable-prompt-tokens-details \
@@ -110,10 +110,11 @@ up)
     echo "[$(ts)] 6b up"
     [ -s /opt/llm/.brave-key ] || die "no /opt/llm/.brave-key; search would answer with nothing"
     # The box venv predates the app. Install as ubuntu, who owns the venv, not as root.
-    "$PY" -c "import sse_starlette" 2>/dev/null \
-        || sudo -u ubuntu "$UV" pip install --python "$PY" sse-starlette \
-        || die "sse-starlette missing from $PY and could not be installed"
-    "$PY" -c "import importlib.metadata as m; print('  app deps:', *(f'{p} {m.version(p)}' for p in ('sse-starlette', 'fastapi', 'uvicorn')))" \
+    # langgraph is pinned to match pyproject.toml's serve group (6c).
+    "$PY" -c "import sse_starlette, langgraph, tokenizers" 2>/dev/null \
+        || sudo -u ubuntu "$UV" pip install --python "$PY" sse-starlette langgraph==1.2.12 tokenizers \
+        || die "app dependencies missing from $PY and could not be installed"
+    "$PY" -c "import importlib.metadata as m; print('  app deps:', *(f'{p} {m.version(p)}' for p in ('sse-starlette', 'fastapi', 'uvicorn', 'langgraph', 'tokenizers')))" \
         || die "app dependencies do not import"
     sudo systemctl stop llm-app gateway >/dev/null 2>&1
     launch_vllm

@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS traces (
   trace_json  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS summaries (
+  covered_through_id INTEGER PRIMARY KEY,
+  chat_id            INTEGER NOT NULL,
+  text               TEXT    NOT NULL,
+  created_at         REAL    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 """
 
@@ -124,6 +131,7 @@ def delete_chat(chat_id: int) -> None:
     """Delete a chat and every message belonging to it."""
     with _connection() as conn:
         conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+        conn.execute("DELETE FROM summaries WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
 
 
@@ -256,6 +264,37 @@ def save_trace(request_id: str, chat_id: int, turn_index: int, app_rtt_ms: float
         )
 
 
+def save_summary(covered_through_id: int, chat_id: int, text: str) -> None:
+    """Store a summary once; the first text wins so the prompt prefix stays byte-identical."""
+    with _connection() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO summaries (covered_through_id, chat_id, text, created_at)
+               VALUES (?, ?, ?, ?)""", (covered_through_id, chat_id, text, time.time()))
+
+
+def get_summary(covered_through_id: int) -> str | None:
+    """Return the summary covering history through this message, if one is stored."""
+    with _connection() as conn:
+        row = conn.execute("SELECT text FROM summaries WHERE covered_through_id = ?",
+                           (covered_through_id,)).fetchone()
+    return row["text"] if row is not None else None
+
+
+def latest_summary(message_ids: list[int]) -> tuple[int, str] | None:
+    """The deepest stored summary among these path ids, as (index in the list, text)."""
+    if not message_ids:
+        return None
+    marks = ",".join("?" for _ in message_ids)
+    with _connection() as conn:
+        rows = conn.execute(f"SELECT covered_through_id, text FROM summaries "
+                            f"WHERE covered_through_id IN ({marks})", message_ids).fetchall()
+    found = {int(row["covered_through_id"]): row["text"] for row in rows}
+    for index in range(len(message_ids) - 1, -1, -1):
+        if message_ids[index] in found:
+            return index, found[message_ids[index]]
+    return None
+
+
 def selftest() -> int:
     """Exercise active-branch storage against a temporary database."""
     global DB_PATH
@@ -311,6 +350,23 @@ def selftest() -> int:
             check("old schema data preserved", migrated is not None and migrated["content"] == "kept")
             check("old schema gains metadata columns", migrated is not None and
                   {"sources_json", "stats_json", "stopped"} <= set(migrated.keys()))
+            with _connection() as conn:
+                tables = {row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'")}
+                old_chat = conn.execute("SELECT * FROM chats WHERE id = 9").fetchone()
+            check("old schema gains the summaries table", "summaries" in tables)
+            check("old chat row untouched by the migration", old_chat is not None and
+                  tuple(old_chat) == (9, "old", 1, 1, "brief", None))
+            init_db()
+            check("migration is idempotent", get_message(9, 7)["content"] == "kept")
+            save_summary(7, 9, "first text")
+            save_summary(7, 9, "second text")
+            check("first summary text wins", get_summary(7) == "first text")
+            check("missing summary is None", get_summary(8) is None)
+            check("latest summary on a path", latest_summary([1, 7, 3]) == (1, "first text")
+                  and latest_summary([1, 3]) is None and latest_summary([]) is None)
+            delete_chat(9)
+            check("deleting a chat removes its summaries", get_summary(7) is None)
         finally:
             DB_PATH = old_path
 

@@ -220,7 +220,9 @@ def count(tok, text: str) -> int:
 
 def join(app_recs: list[dict], gw_recs: list[dict]) -> list[dict]:
     """Attach the gateway's spans to each app turn on (chat_id, turn_index)."""
-    gw = {(g.get("chat_id"), g.get("turn_index")): g for g in gw_recs}
+    # 6c planner calls share (chat_id, turn_index); join the answer. Absent purpose = answer.
+    gw = {(g.get("chat_id"), g.get("turn_index")): g for g in gw_recs
+          if g.get("purpose", "answer") == "answer"}
     out = []
     for r in app_recs:
         g = gw.get((r["chat_id"], r["turn_index"])) or {}
@@ -322,6 +324,9 @@ def selftest() -> int:
            "ttft_ms": 40, "e2e_ms": 900}]
     j = join(app, gw)[0]
     chk("join picks the matching turn", j["retrieval_ms"], 305)
+    plan_row = {"chat_id": 7, "turn_index": 2, "purpose": "plan", "e2e_ms": 50}
+    chk("join ignores a planner row sharing the key",
+        join(app, [gw[1], plan_row])[0]["upstream_e2e_ms"], 900)
     chk("join carries upstream e2e", j["upstream_e2e_ms"], 900)
     chk("unjoined turn is flagged", join([{**app[0], "turn_index": 3}], gw)[0]["gw"], False)
     chk("missing span is None, not a partial sum",

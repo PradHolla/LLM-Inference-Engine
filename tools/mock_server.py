@@ -13,11 +13,21 @@ a genuine knee -- see NOTES/code-notes.md for what that simulation models.
 from __future__ import annotations
 import argparse, asyncio, json, time
 import math
+import re
 
 ARGS = None
 active = 0
 REPLAY = []
 REPLAY_CURSOR = 0
+YEAR_OR_TICKER = re.compile(r"\b(?:19|20)\d{2}\b|(?<![A-Za-z])\$?[A-Z]{2,5}(?![A-Za-z])")
+RECENCY = re.compile(r"\b(?:latest|today)\b", re.IGNORECASE)
+
+
+def plan_json(user_text: str) -> str:
+    """The 6c planner's reply: search on a year, ticker or recency word, think past 12 words."""
+    search = bool(YEAR_OR_TICKER.search(user_text) or RECENCY.search(user_text))
+    return json.dumps({"search": search, "queries": [user_text] if search else [],
+                       "think": len(user_text.split()) > 12})
 
 
 async def generate(writer: asyncio.StreamWriter, prompt_tokens: int, max_tokens: int,
@@ -129,7 +139,10 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
             if not req.get("stream", True):
                 user_text = next((m.get("content", "") for m in reversed(req.get("messages", []))
                                   if m.get("role") == "user"), "")
-                title = " ".join(str(user_text).split()[:7]).strip(" .!?\n") or "New chat"
+                if req.get("response_format"):
+                    title = plan_json(str(user_text))
+                else:
+                    title = " ".join(str(user_text).split()[:7]).strip(" .!?\n") or "New chat"
                 payload = json.dumps({"choices": [{"message": {
                     "role": "assistant", "content": title}}]}).encode()
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
