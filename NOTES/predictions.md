@@ -6725,3 +6725,67 @@ second grader. Gold answers are from the 2026-04-21 FreshQA sheet.
 | F4 | Full end-to-end vs Off, with search, p50 | **2-3x slower** | P6C levels: Off 7.0 s, Full 19.4 s |
 | F5 | First visible token, search on, thinking Off (every item is a first message), p50 | **1.5-2.5 s** | the early search overlaps the planner; search then engine prefill of a ~3,000-token block |
 | F6 | Judge and containment disagree | **<= 15%** of non-false-premise answers | containment misses paraphrases, the judge is generous on hedges; both should be rare |
+
+### P6C-2 actuals, 2026-09-25
+
+Config as the P6C-2 header, commit `de5708e` deployed. Raw: `results/p6c2-planeval.*`,
+`results/p6c2-replay53.jsonl`, `results/p6c-fresh-answers.jsonl`, `results/p6c-fresh-judged.jsonl`,
+`results/p6c-fresh-report.txt`, `results/p6c-fresh-disagreements.jsonl`.
+
+**FreshQA end to end, 80 questions x 4 arms, judged by Qwen3-8B.**
+
+| arm | judge correct | first token p50 | first answer token p50 | e2e p50 | chose to think |
+|---|---|---|---|---|---|
+| search off, thinking off | **35%** | 0.08 s | 0.1 s | 3.1 s | - |
+| search on, thinking Off | **65%** | 1.83 s | 1.8 s | 4.1 s | 0% |
+| search on, thinking Auto | **70%** | 2.03 s | 2.4 s | 4.6 s | 29% |
+| search on, thinking Full | **79%** | 1.54 s | 8.0 s | 11.4 s | 100% |
+
+| arm | false premise | fast-changing | never-changing | slow-changing |
+|---|---|---|---|---|
+| search off, thinking off | 40% | 10% | 65% | 25% |
+| search on, thinking Off | 50% | 45% | 85% | 80% |
+| search on, thinking Auto | 65% | 45% | 90% | 80% |
+| search on, thinking Full | **85%** | 55% | 90% | 85% |
+
+*Qwen3-8B fp8/fp8 KV, vLLM 0.27.1 V1, 32k window, A10G, one user; 20 questions per cell; judge Qwen3-8B,
+thinking off, temperature 0, JSON schema. Golds from the 2026-04-21 FreshQA sheet.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| R1 | conversational turns searched <= 2/10 | **4/10** (from 5) | **wrong**; the rubric line helped one turn |
+| R2 | search agreement >= 90% | **91.0%**, unchanged; planner p50 759 ms (from 831) | correct |
+| R3 | #53 first token on searched turns 3.0-3.5 s | **3.6 s** (from 3.8) | slightly high |
+| F1 | fast-changing: search off <= 30% vs on 55-80% | **10% vs 45%** | off side correct; on side low, and stale golds are part of why (below) |
+| F2 | never-changing 80-95% in every arm | search off **65%**, search on 85-90% | wrong for the no-search arm |
+| F3 | Full over Off with search, <= 5 points | **+14 points** (79% vs 65%) | **wrong** |
+| F4 | Full e2e 2-3x Off | **2.8x** (11.4 vs 4.1 s) | correct |
+| F5 | first token, search on, Off, 1.5-2.5 s | **1.83 s** | correct |
+| F6 | graders disagree <= 15% of non-false-premise answers | **23/240 = 9.6%** | correct |
+
+**Search is worth 30 points** (35% -> 65% with thinking off), and almost all of it where it should
+be: slow-changing 25% -> 80%, fast-changing 10% -> 45%.
+
+**Thinking is worth 14 more, and F3 was wrong because of false premises.** Full beats Off by 35
+points on false-premise questions (85% vs 50%) and by 5-10 elsewhere: reasoning is what notices that
+the question itself is wrong. P6C's measured labels drew only on GSM8K and never-changing recall,
+the two places thinking adds least, and would have argued for thinking less. On questions about the
+current world, the opposite holds. That supports the owner's call not to make the thinking rule
+stricter.
+
+**Auto sits between, closer to Off.** It chose to think on 29% of questions and scored 70%, five
+points over Off for +0.5 s, but gave up most of Full's gain because it rarely thinks on false
+premises (65% vs Full's 85%). The trade on offer: Full is +9 points over Auto for 2.5x the end-to-end
+time.
+
+**Judge reliability.** In the 23 judge/containment disagreements the judge was right about 18
+times, wrong 3 (accepted "2026" for "April 2026"; rejected a correct country answer; rejected a
+reply that matched the gold "10"), 2 unclear. Containment's misses were formatting and false
+positives ("par" inside "particular"). Judge numbers are good to roughly +/- 2 points.
+
+**Stale golds are real.** Several fast-changing "wrong" answers are probably right today: the gold
+says Arsenal top the Premier League and Trump is 79, both true in April and both overtaken by
+September. Fast-changing accuracy is a floor, not a measurement.
+
+**Early search** (every FreshQA item is a first message): first visible token 1.83 s p50 with
+thinking off, inside F5's range.

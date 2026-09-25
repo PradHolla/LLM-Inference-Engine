@@ -1,0 +1,21 @@
+Installed 7 packages in 22ms
+config: judge: Qwen3-8B fp8, thinking off, temperature 0, JSON schema; answers from the 6c app, vLLM 0.27.1 V1 runner, 32k ctx, A10G, one user
+gold answers recorded 2026-04-21; fast-changing golds may be stale
+
+| arm | n | judge correct | containment correct | graders disagree | judge errors | first token p50 s | first answer token p50 s | e2e p50 s | tokens p50 | think chars p50 | chose to think |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| search-off/think-off | 80 | 28/80 (35%) | 28/60 (47%) | 10 | 0 | 0.08 | 0.1 | 3.1 | 160 | 0 | - |
+| search-on/think-auto | 80 | 56/80 (70%) | 44/60 (73%) | 3 | 0 | 2.03 | 2.4 | 4.6 | 135 | 0 | 23/80 (29%) |
+| search-on/think-full | 80 | 63/80 (79%) | 45/60 (75%) | 5 | 0 | 1.54 | 8.0 | 11.4 | 500 | 1,324 | 80/80 (100%) |
+| search-on/think-off | 80 | 52/80 (65%) | 45/60 (75%) | 5 | 0 | 1.83 | 1.8 | 4.1 | 114 | 0 | 0/80 (0%) |
+
+judge accuracy by arm and category
+
+| arm | false-premise | fast-changing | never-changing | slow-changing |
+|---|---|---|---|---|
+| search-off/think-off | 8/20 (40%) | 2/20 (10%) | 13/20 (65%) | 5/20 (25%) |
+| search-on/think-auto | 13/20 (65%) | 9/20 (45%) | 18/20 (90%) | 16/20 (80%) |
+| search-on/think-full | 17/20 (85%) | 11/20 (55%) | 18/20 (90%) | 17/20 (85%) |
+| search-on/think-off | 10/20 (50%) | 9/20 (45%) | 17/20 (85%) | 16/20 (80%) |
+
+23 judge/containment disagreements written to results/p6c-fresh-disagreements.jsonl
