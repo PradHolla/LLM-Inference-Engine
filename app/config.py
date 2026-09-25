@@ -50,6 +50,6 @@ PLAN_MAX_TOKENS = 96
 PLAN_TIMEOUT_S = 8.0
 SUMMARY_TIMEOUT_S = 60.0
 SUMMARY_WAIT_S = 10.0    # the next turn waits this long for a pending summary, then drops the block
-MAX_QUERIES = 3
+MAX_QUERIES = 2
 TOKENIZER_PATH = os.environ.get("APP_TOKENIZER", "")
 CHARS_PER_TOKEN_FALLBACK = 3.5

@@ -21,8 +21,8 @@ Today's date is {date}."""
 PLANNER_INSTRUCTION = """Before answering the user's latest message above, decide how to handle it. Reply with JSON only, in exactly this form:
 {"search": true or false, "queries": ["..."], "think": true or false}
 
-search: true when the answer depends on current or specific facts (prices, news, releases, people, figures, anything dated), or the user asks to look something up. false for chit-chat, rewording, maths, code, opinions, or follow-ups the conversation already answers.
-queries: when search is true, one to three web search queries. Each must stand on its own: name the entities and resolve words like "it", "those" or "that" from the conversation. Split a multi-part question into up to three queries. Use [] when search is false.
+search: true when the answer depends on current or specific facts (prices, news, releases, people, figures, anything dated), or the user asks to look something up. false for chit-chat, rewording, maths, code, opinions, or follow-ups the conversation already answers. A message that only reacts, agrees, thanks or says goodbye ("ok", "thanks!", "omg", "that's interesting", "all right, see ya") is not a question: search false, even when the conversation before it was about something searchable.
+queries: when search is true, one or two web search queries. Each must stand on its own: name the entities and resolve words like "it", "those" or "that" from the conversation. Split a multi-part question into two queries at most. Use [] when search is false.
 think: true for multi-step reasoning, calculation, comparison or planning. false for greetings, simple facts and formatting."""
 
 SUMMARY_INSTRUCTION = """Summarise the conversation above, including any earlier summary, for your own later reference. Keep every name, number, date, decision, and the user's stated preferences and open questions. Write plain prose of at most 200 words. Reply with the summary only."""

@@ -35,6 +35,17 @@ PLAN_SCHEMA = {
 RESPONSE_FORMAT = {"type": "json_schema",
                    "json_schema": {"name": "plan", "schema": PLAN_SCHEMA, "strict": True}}
 PENDING: dict[int, asyncio.Task] = {}
+# First turn only: the raw message is searched while the planner runs (see code-notes).
+SPECULATIVE: dict[tuple, asyncio.Task] = {}
+
+
+def _spec_key(state: "AgentState") -> tuple:
+    return (state["chat_id"], state["turn_index"], state["user_text"])
+
+
+async def _search_alone(query: str) -> gsearch.SearchOutcome:
+    async with httpx.AsyncClient() as client:
+        return await _search_one(query, client)
 
 
 class AgentState(TypedDict, total=False):
@@ -239,9 +250,23 @@ async def load_context(state: AgentState) -> dict:
 async def plan(state: AgentState) -> dict:
     write = get_stream_writer()
     write({"type": "status", "stage": "planning"})
-    parsed, ms, _ = await call_planner(plan_messages(state["base"], state["user_text"]),
-                                       state["model"], state["chat_id"], state["turn_index"])
+    spec = None
+    if state["search_mode"] != "off" and not state["history"]:
+        # A first message is a complete question, so it doubles as a query while the planner
+        # decides. Never on a follow-up: the raw text there is the #53 failure.
+        spec = SPECULATIVE[_spec_key(state)] = asyncio.create_task(_search_alone(state["user_text"]))
+    try:
+        parsed, ms, _ = await call_planner(plan_messages(state["base"], state["user_text"]),
+                                           state["model"], state["chat_id"], state["turn_index"])
+    except BaseException:
+        if spec is not None:
+            spec.cancel()
+            SPECULATIVE.pop(_spec_key(state), None)
+        raise
     decision = resolve(parsed, state["search_mode"], state["thinking"], state["user_text"])
+    if spec is not None and not decision["search"]:
+        spec.cancel()
+        SPECULATIVE.pop(_spec_key(state), None)
     write({"type": "plan", **decision})
     write({"type": "_stats", "plan_ms": ms, "plan_fallback": decision["fallback"]})
     return {"plan": decision}
@@ -249,15 +274,26 @@ async def plan(state: AgentState) -> dict:
 
 async def search(state: AgentState) -> dict:
     write = get_stream_writer()
-    queries = state["plan"]["queries"]
+    spec = SPECULATIVE.pop(_spec_key(state), None)
+    planned = state["plan"]["queries"]
+    # With an early search running, the raw message takes the first slot; the cap still holds.
+    run = planned[1:config.MAX_QUERIES] if spec is not None else planned
+    queries = ([state["user_text"]] if spec is not None else []) + run
     write({"type": "status", "stage": "searching", "query": "; ".join(queries),
            "queries": queries})
     started = time.perf_counter()
-    async with httpx.AsyncClient() as client:
-        outcomes = await asyncio.gather(*(_search_one(query, client) for query in queries))
+    try:
+        async with httpx.AsyncClient() as client:
+            outcomes = list(await asyncio.gather(*(_search_one(query, client) for query in run)))
+        if spec is not None:
+            outcomes.insert(0, await spec)
+    finally:
+        if spec is not None and not spec.done():
+            spec.cancel()
     block, used = cap_block(queries, merge_sources(outcomes))
     write({"type": "sources", "sources": source_cards(used)})
-    write({"type": "_stats", "search_ms": (time.perf_counter() - started) * 1000})
+    write({"type": "_stats", "search_ms": (time.perf_counter() - started) * 1000,
+           "search_early": spec is not None})
     return {"block": block}
 
 

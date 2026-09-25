@@ -243,7 +243,7 @@ def _base_stats(thinking: str, searched: bool) -> dict:
             "completion_tokens": None, "decode_tok_s": None,
             "thinking_level": thinking, "searched": searched,
             "think": None if thinking == config.AUTO else thinking != "off",
-            "queries": None,
+            "queries": None, "search_early": False,
             "plan_ms": None, "plan_fallback": False, "summary_used": False,
             "history_tokens": None, "budget_max_tokens": None}
 
@@ -331,6 +331,8 @@ def _answer_stream(chat_id: int, user_id: int | None, assistant_parent_id: int |
                             reasoning += data["text"]
                     elif kind == "sources":
                         sources = data["sources"]
+                    elif kind == "status" and data.get("stage") == "searching":
+                        stats["queries"] = list(data.get("queries") or [])
                     elif kind == "plan":
                         stats["searched"] = bool(data["search"])
                         stats["think"] = bool(data["think"])
@@ -685,16 +687,17 @@ async def _selftest_async() -> list[str]:
                   saved["stats"]["budget_max_tokens"] == answer_request["max_tokens"] and
                   isinstance(saved["stats"]["history_tokens"], int) and
                   isinstance(saved["stats"]["search_ms"], float) and saved["stats"]["searched"])
-            check("planned queries persist with the message", saved["stats"]["queries"] ==
-                  next(e for e in events if e["type"] == "plan")["queries"] and saved["stats"]["queries"])
+            check("searched queries persist with the message", saved["stats"]["queries"] ==
+                  next(e for e in events if e.get("stage") == "searching")["queries"]
+                  and saved["stats"]["queries"])
 
             # Section 3's table, one row at a time. Planner reply: search, one query, no think.
             fake["plan_reply"] = {"search": True, "queries": ["rewritten query"], "think": False}
             table = [
-                ("auto", "auto", True, True, ["rewritten query"], 0, 0.7),
-                ("auto", "full", True, True, ["rewritten query"], None, 0.6),
-                ("on", "auto", True, True, ["rewritten query"], 0, 0.7),
-                ("on", "brief", True, True, ["rewritten query"], 128, 0.6),
+                ("auto", "auto", True, True, ["row question"], 0, 0.7),
+                ("auto", "full", True, True, ["row question"], None, 0.6),
+                ("on", "auto", True, True, ["row question"], 0, 0.7),
+                ("on", "brief", True, True, ["row question"], 128, 0.6),
                 ("off", "auto", True, False, [], 0, 0.7),
                 ("off", "full", False, False, [], None, 0.6),
                 ("off", "off", False, False, [], 0, 0.7),
@@ -721,18 +724,36 @@ async def _selftest_async() -> list[str]:
                 check(f"{name}: completes", types(row_events)[-2:] == ["stats", "done"])
 
             fake["plan_reply"] = {"search": True, "queries": ["a", " ", "b", "c", "d"], "think": True}
-            capped = await collect(await chats_send(db.create_chat("cap", "auto"), SendBody(
+            n_searches = len(searched_queries)
+            cap_chat = db.create_chat("cap", "auto")
+            capped = await collect(await chats_send(cap_chat, SendBody(
                 content="many parts", thinking="auto", search="auto")))
-            check("planner queries are trimmed to three and blanks dropped",
-                  next(e for e in capped if e["type"] == "plan")["queries"] == ["a", "b", "c"]
+            check("planner queries are trimmed to two and blanks dropped",
+                  next(e for e in capped if e["type"] == "plan")["queries"] == ["a", "b"]
                   and "gw_thinking_budget" not in answers()[-1])
+            check("first message: the raw text is searched early and fills the first slot",
+                  sorted(searched_queries[n_searches:]) == ["b", "many parts"] and
+                  next(e for e in capped if e.get("stage") == "searching")["queries"] == ["many parts", "b"]
+                  and _message(cap_chat, db.get_branch(cap_chat)[-1])["stats"]["search_early"] is True)
+
+            fake["plan_reply"] = {"search": True, "queries": ["rewritten follow-up"], "think": False}
+            follow_chat = db.create_chat("follow", "auto")
+            await collect(await chats_send(follow_chat, SendBody(content="first question",
+                                                               thinking="off", search="off")))
+            n_searches = len(searched_queries)
+            follow = await collect(await chats_send(follow_chat, SendBody(
+                content="explain those", thinking="auto", search="auto")))
+            check("follow-up: no early search, only the planner's rewritten query",
+                  searched_queries[n_searches:] == ["rewritten follow-up"] and
+                  _message(follow_chat, db.get_branch(follow_chat)[-1])["stats"]["search_early"] is False
+                  and "done" in types(follow))
 
             fake["plan_reply"] = {"search": True, "queries": ["nothing here"], "think": False}
             empty = await collect(await chats_send(db.create_chat("empty", "auto"), SendBody(
                 content="find nothing", thinking="auto", search="auto")))
             check("empty search sends empty sources and the could-not-verify line",
                   next(e for e in empty if e["type"] == "sources")["sources"] == [] and
-                  answers()[-1]["messages"][-2]["content"] == prompts.empty_search(["nothing here"]))
+                  answers()[-1]["messages"][-2]["content"] == prompts.empty_search(["find nothing"]))
 
             for mode in ("invalid", "error"):
                 fake["plan"] = mode
@@ -783,10 +804,11 @@ async def _selftest_async() -> list[str]:
             fake["plan_reply"] = {"search": True, "queries": ["hang please"], "think": False}
             stop_search_chat = db.create_chat("stop-search", "auto")
             await cancel_after(await chats_send(stop_search_chat, SendBody(
-                content="stop while searching", thinking="auto", search="auto")), "searching",
+                content="hang while searching", thinking="auto", search="auto")), "searching",
                 search_started)
             await asyncio.wait_for(search_cancelled.wait(), 3.0)
-            check("stop mid-search cancels the running search", search_cancelled.is_set())
+            check("stop mid-search cancels the running search, early search included",
+                  search_cancelled.is_set())
             check("stop mid-search leaves no half turn", db.get_branch(stop_search_chat) == [])
 
             title_chat = db.create_chat("New chat", "brief")

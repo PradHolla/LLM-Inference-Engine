@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 6c session steps, one sub-command each. Runs ON the box after `app-run.sh up`.
 #   sudo systemd-run --unit=p6c-<step> --collect /bin/bash /opt/llm/infra/p6c-runs.sh <step>
-#   steps: wipe | g1 | planeval | replay | levels | fresh
+#   steps: wipe | g1 | planeval | replay | levels | fresh | recheck
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -98,7 +98,20 @@ fresh)
     echo "  judge rc=$?"
     echo "FRESH_DONE"
     ;;
+recheck)
+    # After the conversational rubric, the two-query cap and the early search (2026-09-25).
+    need_stack
+    rm -f results/p6c2-planeval.jsonl results/p6c2-replay53.jsonl
+    "$UV" run tools/planeval.py --labels data/plansets/all.jsonl --today "$(date -u +%F)" \
+        --out results/p6c2-planeval.jsonl > results/p6c2-planeval.txt 2>&1
+    echo "  planeval rc=$?"
+    "$UV" run tools/appdrive.py run --mode convo --prompts data/plansets/replay53.json \
+        --convo-level auto --convo-search auto --title p6c2-replay53 --gap-s 1.5 \
+        --out results/p6c2-replay53.jsonl
+    echo "  replay rc=$?"
+    echo "RECHECK_DONE"
+    ;;
 *)
-    echo "usage: $0 wipe | g1 | planeval | replay | levels | fresh"; exit 2 ;;
+    echo "usage: $0 wipe | g1 | planeval | replay | levels | fresh | recheck"; exit 2 ;;
 esac
 exit 0
