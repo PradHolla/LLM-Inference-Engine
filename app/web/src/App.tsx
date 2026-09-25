@@ -102,8 +102,13 @@ export function App() {
     return () => { active = false; };
   }, []);
 
+  // A chat created by sending needs no load: it is empty and its first message is in flight.
+  const createdBySendRef = useRef<number | null>(null);
+  const creatingRef = useRef(false);
+
   useEffect(() => {
     if (selectedId == null) { setChat(null); setMessages([]); return; }
+    if (createdBySendRef.current === selectedId) { createdBySendRef.current = null; return; }
     let active = true;
     setLoading(true);
     getChat(selectedId).then((payload) => {
@@ -264,10 +269,11 @@ export function App() {
     await refreshList().catch(() => undefined);
   };
 
-  const runStream = async (path: string, body: Record<string, unknown>, optimistic?: Message) => {
+  const runStream = async (path: string, body: Record<string, unknown>, optimistic?: Message,
+                           forChat?: number) => {
     const thinkingMode = typeof body.thinking === "string" ? body.thinking : thinking;
-    if (selectedId == null || stream) return;
-    const chatId = selectedId;
+    const chatId = forChat ?? selectedId;
+    if (chatId == null || stream) return;
     const controller = new AbortController();
     abortRef.current = controller;
     stopRequested.current = false;
@@ -346,20 +352,41 @@ export function App() {
 
   const searchPayload = () => config?.search_modes?.length ? search : search === "on";
 
-  const send = () => {
-    if (!draft.trim() || selectedId == null || stream) return;
+  const send = async () => {
+    if (!draft.trim() || stream || creatingRef.current) return;
     const content = draft.trim();
+    let chatId = selectedId;
+    let fresh = false;
+    if (chatId == null) {
+      // Nothing open (an empty app, or the open chat was deleted): start one, as ChatGPT does.
+      creatingRef.current = true;
+      try {
+        const next = await createChat();
+        createdBySendRef.current = next.id;
+        setChats((current) => [next, ...current]);
+        setChat(next);
+        setMessages([]);
+        setSelectedId(next.id);
+        chatId = next.id;
+        fresh = true;
+      } catch (error) {
+        setStreamError(error instanceof Error ? error.message : "Could not start a conversation.");
+        return;
+      } finally {
+        creatingRef.current = false;
+      }
+    }
     setDraft("");
-    const parentId = editingParentRef.current !== undefined
+    const parentId = fresh ? null : editingParentRef.current !== undefined
       ? editingParentRef.current : chat?.head_message_id ?? null;
     const temporary: Message = {
       id: -Date.now(), parent_id: parentId, role: "user", content, thinking: null,
       created_at: Date.now() / 1000, tokens: null, sibling_ids: [], stopped: false,
       sources: null, stats: null,
     };
-    void runStream(`/api/chats/${selectedId}/send`, {
+    void runStream(`/api/chats/${chatId}/send`, {
       content, thinking, search: searchPayload(), parent_id: parentId,
-    }, temporary);
+    }, temporary, chatId);
     editingParentRef.current = undefined;
     setEditingMessage(null);
   };
