@@ -6704,3 +6704,24 @@ a speculative search of the raw message started alongside the planner, and a sho
 **Cache in the replay** climbed from 6% to 64% of the prompt (5,312 of 8,289 tokens at turn 8),
 the planner warming the history for the answer as designed. The summary path was not exercised
 (announced as a cut).
+
+## P6C-2  Planner fixes rechecked, and FreshQA end to end, written 2026-09-25 with the box STOPPED
+
+Config as P6C (Qwen3-8B fp8/fp8 KV, vLLM 0.27.1 V1, 32k window, A10G, one user) plus commit
+`aa630b4`: conversational examples in the planner rubric, at most two queries, and the first
+message of a chat searched while the planner runs. FreshQA: 80 questions (20 per category) x 4
+arms (search on with thinking Auto / Off / Full; search off with thinking off), graded by a
+Qwen3-8B judge (thinking off, temperature 0, JSON schema) with gold-string containment as a
+second grader. Gold answers are from the 2026-04-21 FreshQA sheet.
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| R1 | MTRAG conversational turns searched | **<= 2 of 10**, from 5 | the three misses are now named in the rubric almost verbatim |
+| R2 | Search agreement over all labelled items | **>= 90%**, from 91.0% (no regression) | the new line only targets reactions and goodbyes |
+| R3 | #53 replay, first visible token on searched turns, p50 | **3.0-3.5 s**, from 3.8 s | two queries shorten the fan-out; turn 1 also hides the planner behind the early search |
+| F1 | Judge accuracy, fast-changing: search off vs search on (Off) | **<= 30% vs 55-80%** | this is the category search exists for; stale April golds cap the "on" side |
+| F2 | Judge accuracy, never-changing, every arm | **80-95%** | recall questions an 8B model mostly knows |
+| F3 | Accuracy gain of Full thinking over Off, with search, overall | **<= 5 points** | FreshQA is bounded by retrieval, not reasoning; P6C's measured labels showed thinking changing 5 of 32 recall answers |
+| F4 | Full end-to-end vs Off, with search, p50 | **2-3x slower** | P6C levels: Off 7.0 s, Full 19.4 s |
+| F5 | First visible token, search on, thinking Off (every item is a first message), p50 | **1.5-2.5 s** | the early search overlaps the planner; search then engine prefill of a ~3,000-token block |
+| F6 | Judge and containment disagree | **<= 15%** of non-false-premise answers | containment misses paraphrases, the judge is generous on hedges; both should be rare |
