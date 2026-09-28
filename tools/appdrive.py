@@ -152,6 +152,8 @@ async def run(a: argparse.Namespace) -> int:
                 rec.update(phase="smoke", qid=0, turn_index=1)
                 flush(a.out, rec)
                 print(line(rec), flush=True)
+                # The app's DB holds the owner's real chats; a smoke check leaves nothing behind.
+                await client.delete(f"{a.app}/api/chats/{chat_id}")
             return smoke_verdict([json.loads(x) for x in open(a.out)
                                   if json.loads(x).get("phase") == "smoke"][-3:])
         if a.mode == "convo":
