@@ -6814,7 +6814,7 @@ the message. Constrained decoding emits properties in schema order, so a field d
 
 ### P6C-3 actuals, run 1, 2026-09-27: goodbyes fixed, follow-ups broken
 
-Config as the P6C-3 header, commit `29ee59c`. Raw: `results/p6c3-planeval.*`.
+Config as the P6C-3 header, commit `29ee59c`. Raw: `results/p6c3-run1-planeval.*`.
 
 | # | Predicted | Measured | Verdict |
 |---|---|---|---|
