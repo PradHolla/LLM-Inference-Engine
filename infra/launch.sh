@@ -3,6 +3,7 @@
 # if an instance already exists for this project (use up.sh instead).
 #   ./infra/launch.sh              # on-demand g5.xlarge  (default; use this)
 #   USE_SPOT=1 ./infra/launch.sh   # spot -- capacity escape hatch, see NOTES/PROJECT.md
+#   FROM_AMI=ami-... AZ=us-east-1b ./infra/launch.sh   # restore from our baked image
 set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
@@ -13,6 +14,7 @@ INSTANCE_TYPE="${INSTANCE_TYPE:-g5.2xlarge}"
 AZ="${AZ:-}"
 ROOT_GB="${ROOT_GB:-200}"
 USE_SPOT="${USE_SPOT:-0}"
+FROM_AMI="${FROM_AMI:-}"
 KEY_NAME="${KEY_NAME:-$PROJECT}"
 SG_NAME="${SG_NAME:-$PROJECT-sg}"
 VLLM_PORT="${VLLM_PORT:-8000}"
@@ -26,7 +28,15 @@ EXISTING=$(aws ec2 describe-instances --region "$REGION" \
               "Name=instance-state-name,Values=pending,running,stopping,stopped" \
     --query 'Reservations[].Instances[].InstanceId' --output text)
 if [ -n "$EXISTING" ]; then
-    die "instance already exists for this project: $EXISTING (use infra/up.sh)"
+    # A restore test may run while the old box sits stopped; nothing else may.
+    RUNNING=$(aws ec2 describe-instances --region "$REGION" \
+        --filters "Name=tag:Project,Values=$PROJECT" \
+                  "Name=instance-state-name,Values=pending,running,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' --output text)
+    if [ -z "$FROM_AMI" ] || [ -n "$RUNNING" ]; then
+        die "instance already exists for this project: $EXISTING (use infra/up.sh)"
+    fi
+    say "restoring from $FROM_AMI beside stopped $EXISTING"
 fi
 
 # --- quota sanity check ------------------------------------------------------
@@ -51,10 +61,15 @@ if [ $((INUSE + NEED)) -gt "$LIMIT" ]; then
 fi
 
 # --- AMI: resolve latest via SSM so this never goes stale --------------------
-AMI=$(aws ssm get-parameter --region "$REGION" \
-    --name /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id \
-    --query 'Parameter.Value' --output text)
-say "AMI $AMI (Deep Learning Base OSS Nvidia Driver, Ubuntu 24.04)"
+if [ -n "$FROM_AMI" ]; then
+    AMI="$FROM_AMI"
+    say "AMI $AMI (our baked image; already bootstrapped, so no user-data)"
+else
+    AMI=$(aws ssm get-parameter --region "$REGION" \
+        --name /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id \
+        --query 'Parameter.Value' --output text)
+    say "AMI $AMI (Deep Learning Base OSS Nvidia Driver, Ubuntu 24.04)"
+fi
 
 # --- key pair ----------------------------------------------------------------
 if ! aws ec2 describe-key-pairs --region "$REGION" --key-names "$KEY_NAME" >/dev/null 2>&1; then
@@ -127,6 +142,7 @@ PY
 SZ=$(wc -c < "$UD")
 [ "$SZ" -lt 16384 ] || die "user-data is ${SZ} bytes, over the 16 KB EC2 limit"
 
+UD_ARGS=(--user-data "file://$UD"); [ -n "$FROM_AMI" ] && UD_ARGS=()
 say "launching $INSTANCE_TYPE in $AZ (shutdown -> $SHUTDOWN_BEHAVIOR)"
 IID=$(aws ec2 run-instances --region "$REGION" \
     --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
@@ -134,7 +150,7 @@ IID=$(aws ec2 run-instances --region "$REGION" \
     --instance-initiated-shutdown-behavior "$SHUTDOWN_BEHAVIOR" \
     --metadata-options 'HttpTokens=required,HttpEndpoint=enabled' \
     --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$ROOT_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":$DELETE_ROOT}}]" \
-    --user-data "file://$UD" \
+    ${UD_ARGS[@]+"${UD_ARGS[@]}"} \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Project,Value=$PROJECT},{Key=Name,Value=$PROJECT}]" \
     ${MARKET_ARGS[@]+"${MARKET_ARGS[@]}"} \
     --query 'Instances[0].InstanceId' --output text)

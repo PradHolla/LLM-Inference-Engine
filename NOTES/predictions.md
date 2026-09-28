@@ -6841,3 +6841,25 @@ rely on the conversation as questions; the quote is removed. Schema order and ov
 | K1b | conversational searched | **<= 2 of 10** |
 | K2b | search agreement | **>= 90%**; regression **>= 10/11** |
 | K4b | planner p50 | **<= 850 ms** |
+
+### P6C-3 run 2 actuals, 2026-09-27
+
+Config as the P6C-3 header with the run-2 change, commit `2781925`. Raw: `results/p6c3-planeval.*`.
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| K1b | conversational searched <= 2/10 | **0/10** (from 4/10 in P6C-2) | correct |
+| K2b | search agreement >= 90%, regression >= 10/11 | **93.4%** (468/501, from 91.0%); regression **10/11** | correct |
+| K4b | planner p50 <= 850 ms | **929 ms** (from 759) | **wrong** |
+
+By source against P6C-2: FreshQA 98.8 -> 100.0%, GSM8K 100 -> 100%, MTRAG 86.0 -> 85.0%, QReCC
+89.3 -> 98.7%, regression 11/11 -> 10/11. Search-labelled items not searched: 33, from 41 (5 of
+them classed reaction). Query entity hits 56.0% (run 1) -> 64.9%.
+
+**K4b missed because the cost is per call, not per mix.** Split by decision, p50 rose 812 -> 980 ms
+on searched items and 401 -> 556 ms on the rest, so +150-170 ms everywhere: about five more output
+tokens for `kind` at ~20 ms, plus the longer instruction. The prediction assumed ~100 ms.
+
+**Run 1 against run 2 isolates the cause of run 1's collapse**: the same schema and override with
+the isolating wording and quote removed goes 83.6% -> 93.4%. The `kind` field was never the
+problem; telling the planner to judge the message "on its own" was.
