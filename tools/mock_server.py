@@ -26,7 +26,7 @@ RECENCY = re.compile(r"\b(?:latest|today)\b", re.IGNORECASE)
 def plan_json(user_text: str) -> str:
     """The 6c planner's reply: search on a year, ticker or recency word, think past 12 words."""
     search = bool(YEAR_OR_TICKER.search(user_text) or RECENCY.search(user_text))
-    return json.dumps({"search": search, "queries": [user_text] if search else [],
+    return json.dumps({"kind": "question", "search": search, "queries": [user_text] if search else [],
                        "think": len(user_text.split()) > 12})
 
 

@@ -367,7 +367,8 @@ def selftest() -> int:
           len(seen) == 3 and all(r.get("gw_purpose") == "plan" and
                                  r.get("gw_thinking_budget") == 0 and
                                  r.get("response_format", {}).get("type") == "json_schema" and
-                                 r["messages"][-1]["content"] == prompts.PLANNER_INSTRUCTION
+                                 r["messages"][-1]["content"] ==
+                                 prompts.planner_instruction(r["messages"][-2]["content"])
                                  for r in seen))
     check("history precedes the user message",
           seen[0]["messages"][1]["content"] == "Tell me about ASML's EUV machines")

@@ -641,12 +641,28 @@ async def _selftest_async() -> list[str]:
                   plan_request.get("gw_purpose") == "plan" and plan_request.get("gw_chat_id") ==
                   chat_id and plan_request.get("gw_turn_index") == 1 and
                   plan_request.get("gw_thinking_budget") == 0 and
-                  plan_request.get("stream") is False and plan_request.get("max_tokens") == 96 and
+                  plan_request.get("stream") is False and plan_request.get("max_tokens") == config.PLAN_MAX_TOKENS and
                   plan_request.get("response_format", {}).get("type") == "json_schema" and
                   plan_request.get("temperature") == 0.7 and plan_request.get("top_p") == 0.8)
             check("plan prompt ends user message then instruction",
                   plan_request["messages"][-2] == {"role": "user", "content": "hello"} and
-                  plan_request["messages"][-1]["content"] == prompts.PLANNER_INSTRUCTION)
+                  plan_request["messages"][-1]["content"] == prompts.planner_instruction("hello"))
+            check("planner instruction quotes the latest message, capped",
+                  prompts.planner_instruction("hello").endswith('The latest message is: "hello"') and
+                  prompts.planner_instruction("x " * 400).endswith(' ..."'))
+            check("schema decodes kind before search",
+                  list(agent.PLAN_SCHEMA["properties"])[:2] == ["kind", "search"])
+            reaction = agent.parse_plan('{"kind": "reaction", "search": true, '
+                                        '"queries": ["day trading rules"], "think": false}')
+            check("a reaction never searches, whatever the planner said",
+                  reaction["search"] is False and reaction["queries"] == [] and
+                  agent.resolve(reaction, "auto", "auto", "omg.")["search"] is False and
+                  agent.resolve(reaction, "on", "auto", "omg.")["queries"] == ["omg."])
+            check("a question keeps its search, an old reply without kind still parses",
+                  agent.parse_plan('{"kind": "question", "search": true, "queries": ["a"], '
+                                   '"think": true}')["search"] is True and
+                  agent.parse_plan('{"search": true, "queries": ["a"], "think": false}')["kind"]
+                  is None)
             plan_event = next(e for e in events if e["type"] == "plan")
             check("forced search overrides the planner and uses the user text",
                   plan_event == {"type": "plan", "search": True, "queries": ["hello"],

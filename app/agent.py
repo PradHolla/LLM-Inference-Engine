@@ -22,14 +22,17 @@ from . import budget, config, db, prompts
 
 LOGGER = logging.getLogger(__name__)
 
+# Declared first so it is decoded before "search": the message is classified before the topic.
+KINDS = ("question", "task", "reaction")
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
+        "kind": {"type": "string", "enum": list(KINDS)},
         "search": {"type": "boolean"},
         "queries": {"type": "array", "items": {"type": "string"}, "maxItems": config.MAX_QUERIES},
         "think": {"type": "boolean"},
     },
-    "required": ["search", "queries", "think"],
+    "required": ["kind", "search", "queries", "think"],
     "additionalProperties": False,
 }
 RESPONSE_FORMAT = {"type": "json_schema",
@@ -104,8 +107,11 @@ def parse_plan(text: str) -> dict:
     queries = data.get("queries", [])
     if not isinstance(queries, list) or not all(isinstance(q, str) for q in queries):
         raise ValueError("planner queries is not a list of strings")
-    return {"search": data["search"], "think": data["think"],
-            "queries": [re.sub(r"\s+", " ", q).strip() for q in queries if q.strip()]}
+    kind = data.get("kind") if data.get("kind") in KINDS else None
+    queries = [re.sub(r"\s+", " ", q).strip() for q in queries if q.strip()]
+    if kind == "reaction":
+        return {"kind": kind, "search": False, "think": data["think"], "queries": []}
+    return {"kind": kind, "search": data["search"], "think": data["think"], "queries": queries}
 
 
 def resolve(parsed: dict | None, search_mode: str, thinking: str, user_text: str) -> dict:
@@ -128,7 +134,7 @@ def resolve(parsed: dict | None, search_mode: str, thinking: str, user_text: str
 def plan_messages(base: list[dict], user_text: str) -> list[dict]:
     """[system][summary][history][user][instruction]: the answer's prefix, instruction last."""
     return [*base, {"role": "user", "content": user_text},
-            {"role": "system", "content": prompts.PLANNER_INSTRUCTION}]
+            {"role": "system", "content": prompts.planner_instruction(user_text)}]
 
 
 def plan_body(messages: list[dict], model: str, chat_id: int | None,

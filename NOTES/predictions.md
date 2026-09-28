@@ -6789,3 +6789,25 @@ September. Fast-changing accuracy is a floor, not a measurement.
 
 **Early search** (every FreshQA item is a first message): first visible token 1.83 s p50 with
 thinking off, inside F5's range.
+
+## P6C-3  The planner classifies the message before deciding search, written 2026-09-27 with the box STOPPED
+
+Config as P6C-2 (Qwen3-8B fp8/fp8 KV, vLLM 0.27.1 V1, 32k window, A10G, one user) plus: a
+`kind` field (question / task / reaction) declared FIRST in the planner schema, so the grammar
+decodes it before `search`; `kind == reaction` forces search off in code; the planner
+instruction ends by quoting the latest message (capped at 300 chars); `PLAN_MAX_TOKENS` 96 ->
+112. Same 581-item set, no web searches (the planner eval never sets `gw_search`).
+
+**Why it should work:** the four P6C-2 misses ("omg.", "all right, see ya", "Ah, I'd better go
+to Google ...", "I appreciate the summary...") follow 8-16 turns on a searchable topic, and the
+first two are named in the rubric almost verbatim. The planner is judging the conversation, not
+the message. Constrained decoding emits properties in schema order, so a field decoded before
+`search` is a forced classification step, not a post-hoc label.
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| K1 | MTRAG conversational turns searched | **<= 1 of 10**, from 4 | "omg" and "see ya" become reactions; the Google line may still read as a request |
+| K2 | Search agreement, all labelled items | **>= 90%**, from 91.0% | the override only fires on reactions |
+| K3 | Labelled search:true items classed reaction (the risk) | **<= 3 of ~400** | short follow-ups like "and in 2020?" are the exposure |
+| K4 | Planner p50 | **<= 900 ms**, from 759 | ~5 more output tokens at ~20 ms, plus ~40 prompt tokens for the quote |
+| K5 | Fallbacks | **<= 2 / 581** | the extra 16 tokens of room cover the new field |

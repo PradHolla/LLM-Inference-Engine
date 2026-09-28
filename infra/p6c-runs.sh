@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 6c session steps, one sub-command each. Runs ON the box after `app-run.sh up`.
 #   sudo systemd-run --unit=p6c-<step> --collect /bin/bash /opt/llm/infra/p6c-runs.sh <step>
-#   steps: wipe | g1 | planeval | replay | levels | fresh | recheck
+#   steps: wipe | g1 | planeval | replay | levels | fresh | recheck | kind
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -111,7 +111,16 @@ recheck)
     echo "  replay rc=$?"
     echo "RECHECK_DONE"
     ;;
+kind)
+    # Planner classifies the message (kind) before deciding search, and quotes it (2026-09-27).
+    need_stack
+    rm -f results/p6c3-planeval.jsonl
+    "$UV" run tools/planeval.py --labels data/plansets/all.jsonl --today "$(date -u +%F)" \
+        --out results/p6c3-planeval.jsonl > results/p6c3-planeval.txt 2>&1
+    echo "  planeval rc=$?"
+    echo "KIND_DONE"
+    ;;
 *)
-    echo "usage: $0 wipe | g1 | planeval | replay | levels | fresh | recheck"; exit 2 ;;
+    echo "usage: $0 wipe | g1 | planeval | replay | levels | fresh | recheck | kind"; exit 2 ;;
 esac
 exit 0
