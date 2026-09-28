@@ -30,30 +30,30 @@ for r in sorted((r for r in load(args.app) if r.get("phase") == "convo"), key=la
 assert round(search_share[0], 1) == 75.8 and round(model_share[0], 1) == 94.2, (search_share[0], model_share[0])
 
 BLUE, ORANGE, INK, MUTED = "#1f4e79", "#c1440e", "#222222", "#666666"
-fig, ax = plt.subplots(figsize=(10, 6.2), dpi=200)
+fig, ax = plt.subplots(figsize=(8.4, 6.4), dpi=200)
 fig.patch.set_facecolor("#ffffff"); ax.set_facecolor("#ffffff")
 ax.axhspan(min(model_share), max(model_share), color=BLUE, alpha=0.07, lw=0)
 ax.axhspan(min(search_share), max(search_share), color=ORANGE, alpha=0.07, lw=0)
 ax.plot(turns, model_share, "o", ms=8, color=BLUE)
 ax.plot(turns, search_share, "o", ms=8, color=ORANGE)
 
-ax.text(10.35, sum(model_share) / len(model_share),
-        f"the model's share of the\nwait for the whole answer\n{min(model_share):.0f}-{max(model_share):.0f}%",
-        color=BLUE, fontsize=11.5, fontweight="bold", va="center")
-ax.text(10.35, sum(search_share) / len(search_share),
-        f"web search's share of the\nwait for the first word\n{min(search_share):.0f}-{max(search_share):.0f}%",
-        color=ORANGE, fontsize=11.5, fontweight="bold", va="center")
+ax.text(0.75, min(model_share) - 2.5,
+        f"Model's share of the wait for the whole answer: {min(model_share):.0f}-{max(model_share):.0f}%",
+        color=BLUE, fontsize=11.5, fontweight="bold", va="top")
+ax.text(0.75, min(search_share) - 2.5,
+        f"Web search's share of the wait for the first word: {min(search_share):.0f}-{max(search_share):.0f}%",
+        color=ORANGE, fontsize=11.5, fontweight="bold", va="top")
 
 ax.set_xticks(turns); ax.set_xlim(0.6, 10.3); ax.set_ylim(0, 100)
 ax.set_yticks(range(0, 101, 20)); ax.set_yticklabels([f"{v}%" for v in range(0, 101, 20)])
 ax.set_xlabel("turn of the conversation", fontsize=12)
 ax.set_ylabel("share of the wait", fontsize=12)
-ax.set_title("Same chat, two clocks\nWhat you should optimise depends on which wait you measure",
+ax.set_title("Same chat, two clocks\nWhat you should optimize depends on which wait you measure",
              fontsize=14, fontweight="bold", loc="left", pad=14, color=INK)
 ax.grid(axis="y", alpha=0.25, lw=0.7)
 for s in ("top", "right"): ax.spines[s].set_visible(False)
-fig.text(0.01, 0.015, "Qwen3-8B fp8 weights and KV cache on one A10G 24GB, vLLM 0.27.1, 16k context. One 10-turn chat, "
-         "one user, live Brave search, thinking capped at 128 tokens.", fontsize=8.5, color=MUTED)
-fig.tight_layout(rect=(0, 0.035, 0.80, 1))
+fig.text(0.01, 0.015, "Qwen3-8B, fp8 weights, KV cache on A10G 24GB, vLLM, 16k context,\n10-turn chat, "
+         "one user, live search, thinking capped at 128 tokens.", fontsize=8.5, color=MUTED)
+fig.tight_layout(rect=(0, 0.06, 1, 1))
 fig.savefig(args.out, facecolor="#ffffff")
 print(f"wrote {args.out}")
