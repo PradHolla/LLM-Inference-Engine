@@ -22,12 +22,12 @@ ssh, `infra/sync.sh` never hand-typed ssh, and never quote a number without its 
 ## 0. Bring the box up
 
 ```bash
-aws ec2 describe-instances --instance-ids i-07d8b10bdcf39a099 \
+aws ec2 describe-instances --instance-ids i-087f9edbde56d4433 \
     --query 'Reservations[0].Instances[0].State.Name' --output text      # expect: stopped
 ./infra/up.sh
 ```
 
-**Known failure, not a bug:** `InsufficientInstanceCapacity` in us-east-1c. It cleared on the
+**Known failure, not a bug:** `InsufficientInstanceCapacity` (seen in us-east-1c; the box has lived in us-east-1a since 2026-09-28). It cleared on the
 second try on 2026-09-22. Retry once a minute, up to 15 times, in a loop that BRANCHES on the
 result (incidents 30, 47: `&& break` is not a gate). `up.sh` also exits early with "no instance
 found" if the box is still `pending`; wait for `running` with `aws ec2 wait instance-running`
@@ -113,7 +113,7 @@ When the owner says they are done, collect their feedback verbatim into the repl
 ./infra/sync.sh pull
 ./infra/sync.sh run 'rm -f /opt/llm/.no-autoshutdown && echo hold-removed'
 ./infra/down.sh
-aws ec2 wait instance-stopped --instance-ids i-07d8b10bdcf39a099   # in the background; it can take minutes
+aws ec2 wait instance-stopped --instance-ids i-087f9edbde56d4433   # in the background; it can take minutes
 ```
 
 Confirm `stopped`, and confirm `hold-removed` was printed BEFORE `down.sh`. Stop, never
