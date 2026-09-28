@@ -194,6 +194,10 @@
     <li><a href="#adaptive">Clever lost to simple</a></li>
     <li><a href="#priority">Priority needs a queue</a></li>
     <li><a href="#overlap">A win that wasn&rsquo;t</a></li>
+    <div class="grp">The agent</div>
+    <li><a href="#endtoend">A real chat, end to end</a></li>
+    <li><a href="#planner">A plan before every answer</a></li>
+    <li><a href="#fresh">What search and thinking buy</a></li>
     <div class="grp">Conclusions</div>
     <li><a href="#attrib">The attribution</a></li>
     <li><a href="#method">Bugs and method</a></li>
@@ -204,7 +208,7 @@
 <header>
   <p class="eyebrow">Qwen3-8B &middot; one NVIDIA A10G &middot; every number predicted before it was measured</p>
   <h1>An inference engine from scratch, and why every speed-up here is a range</h1>
-  <p class="standfirst">Eight parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest.</p>
+  <p class="standfirst">Nine parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest. The last part puts a search agent on top of the engine and measures what a user actually gets: live web search takes a benchmark of current-events questions from 35% to 65%, and thinking takes it to 79%.</p>
   <div class="hstat">
     <div class="hs"><span class="k">Naive server</span><span class="v">0.332 req/s</span></div>
     <div class="hs"><span class="k">Engine from scratch</span><span class="v"><em>1.60</em> req/s</span></div>
@@ -216,6 +220,7 @@
     <div class="hs"><span class="k">Four tokens of formatting</span><span class="v"><em>2.3×</em> slower</span></div>
     <div class="hs"><span class="k">Hidden reasoning, gsm8k</span><span class="v"><em>0.4</em> points for <em>160×</em> the silence</span></div>
     <div class="hs"><span class="k">Vendor&rsquo;s own stop phrase</span><span class="v"><em>42.7</em> points worse</span></div>
+    <div class="hs"><span class="k">Live search, FreshQA</span><span class="v">35% &rarr; <em>79%</em></span></div>
   </div>
 </header>
 
@@ -1144,7 +1149,7 @@ overflow     needs to exceed   16,384   this config   25,760   1.57&times;   OK<
   <div class="concept">
     <span class="tag">Why this changed the product</span>
     <p>A conventional reasoning control offers low, medium and high. On this model and this hardware, <strong>medium lands in the trough.</strong> So the chat application built on top of this engine offers three settings &mdash; off, 128 tokens, and unbounded &mdash; with nothing in between, and maps the OpenAI-standard <code>reasoning_effort: medium</code> <em>upward</em> to unbounded rather than to a middle value. It is the one place in this project where a measurement overruled an industry convention outright.</p>
-    <p>The honest caveat: every reasoning-length number here comes from mathematics problems. Whether an ordinary conversational question behaves the same way is untested, and until it is, those three settings are provisional.</p>
+    <p>The honest caveat: every reasoning-length number here comes from mathematics problems. Whether an ordinary conversational question behaves the same way was untested when this was written. Part nine tested it, and the 128-token setting did not survive.</p>
   </div>
   <div class="concept">
     <span class="tag">Read the label on the box</span>
@@ -1250,7 +1255,87 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
   <p>The third ordering is the cautionary one. Thinking first and searching afterwards costs almost nothing end to end &mdash; 172&nbsp;ms &mdash; but 8.3 seconds at the first token, because the relay runs the entire first generation before it starts the search. <strong>Ordering is nearly free in total time and decisive in the only latency a person actually perceives.</strong></p>
 </section>
 
-<p class="part">Part nine &middot; Conclusions</p>
+<p class="part">Part nine &middot; The agent on top</p>
+
+<section id="endtoend">
+  <h2>A real chat, end to end</h2>
+  <p>Part seven measured the pieces of a chat turn. This part drives the finished app the way a browser does, through its own API, and joins every turn to the gateway&rsquo;s trace. The first run asked the question part seven could only estimate: in a ten-turn conversation with search and thinking on, where does the wait go?</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV, 16k window, one user, live Brave search, thinking at 128 tokens. Driven through the app&rsquo;s own API and joined to the gateway trace per turn.</caption>
+    <thead><tr><th class="n">Turn</th><th class="n">Prompt</th><th class="n">Already cached</th><th class="n">Search</th><th class="n">Model&rsquo;s first token</th><th class="n">User&rsquo;s first token</th><th class="n">Inference share of the whole answer</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">1,386</td><td class="n">0</td><td class="n">1,438 ms</td><td class="n">411 ms</td><td class="n">1,896 ms</td><td class="n">94.2%</td></tr>
+      <tr><td class="n">5</td><td class="n">7,098</td><td class="n">3,264</td><td class="n">993 ms</td><td class="n">1,223 ms</td><td class="n">2,262 ms</td><td class="n">96.0%</td></tr>
+      <tr><td class="n">10</td><td class="n">14,805</td><td class="n">9,648</td><td class="n">1,221 ms</td><td class="n x">2,052 ms</td><td class="n x">3,320 ms</td><td class="n">91.0%</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>By the end of an answer, 90&ndash;98% of the wait is inference</strong>, because chat answers are long. At the first word it depends on the turn: search is three quarters of it on turn 1 and a third of it by turn 10. Search stays flat; what grows is the prompt the model has to read.</p>
+  <div class="finding warn">
+    <p><strong>With thinking on, the model&rsquo;s previous answer is never cached.</strong> Its cache entries were computed straight after a thinking block, and the chat format strips thinking out of history, so the re-rendered turn diverges at the first word of the answer and the whole answer is read again, every turn. Part seven&rsquo;s 35&times; conversation win was measured with thinking off. It does not carry over to a thinking chat.</p>
+  </div>
+  <h3>The small thinking budget cut off every chain</h3>
+  <p>Part eight chose 128 tokens as the safe small budget, with the caveat that it was measured on maths. On twelve ordinary chat questions &mdash; a dinner idea, React versus Vue, a savings plan &mdash; the model&rsquo;s own unbounded reasoning ran <strong>309 tokens at the shortest and 570 at the median</strong>. The 128-token setting truncated <strong>12 of 12</strong>, every one of them mid-thought, which is exactly the place part eight showed is worst to stop.</p>
+  <p>So the fixed levels went. The app now offers <strong>Auto</strong>, which decides per message between no thinking and unbounded thinking, and never picks a cap.</p>
+</section>
+
+<section id="planner">
+  <h2>A plan before every answer</h2>
+  <p>The app became an agent: a small graph that loads the conversation, plans, searches, and answers, with a summary of older turns written in the background once a chat grows long. The plan is one short call to the same model, with thinking off, constrained to a JSON schema. It decides three things: whether this message needs the web, what to search for as self-contained queries (&ldquo;explain those risks&rdquo; becomes &ldquo;risks associated with ASML stock&rdquo;), and whether to think.</p>
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Why a schema can be enforced rather than requested</h4>
+    <p>Asking a model for JSON is a request it can ignore. vLLM can instead compile the schema into a grammar and mask every token that would break it, at each decoding step, so the output is valid by construction. A prompt that never mentions JSON came back as <code>{"fruit": "Strawberry", "n": 1}</code>. Across 581 planner calls there was one fallback.</p>
+  </div>
+  <p>The planner was scored against 581 labelled questions from four public datasets &mdash; MTRAG and QReCC for multi-turn conversations, FreshQA for current events, GSM8K for maths that needs no search &mdash; plus the real chats where the earlier app had failed:</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV, 32k window, planner with thinking off and a JSON schema, one user.</caption>
+    <thead><tr><th>Measure</th><th class="n">Result</th></tr></thead>
+    <tbody>
+      <tr><td>Planner latency, median</td><td class="n m">759 ms</td></tr>
+      <tr><td>Search decision agrees with the label, all 581</td><td class="n m">91.0%</td></tr>
+      <tr><td>Dated questions (FreshQA slow and fast-changing) sent to search</td><td class="n m">97.5%</td></tr>
+      <tr><td>Maths problems sent to search</td><td class="n m">0 of 60</td></tr>
+      <tr><td>Follow-ups from the app&rsquo;s own failed chats, resolved correctly</td><td class="n m">10 of 10</td></tr>
+      <tr><td>Searched answers that cite a source</td><td class="n m">82%</td></tr>
+    </tbody>
+  </table></div>
+  <p>On the first message of a chat there is no history to resolve, so the raw message is searched while the planner is still running. The planner&rsquo;s second query, if it wrote one, runs alongside it.</p>
+  <div class="finding">
+    <p><strong>The cheapest win in the whole project was a system prompt.</strong> The app had none. Adding one that asks for a direct answer of a few hundred words halved the answer on the same twelve questions, 644 tokens to 293, and halved the time to a finished answer, <strong>14.4 s to 7.0 s</strong>. No kernel, no quantization, no GPU time.</p>
+  </div>
+</section>
+
+<section id="fresh">
+  <h2>What search and thinking buy</h2>
+  <p>Speed is only half of a search product. The other half is whether the answer is right about a world that has moved since the model was trained. FreshQA is built for exactly that: questions whose answers never change, change slowly, change fast, or rest on a false premise. Eighty of them, twenty per category, went through the real app in four configurations, and a separate call to the same model graded every answer against the gold, checked by plain string matching.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, fp8 KV, vLLM 0.27.1, 32k window, A10G, one user, live Brave search. 80 FreshQA questions per row; gold answers from the April 2026 sheet. Judge: Qwen3-8B, thinking off, temperature 0, JSON schema.</caption>
+    <thead><tr><th>Configuration</th><th class="n">Correct</th><th class="n">First token on screen</th><th class="n">Finished answer</th></tr></thead>
+    <tbody>
+      <tr><td>No search, no thinking</td><td class="n x">35%</td><td class="n">0.08 s</td><td class="n">3.1 s</td></tr>
+      <tr><td>Search, no thinking</td><td class="n m">65%</td><td class="n m">1.83 s</td><td class="n m">4.1 s</td></tr>
+      <tr><td>Search, Auto thinking</td><td class="n">70%</td><td class="n">2.03 s</td><td class="n">4.6 s</td></tr>
+      <tr><td>Search, full thinking</td><td class="n m">79%</td><td class="n">1.54 s</td><td class="n">11.4 s</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>Search is worth 30 points, and it lands where it should.</strong> Questions whose answers change slowly go from 25% to 80%; fast-changing ones from 10% to 45%. Questions that never change gain less, 65% to 85%, because the model already knows most of them. And the whole thing costs under two seconds before the first word appears.</p>
+  <div class="scroll"><table>
+    <caption>Same runs, split by FreshQA category. 20 questions per cell.</caption>
+    <thead><tr><th>Configuration</th><th class="n">False premise</th><th class="n">Fast-changing</th><th class="n">Slow-changing</th><th class="n">Never changing</th></tr></thead>
+    <tbody>
+      <tr><td>No search, no thinking</td><td class="n">40%</td><td class="n">10%</td><td class="n">25%</td><td class="n">65%</td></tr>
+      <tr><td>Search, no thinking</td><td class="n">50%</td><td class="n">45%</td><td class="n">80%</td><td class="n">85%</td></tr>
+      <tr><td>Search, Auto thinking</td><td class="n">65%</td><td class="n">45%</td><td class="n">80%</td><td class="n">90%</td></tr>
+      <tr><td>Search, full thinking</td><td class="n m">85%</td><td class="n">55%</td><td class="n">85%</td><td class="n">90%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Thinking is worth 14 more points, and most of it is one category.</strong> On questions with a false premise, full thinking scores 85% against 50% without. Reasoning is what notices that the question itself is wrong. Part eight found thinking worth almost nothing on grade-school maths; on questions about the current world it is worth the most of anything after search. The same knob, again, has no number without a workload.</p>
+  </div>
+  <p>The grader was checked rather than trusted. Where the judge and the string match disagreed, 23 of 240 answers, the judge was right about 18 times and wrong 3, which puts its figures within about two points. Some fast-changing &ldquo;wrong&rdquo; answers are right today and wrong only against an April gold, so that column is a floor.</p>
+</section>
+
+<p class="part">Part ten &middot; Conclusions</p>
 
 <section id="attrib">
   <h2>The attribution</h2>
@@ -1314,7 +1399,7 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
 
 <footer>
   Qwen3-8B on a single NVIDIA A10G (g5.2xlarge), vLLM 0.27.1. Parts one to three run bfloat16;
-  parts four to eight run fp8 unless a table says otherwise; parts one to seven sample greedily and part eight uses the vendor&rsquo;s recommended sampling, for the reason part eight gives, and every table states the configuration
+  parts four to nine run fp8 unless a table says otherwise, and part nine runs the chat app with a 32k window and one user; parts one to seven sample greedily and part eight uses the vendor&rsquo;s recommended sampling, for the reason part eight gives, and every table states the configuration
   it was measured under. All three engines speak the same streaming protocol on the same port and were
   measured by the same benchmark client with no modifications — the constraint that makes
   <code>0.332 &rarr; 1.60 &rarr; 5.70</code> a ladder rather than three unrelated numbers.

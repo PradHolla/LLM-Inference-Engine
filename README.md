@@ -1,7 +1,7 @@
 # LLM Inference Engine
 
-> **AI usage:** I built this with Claude Code (Opus for design, analysis and debugging, Sonnet
-> for mechanical implementation work), in this learning project.
+> **AI usage:** I built this with Claude Code (Opus for design, analysis and debugging; Sonnet,
+> and later an Opus subagent, for mechanical implementation work), in this learning project.
 
 An LLM serving stack built from scratch and measured against first-principles predictions
 at every layer. Qwen3-8B on a single NVIDIA A10G (AWS `g5.2xlarge`).
@@ -18,6 +18,11 @@ predicted in writing before it was measured and every gap explained.
 One benchmark harness, one GPU, one prompt, nothing renormalised between them. The 75x
 is the number users would feel: at a load the naive server could not survive, the engine
 answers in a third of a second.
+
+On top of the engine sits a Perplexity-style chat app: a LangGraph agent decides per message
+whether to search the web and whether to think, and answers with citations. **Live search
+takes it from 35% to 79% on FreshQA**, with the first word on screen in 1.8 s when thinking
+is off.
 
 ## What this project demonstrates
 
@@ -37,7 +42,7 @@ Every claim above links to a number in `NOTES/predictions.md`, which records the
 prediction, its arithmetic, the measurement, and the explanation for any gap. Roughly a
 third of the predictions were wrong; those are the entries worth reading.
 
-## Status: phases 0-5 and 7 complete; 6a measured, 6b built and awaiting its end-to-end run
+## Status: phases 0-7 complete; the chat app runs as a search agent, measured end to end
 
 ### How each step moved the number
 
@@ -427,6 +432,54 @@ The technique works and the explanation written into the design document was wro
 prediction in the same run did land: the TTFT gap was derived as
 prefill(3,000 tokens) x 0.2915 ms/token = **875 ms**, and measured **882 ms**.
 
+### Phase 6b: the app end to end, and a thinking level that cut off every chain
+
+The whole stack driven through the app's own HTTP API, one user, joined to the gateway's
+trace per turn. At the end of an answer, inference is **90-98%** of the wait, because answers
+are long. At the first token it depends on the turn: the web search is 64-76% of it early in a
+chat and 37-47% by turn 10, because what grows is prefill.
+
+**The model's previous answer is never cached when thinking is on.** Its KV was computed
+right after a `<think>` block, and the chat template strips thinking from history, so the
+re-rendered turn diverges at the first answer token and the whole answer is prefilled again,
+every turn. The 35x multi-turn cache win above was measured with thinking off and does not
+carry over.
+
+**The Brief level (128 thinking tokens) truncated 12 of 12 ordinary chat questions.** The
+shortest natural chain was 309 tokens, the median 570. Phase 7 showed that a chain cut before
+it reaches an answer is the worst place to stop, so the app replaced the three fixed levels
+with **Auto**, which picks Off or unbounded per message and never a cap.
+
+### Phase 6c: the app as an agent
+
+A LangGraph graph, `load_context -> plan -> search -> answer`, with a background summary for
+long chats. The planner is one call with thinking off and a JSON schema that vLLM enforces
+during decoding (1 fallback in 581 calls). It decides whether to search, writes up to two
+self-contained queries, and picks the thinking level. It runs in **759 ms p50** and agrees with
+the labelled search decision on **91%** of 581 real questions (MTRAG, QReCC, FreshQA, GSM8K).
+On the first message of a chat the raw text is searched while the planner is still running.
+
+**Adding a system prompt halved answer time for free**: 644 to 293 tokens at thinking Off,
+14.4 s to 7.0 s end to end, on the same 12 questions as 6b. 82% of searched answers cite
+their sources.
+
+**FreshQA, end to end through the app**, 80 questions across its four categories, graded by a
+separate Qwen3-8B judge and checked against gold-string containment:
+
+| arm | accuracy | first token p50 | end to end p50 |
+|---|---|---|---|
+| search off, thinking off | 35% | 0.08 s | 3.1 s |
+| search on, thinking Off | **65%** | **1.83 s** | 4.1 s |
+| search on, thinking Auto | 70% | 2.03 s | 4.6 s |
+| search on, thinking Full | **79%** | 1.54 s | 11.4 s |
+
+*Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1, 32k window, A10G, one user, Brave search; gold
+answers from the 2026-04-21 FreshQA sheet.*
+
+Search is worth 30 points, almost all of it on facts that change: slow-changing questions go
+25% to 80%. Thinking is worth 14 more, and nearly all of that comes from questions with a false
+premise, 50% to 85%: reasoning is what notices the question itself is wrong.
+
 ## What is here
 
 ```
@@ -442,6 +495,10 @@ tools/specmon.py      reads speculative-decoding acceptance off vLLM's metrics;
                       reports acceptance BY DRAFT POSITION, not just the scalar
 tools/convo.py        stateful multi-turn conversation driver; measures prefix-cache
                       behaviour, which an open-loop load generator cannot see
+tools/appdrive.py     drives the chat app's own API; joins each turn to the gateway trace
+tools/planeval.py     scores the planner against labelled questions
+tools/plansets.py     builds the planner sets from MTRAG, QReCC, FreshQA and GSM8K
+tools/freshjudge.py   grades FreshQA answers with a separate Qwen3-8B judge
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock
@@ -452,8 +509,9 @@ labbench/             Phase 6a: the instrument surface -- byte-faithful streamin
 labbench/web/         Vite + React source; builds static UI assets into labbench/ui/
 gateway/              Phase 6a: the inference gateway -- prompt assembly, web search,
                       context overflow strategy, thinking budget, request tracing
-app/                  Phase 6b: the chat API -- SQLite branching message tree, SSE
-                      streaming, three-level thinking control, cream/dark themes
+app/                  Phase 6b/6c: the chat API and its LangGraph agent -- planner,
+                      parallel search, cited answer, background summary; SQLite
+                      branching message tree, SSE streaming, cream/dark themes
 app/web/              Vite + React source; builds static UI assets into app/ui/
 infra/                provisioning, cost guardrails, spot interruption handling,
                       one-command session lifecycle, pinned-KV vLLM launcher
@@ -504,7 +562,7 @@ is true forever and would disable the guardrail entirely.
 | 3 | vLLM as an object of study; ablate every flag | done |
 | 4 | Quantization: throughput, capacity, and quality | done |
 | 5 | Speculative decoding | done |
-| 6 | The chat app and web search | 6a measured; 6b built, not yet run on a GPU |
+| 6 | The chat app and web search | done: gateway, app, search agent |
 | 7 | Thinking budget as a scheduling policy | done |
 
 Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth
