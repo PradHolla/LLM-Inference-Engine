@@ -647,9 +647,6 @@ async def _selftest_async() -> list[str]:
             check("plan prompt ends user message then instruction",
                   plan_request["messages"][-2] == {"role": "user", "content": "hello"} and
                   plan_request["messages"][-1]["content"] == prompts.planner_instruction("hello"))
-            check("planner instruction quotes the latest message, capped",
-                  prompts.planner_instruction("hello").endswith('The latest message is: "hello"') and
-                  prompts.planner_instruction("x " * 400).endswith(' ..."'))
             check("schema decodes kind before search",
                   list(agent.PLAN_SCHEMA["properties"])[:2] == ["kind", "search"])
             reaction = agent.parse_plan('{"kind": "reaction", "search": true, '

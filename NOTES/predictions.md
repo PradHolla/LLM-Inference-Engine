@@ -6811,3 +6811,33 @@ the message. Constrained decoding emits properties in schema order, so a field d
 | K3 | Labelled search:true items classed reaction (the risk) | **<= 3 of ~400** | short follow-ups like "and in 2020?" are the exposure |
 | K4 | Planner p50 | **<= 900 ms**, from 759 | ~5 more output tokens at ~20 ms, plus ~40 prompt tokens for the quote |
 | K5 | Fallbacks | **<= 2 / 581** | the extra 16 tokens of room cover the new field |
+
+### P6C-3 actuals, run 1, 2026-09-27: goodbyes fixed, follow-ups broken
+
+Config as the P6C-3 header, commit `29ee59c`. Raw: `results/p6c3-planeval.*`.
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| K1 | conversational searched <= 1/10 | **0/10** | correct |
+| K2 | search agreement >= 90% | **83.6%** (419/501), from 91.0%; MTRAG 86.0% -> 68.5%, regression 11/11 -> 6/11 | **wrong, badly** |
+| K3 | search-labelled items classed reaction <= 3 | **11** | wrong |
+| K4 | planner p50 <= 900 ms | **819 ms** | correct |
+| K5 | fallbacks <= 2 | **0** | correct |
+
+82 search-labelled items lost their search against 41 before. Only 11 were the reaction override;
+**65 were classed "question" and still declined search**, so the instruction moved the search
+decision itself. Cause, by the wording: the kind line said "judge the latest message on its own,
+not the topic of the conversation", and the quote repeated the message in isolation, so short
+follow-ups ("weak understanding metrics", "oh I meant saturn") were judged without their context.
+The risk K3 named was real but the mechanism was the prompt, not the override.
+
+### P6C-3 run 2, written before it: keep kind and the override, drop the isolation
+
+Change: the kind line now says "what the latest message does" and names short follow-ups that
+rely on the conversation as questions; the quote is removed. Schema order and override unchanged.
+
+| # | Prediction | Value |
+|---|---|---|
+| K1b | conversational searched | **<= 2 of 10** |
+| K2b | search agreement | **>= 90%**; regression **>= 10/11** |
+| K4b | planner p50 | **<= 850 ms** |

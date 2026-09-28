@@ -1,0 +1,1205 @@
+  mtrag-35e6be0f20-t6: search=no think=no fallback=no 1079 ms
+  mtrag-6495c82abb-t3: search=yes think=yes fallback=no 1041 ms
+  mtrag-1be6627211-t3: search=no think=yes fallback=no 640 ms
+  mtrag-dd82f0f978-t8: search=yes think=yes fallback=no 1208 ms
+  mtrag-c5518952b7-t4: search=no think=no fallback=no 605 ms
+  mtrag-d2432696b3-t5: search=no think=yes fallback=no 763 ms
+  mtrag-34ac6bedd4-t4: search=no think=no fallback=no 601 ms
+  mtrag-47b2471404-t2: search=yes think=no fallback=no 745 ms
+  mtrag-be461bfeda-t4: search=yes think=yes fallback=no 860 ms
+  mtrag-5b2404d71f-t8: search=yes think=yes fallback=no 1278 ms
+  mtrag-f05ba9633e-t6: search=yes think=yes fallback=no 1319 ms
+  mtrag-1dcbbeb35d-t4: search=yes think=no fallback=no 1008 ms
+  mtrag-d5f0e7023a-t7: search=yes think=yes fallback=no 860 ms
+  mtrag-94d04f2cd4-t5: search=no think=no fallback=no 682 ms
+  mtrag-5600fe1c05-t6: search=no think=yes fallback=no 755 ms
+  mtrag-62a5aee8a4-t7: search=no think=no fallback=no 715 ms
+  mtrag-717ca9138f-t8: search=no think=yes fallback=no 774 ms
+  mtrag-8040ccdfc0-t3: search=no think=yes fallback=no 799 ms
+  mtrag-1534a09527-t5: search=no think=yes fallback=no 599 ms
+  mtrag-c1e53df98a-t1: search=yes think=yes fallback=no 992 ms
+  mtrag-d5b1e735a0-t8: search=no think=yes fallback=no 770 ms
+  mtrag-95a0893567-t5: search=yes think=yes fallback=no 1077 ms
+  mtrag-cfbcfa3e38-t5: search=yes think=yes fallback=no 1100 ms
+  mtrag-ca6f0197d2-t2: search=no think=no fallback=no 774 ms
+  mtrag-a3f07e9ed5-t3: search=yes think=no fallback=no 747 ms
+  mtrag-766728e82e-t3: search=no think=no fallback=no 566 ms
+  mtrag-af57ff6995-t5: search=yes think=yes fallback=no 858 ms
+  mtrag-dc1aaac0b3-t3: search=yes think=yes fallback=no 934 ms
+  mtrag-91715ec6ec-t4: search=yes think=yes fallback=no 1204 ms
+  mtrag-4da5a7f42f-t5: search=no think=yes fallback=no 645 ms
+  mtrag-8a19ee37ca-t4: search=no think=no fallback=no 923 ms
+  mtrag-41a4006bfa-t2: search=yes think=no fallback=no 689 ms
+  mtrag-61374b240d-t7: search=yes think=yes fallback=no 964 ms
+  mtrag-535ebd3063-t6: search=yes think=yes fallback=no 1140 ms
+  mtrag-13a398b300-t5: search=yes think=yes fallback=no 1003 ms
+  mtrag-af5e45e59e-t2: search=yes think=yes fallback=no 776 ms
+  mtrag-d7b4f863ba-t4: search=yes think=no fallback=no 961 ms
+  mtrag-2f94b6fb4c-t4: search=no think=no fallback=no 907 ms
+  mtrag-62888f39e7-t6: search=yes think=yes fallback=no 1068 ms
+  mtrag-0208bf26ec-t5: search=yes think=yes fallback=no 1038 ms
+  mtrag-5815bb4a99-t7: search=no think=yes fallback=no 797 ms
+  mtrag-d44c3196b3-t4: search=yes think=yes fallback=no 925 ms
+  mtrag-2cc753bcef-t8: search=no think=no fallback=no 808 ms
+  mtrag-1c041ce47a-t6: search=yes think=no fallback=no 880 ms
+  mtrag-747a810abf-t7: search=yes think=yes fallback=no 1023 ms
+  mtrag-4751cd8210-t7: search=no think=yes fallback=no 901 ms
+  mtrag-6a738cc02c-t5: search=no think=yes fallback=no 766 ms
+  mtrag-5503c6e98c-t2: search=yes think=yes fallback=no 883 ms
+  mtrag-c6c3b02ca3-t7: search=yes think=yes fallback=no 775 ms
+  mtrag-258193fc88-t7: search=yes think=yes fallback=no 1413 ms
+  mtrag-f0d2873b87-t7: search=yes think=yes fallback=no 1259 ms
+  mtrag-20c2cbd18c-t2: search=yes think=no fallback=no 673 ms
+  mtrag-33431330ab-t8: search=yes think=yes fallback=no 1313 ms
+  mtrag-e9dd465e8d-t1: search=no think=no fallback=no 658 ms
+  mtrag-aea2634b0e-t6: search=yes think=yes fallback=no 1128 ms
+  mtrag-79f0d0539d-t6: search=yes think=yes fallback=no 924 ms
+  mtrag-f1121a39d8-t2: search=yes think=yes fallback=no 741 ms
+  mtrag-927077bd89-t1: search=yes think=yes fallback=no 919 ms
+  mtrag-adf9b1f61c-t4: search=yes think=yes fallback=no 1324 ms
+  mtrag-6af5334fbd-t6: search=no think=no fallback=no 682 ms
+  mtrag-b2805ee4c4-t2: search=yes think=yes fallback=no 1089 ms
+  mtrag-81afaf82a0-t1: search=no think=no fallback=no 701 ms
+  mtrag-dcc0215a11-t3: search=yes think=yes fallback=no 832 ms
+  mtrag-2b34f5e786-t5: search=no think=no fallback=no 644 ms
+  mtrag-04f83f1199-t2: search=yes think=yes fallback=no 953 ms
+  mtrag-4fb9958d3e-t2: search=no think=no fallback=no 600 ms
+  mtrag-0ef145e499-t7: search=no think=no fallback=no 686 ms
+  mtrag-91204c45fc-t3: search=yes think=no fallback=no 750 ms
+  mtrag-fdee20f7fd-t7: search=no think=yes fallback=no 908 ms
+  mtrag-72ba19c385-t3: search=no think=yes fallback=no 712 ms
+  mtrag-251e29286c-t1: search=yes think=no fallback=no 827 ms
+  mtrag-a6eab3f851-t4: search=yes think=yes fallback=no 923 ms
+  mtrag-f0d3086322-t2: search=no think=no fallback=no 553 ms
+  mtrag-5f9ccf0a4f-t1: search=yes think=no fallback=no 961 ms
+  mtrag-f5a8ca2f2b-t5: search=yes think=yes fallback=no 847 ms
+  mtrag-fd99b316e5-t3: search=no think=no fallback=no 692 ms
+  mtrag-2f484ad8f3-t8: search=yes think=yes fallback=no 1162 ms
+  mtrag-ddbbbe7ea1-t2: search=no think=yes fallback=no 545 ms
+  mtrag-3a07680acf-t4: search=yes think=yes fallback=no 1139 ms
+  mtrag-d4d8edb3e0-t2: search=no think=yes fallback=no 720 ms
+  mtrag-29e3ec96a6-t1: search=yes think=no fallback=no 915 ms
+  mtrag-e1b602e47d-t1: search=no think=no fallback=no 525 ms
+  mtrag-e52ab8d5f6-t5: search=yes think=yes fallback=no 798 ms
+  mtrag-a277cf5022-t4: search=yes think=yes fallback=no 1178 ms
+  mtrag-fc3e765d7f-t5: search=yes think=yes fallback=no 1137 ms
+  mtrag-dd6b6ffd17-t3: search=yes think=yes fallback=no 866 ms
+  mtrag-1c0e5e78f1-t4: search=yes think=yes fallback=no 1265 ms
+  mtrag-9c52934a9a-t5: search=no think=no fallback=no 909 ms
+  mtrag-b4614daadc-t4: search=yes think=yes fallback=no 970 ms
+  mtrag-a2698b2973-t3: search=yes think=yes fallback=no 1219 ms
+  mtrag-c01c8cf114-t2: search=yes think=yes fallback=no 736 ms
+  mtrag-674aa142d9-t4: search=yes think=no fallback=no 881 ms
+  mtrag-e0f8a53d3a-t4: search=yes think=yes fallback=no 912 ms
+  mtrag-4c86c8740c-t4: search=yes think=yes fallback=no 791 ms
+  mtrag-5b9edac124-t1: search=yes think=yes fallback=no 980 ms
+  mtrag-3f5fa37823-t2: search=yes think=no fallback=no 728 ms
+  mtrag-4175fcce99-t1: search=yes think=yes fallback=no 1050 ms
+  mtrag-2f01333723-t7: search=yes think=yes fallback=no 913 ms
+  mtrag-694e275f1a-t6: search=yes think=yes fallback=no 1114 ms
+  mtrag-941445ba11-t1: search=no think=no fallback=no 677 ms
+  mtrag-1c74814752-t7: search=yes think=yes fallback=no 1117 ms
+  mtrag-1065ea5ad1-t4: search=no think=yes fallback=no 580 ms
+  mtrag-5e79e46513-t2: search=yes think=yes fallback=no 762 ms
+  mtrag-ccdfb6b6f9-t7: search=yes think=yes fallback=no 1260 ms
+  mtrag-f3a917e029-t5: search=yes think=yes fallback=no 1104 ms
+  mtrag-4a8369b740-t3: search=yes think=yes fallback=no 948 ms
+  mtrag-5c13daa943-t1: search=yes think=no fallback=no 827 ms
+  mtrag-124e27c386-t1: search=yes think=yes fallback=no 885 ms
+  mtrag-6528deeee4-t7: search=yes think=yes fallback=no 1023 ms
+  mtrag-7cb06b3f80-t2: search=no think=yes fallback=no 641 ms
+  mtrag-35e6be0f20-t2: search=yes think=yes fallback=no 973 ms
+  mtrag-6495c82abb-t2: search=yes think=yes fallback=no 943 ms
+  mtrag-1be6627211-t4: search=yes think=yes fallback=no 826 ms
+  mtrag-dd82f0f978-t3: search=yes think=yes fallback=no 889 ms
+  mtrag-c5518952b7-t2: search=yes think=no fallback=no 877 ms
+  mtrag-d2432696b3-t2: search=yes think=yes fallback=no 991 ms
+  mtrag-34ac6bedd4-t6: search=yes think=yes fallback=no 1293 ms
+  mtrag-47b2471404-t8: search=yes think=yes fallback=no 1119 ms
+  mtrag-be461bfeda-t7: search=no think=yes fallback=no 699 ms
+  mtrag-5b2404d71f-t2: search=yes think=yes fallback=no 821 ms
+  mtrag-f05ba9633e-t1: search=yes think=yes fallback=no 999 ms
+  mtrag-1dcbbeb35d-t3: search=no think=no fallback=no 670 ms
+  mtrag-d5f0e7023a-t2: search=yes think=yes fallback=no 1094 ms
+  mtrag-94d04f2cd4-t8: search=no think=yes fallback=no 691 ms
+  mtrag-5600fe1c05-t4: search=no think=no fallback=no 638 ms
+  mtrag-62a5aee8a4-t1: search=yes think=no fallback=no 789 ms
+  mtrag-717ca9138f-t3: search=yes think=no fallback=no 920 ms
+  mtrag-8040ccdfc0-t4: search=yes think=yes fallback=no 1134 ms
+  mtrag-1534a09527-t1: search=yes think=no fallback=no 695 ms
+  mtrag-c1e53df98a-t5: search=yes think=yes fallback=no 1019 ms
+  mtrag-d5b1e735a0-t5: search=yes think=yes fallback=no 777 ms
+  mtrag-95a0893567-t2: search=yes think=no fallback=no 669 ms
+  mtrag-cfbcfa3e38-t2: search=yes think=yes fallback=no 924 ms
+  mtrag-ca6f0197d2-t3: search=yes think=yes fallback=no 1155 ms
+  mtrag-a3f07e9ed5-t4: search=yes think=yes fallback=no 929 ms
+  mtrag-766728e82e-t2: search=yes think=yes fallback=no 974 ms
+  mtrag-af57ff6995-t3: search=yes think=no fallback=no 697 ms
+  mtrag-dc1aaac0b3-t2: search=no think=yes fallback=no 881 ms
+  mtrag-91715ec6ec-t8: search=yes think=yes fallback=no 1167 ms
+  mtrag-4da5a7f42f-t6: search=yes think=yes fallback=no 966 ms
+  mtrag-8a19ee37ca-t2: search=no think=yes fallback=no 517 ms
+  mtrag-41a4006bfa-t1: search=yes think=no fallback=no 676 ms
+  mtrag-61374b240d-t5: search=no think=yes fallback=no 646 ms
+  mtrag-535ebd3063-t3: search=no think=yes fallback=no 697 ms
+  mtrag-13a398b300-t2: search=no think=no fallback=no 648 ms
+  mtrag-af5e45e59e-t4: search=yes think=yes fallback=no 888 ms
+  mtrag-d7b4f863ba-t6: search=yes think=no fallback=no 920 ms
+  mtrag-2f94b6fb4c-t2: search=yes think=yes fallback=no 925 ms
+  mtrag-62888f39e7-t1: search=yes think=yes fallback=no 1030 ms
+  mtrag-0208bf26ec-t3: search=no think=no fallback=no 527 ms
+  mtrag-5815bb4a99-t2: search=yes think=yes fallback=no 935 ms
+  mtrag-d44c3196b3-t1: search=yes think=yes fallback=no 854 ms
+  mtrag-2cc753bcef-t5: search=yes think=yes fallback=no 962 ms
+  mtrag-1c041ce47a-t7: search=no think=yes fallback=no 702 ms
+  mtrag-747a810abf-t1: search=no think=yes fallback=no 705 ms
+  mtrag-4751cd8210-t8: search=no think=no fallback=no 571 ms
+  mtrag-6a738cc02c-t1: search=yes think=yes fallback=no 802 ms
+  mtrag-5503c6e98c-t6: search=yes think=yes fallback=no 934 ms
+  mtrag-c6c3b02ca3-t8: search=yes think=yes fallback=no 751 ms
+  mtrag-258193fc88-t9: search=no think=yes fallback=no 661 ms
+  mtrag-f0d2873b87-t8: search=yes think=yes fallback=no 862 ms
+  mtrag-20c2cbd18c-t1: search=no think=yes fallback=no 694 ms
+  mtrag-33431330ab-t1: search=yes think=no fallback=no 762 ms
+  mtrag-e9dd465e8d-t2: search=no think=yes fallback=no 713 ms
+  mtrag-aea2634b0e-t3: search=no think=no fallback=no 634 ms
+  mtrag-79f0d0539d-t5: search=yes think=yes fallback=no 857 ms
+  mtrag-f1121a39d8-t4: search=no think=yes fallback=no 756 ms
+  mtrag-927077bd89-t5: search=no think=no fallback=no 683 ms
+  mtrag-adf9b1f61c-t7: search=no think=yes fallback=no 724 ms
+  mtrag-6af5334fbd-t3: search=yes think=yes fallback=no 1084 ms
+  mtrag-b2805ee4c4-t4: search=yes think=yes fallback=no 1098 ms
+  mtrag-81afaf82a0-t3: search=no think=yes fallback=no 1175 ms
+  mtrag-dcc0215a11-t4: search=yes think=yes fallback=no 933 ms
+  mtrag-2b34f5e786-t4: search=yes think=yes fallback=no 1052 ms
+  mtrag-04f83f1199-t1: search=yes think=yes fallback=no 922 ms
+  mtrag-4fb9958d3e-t5: search=yes think=yes fallback=no 953 ms
+  mtrag-0ef145e499-t6: search=yes think=yes fallback=no 799 ms
+  mtrag-91204c45fc-t1: search=yes think=no fallback=no 840 ms
+  mtrag-fdee20f7fd-t3: search=no think=yes fallback=no 820 ms
+  mtrag-72ba19c385-t8: search=no think=no fallback=no 684 ms
+  mtrag-251e29286c-t2: search=yes think=yes fallback=no 1051 ms
+  mtrag-a6eab3f851-t2: search=no think=no fallback=no 524 ms
+  mtrag-f0d3086322-t8: search=yes think=yes fallback=no 1096 ms
+  mtrag-5f9ccf0a4f-t4: search=yes think=yes fallback=no 1218 ms
+  mtrag-f5a8ca2f2b-t9: search=yes think=no fallback=no 834 ms
+  mtrag-fd99b316e5-t1: search=yes think=no fallback=no 687 ms
+  mtrag-2f484ad8f3-t4: search=yes think=no fallback=no 719 ms
+  mtrag-ddbbbe7ea1-t4: search=no think=yes fallback=no 604 ms
+  mtrag-3a07680acf-t1: search=yes think=yes fallback=no 828 ms
+  mtrag-d4d8edb3e0-t4: search=yes think=yes fallback=no 904 ms
+  mtrag-29e3ec96a6-t5: search=no think=no fallback=no 796 ms
+  mtrag-e1b602e47d-t7: search=no think=yes fallback=no 827 ms
+  mtrag-e52ab8d5f6-t8: search=no think=no fallback=no 649 ms
+  mtrag-dc1aaac0b3-t5: search=no think=no fallback=no 579 ms
+  mtrag-dc1aaac0b3-t8: search=no think=no fallback=no 722 ms
+  mtrag-a6eab3f851-t3: search=no think=no fallback=no 518 ms
+  mtrag-c01c8cf114-t7: search=no think=no fallback=no 653 ms
+  mtrag-8040ccdfc0-t1: search=no think=no fallback=no 648 ms
+  mtrag-8040ccdfc0-t5: search=no think=no fallback=no 528 ms
+  mtrag-2f01333723-t9: search=no think=no fallback=no 612 ms
+  qrecc-132-t2: search=yes think=no fallback=no 936 ms
+  qrecc-2192-t5: search=yes think=no fallback=no 741 ms
+  qrecc-2523-t4: search=yes think=no fallback=no 809 ms
+  qrecc-239-t3: search=yes think=yes fallback=no 784 ms
+  qrecc-2640-t2: search=yes think=no fallback=no 843 ms
+  qrecc-1199-t7: search=no think=no fallback=no 577 ms
+  qrecc-1627-t6: search=yes think=yes fallback=no 1443 ms
+  qrecc-1618-t6: search=yes think=yes fallback=no 961 ms
+  qrecc-88-t3: search=no think=no fallback=no 917 ms
+  qrecc-2598-t5: search=yes think=yes fallback=no 997 ms
+  qrecc-1170-t3: search=yes think=no fallback=no 804 ms
+  qrecc-211-t5: search=yes think=yes fallback=no 997 ms
+  qrecc-121-t2: search=yes think=no fallback=no 1290 ms
+  qrecc-310-t6: search=yes think=yes fallback=no 1058 ms
+  qrecc-237-t3: search=yes think=yes fallback=no 1120 ms
+  qrecc-1796-t2: search=yes think=no fallback=no 841 ms
+  qrecc-365-t4: search=yes think=no fallback=no 747 ms
+  qrecc-2012-t4: search=yes think=no fallback=no 922 ms
+  qrecc-1783-t8: search=yes think=yes fallback=no 1055 ms
+  qrecc-1620-t6: search=yes think=no fallback=no 811 ms
+  qrecc-479-t2: search=yes think=no fallback=no 722 ms
+  qrecc-1924-t3: search=yes think=yes fallback=no 944 ms
+  qrecc-2269-t2: search=yes think=no fallback=no 739 ms
+  qrecc-303-t7: search=yes think=yes fallback=no 1235 ms
+  qrecc-1181-t5: search=yes think=no fallback=no 887 ms
+  qrecc-1001-t3: search=yes think=yes fallback=no 702 ms
+  qrecc-186-t4: search=yes think=yes fallback=no 901 ms
+  qrecc-284-t2: search=yes think=no fallback=no 664 ms
+  qrecc-513-t2: search=yes think=yes fallback=no 993 ms
+  qrecc-1949-t5: search=yes think=yes fallback=no 823 ms
+  qrecc-24-t7: search=yes think=yes fallback=no 1041 ms
+  qrecc-1923-t3: search=yes think=no fallback=no 995 ms
+  qrecc-2344-t4: search=yes think=no fallback=no 1044 ms
+  qrecc-2008-t4: search=yes think=no fallback=no 907 ms
+  qrecc-884-t8: search=yes think=yes fallback=no 1474 ms
+  qrecc-2201-t3: search=yes think=no fallback=no 1166 ms
+  qrecc-26-t6: search=no think=yes fallback=no 716 ms
+  qrecc-2247-t2: search=no think=no fallback=no 700 ms
+  qrecc-159-t7: search=no think=no fallback=no 774 ms
+  qrecc-1437-t3: search=no think=yes fallback=no 554 ms
+  qrecc-836-t4: search=yes think=yes fallback=no 1210 ms
+  qrecc-337-t2: search=yes think=yes fallback=no 1000 ms
+  qrecc-1063-t3: search=yes think=yes fallback=no 896 ms
+  qrecc-2675-t3: search=no think=no fallback=no 672 ms
+  qrecc-2229-t3: search=yes think=yes fallback=no 860 ms
+  qrecc-641-t5: search=yes think=yes fallback=no 1053 ms
+  qrecc-1362-t2: search=no think=yes fallback=no 557 ms
+  qrecc-1258-t4: search=yes think=yes fallback=no 1105 ms
+  qrecc-79-t6: search=yes think=yes fallback=no 1036 ms
+  qrecc-1906-t5: search=yes think=no fallback=no 863 ms
+  qrecc-1611-t5: search=yes think=yes fallback=no 919 ms
+  qrecc-2349-t2: search=yes think=yes fallback=no 784 ms
+  qrecc-2572-t3: search=yes think=yes fallback=no 1161 ms
+  qrecc-924-t4: search=yes think=yes fallback=no 866 ms
+  qrecc-932-t3: search=yes think=yes fallback=no 1181 ms
+  qrecc-100-t5: search=yes think=yes fallback=no 1054 ms
+  qrecc-380-t4: search=yes think=yes fallback=no 1306 ms
+  qrecc-449-t4: search=yes think=yes fallback=no 1036 ms
+  qrecc-1422-t9: search=yes think=no fallback=no 655 ms
+  qrecc-1609-t5: search=yes think=yes fallback=no 924 ms
+  qrecc-457-t4: search=yes think=yes fallback=no 980 ms
+  qrecc-1150-t2: search=yes think=yes fallback=no 928 ms
+  qrecc-975-t6: search=yes think=yes fallback=no 1133 ms
+  qrecc-763-t7: search=yes think=yes fallback=no 1245 ms
+  qrecc-1914-t4: search=yes think=yes fallback=no 1153 ms
+  qrecc-651-t4: search=yes think=yes fallback=no 1078 ms
+  qrecc-1613-t5: search=no think=no fallback=no 579 ms
+  qrecc-579-t3: search=yes think=no fallback=no 758 ms
+  qrecc-257-t7: search=yes think=yes fallback=no 1107 ms
+  qrecc-1303-t6: search=yes think=yes fallback=no 1132 ms
+  qrecc-2080-t3: search=yes think=yes fallback=no 1017 ms
+  qrecc-1687-t5: search=yes think=yes fallback=no 844 ms
+  qrecc-522-t2: search=yes think=no fallback=no 1004 ms
+  qrecc-1392-t8: search=yes think=no fallback=no 1056 ms
+  qrecc-897-t2: search=yes think=no fallback=no 847 ms
+  qrecc-883-t3: search=yes think=no fallback=no 930 ms
+  qrecc-1435-t4: search=yes think=yes fallback=no 868 ms
+  qrecc-779-t3: search=yes think=yes fallback=no 1050 ms
+  qrecc-775-t7: search=yes think=yes fallback=no 1056 ms
+  qrecc-761-t6: search=yes think=yes fallback=no 961 ms
+  qrecc-415-t7: search=yes think=yes fallback=no 1465 ms
+  qrecc-1532-t5: search=yes think=yes fallback=no 978 ms
+  qrecc-722-t2: search=yes think=no fallback=no 795 ms
+  qrecc-2592-t2: search=no think=no fallback=no 671 ms
+  qrecc-650-t5: search=yes think=yes fallback=no 1087 ms
+  qrecc-724-t12: search=yes think=yes fallback=no 1068 ms
+  qrecc-2257-t5: search=yes think=yes fallback=no 946 ms
+  qrecc-874-t2: search=yes think=yes fallback=no 873 ms
+  qrecc-827-t2: search=yes think=yes fallback=no 938 ms
+  qrecc-264-t6: search=yes think=yes fallback=no 933 ms
+  qrecc-145-t3: search=yes think=yes fallback=no 905 ms
+  qrecc-1474-t4: search=yes think=yes fallback=no 994 ms
+  qrecc-2487-t4: search=yes think=yes fallback=no 887 ms
+  qrecc-523-t4: search=yes think=yes fallback=no 991 ms
+  qrecc-1922-t3: search=yes think=no fallback=no 716 ms
+  qrecc-2767-t5: search=yes think=yes fallback=no 1340 ms
+  qrecc-413-t9: search=yes think=no fallback=no 755 ms
+  qrecc-698-t3: search=yes think=yes fallback=no 1126 ms
+  qrecc-1173-t3: search=yes think=yes fallback=no 982 ms
+  qrecc-1124-t3: search=yes think=no fallback=no 987 ms
+  qrecc-1673-t7: search=yes think=yes fallback=no 1080 ms
+  qrecc-313-t6: search=yes think=yes fallback=no 1113 ms
+  qrecc-1626-t3: search=yes think=no fallback=no 849 ms
+  qrecc-668-t4: search=yes think=no fallback=no 898 ms
+  qrecc-87-t5: search=yes think=yes fallback=no 1464 ms
+  qrecc-285-t2: search=yes think=yes fallback=no 823 ms
+  qrecc-162-t11: search=no think=no fallback=no 637 ms
+  qrecc-2748-t4: search=yes think=yes fallback=no 904 ms
+  qrecc-1240-t8: search=yes think=yes fallback=no 1162 ms
+  qrecc-2074-t4: search=yes think=no fallback=no 678 ms
+  qrecc-941-t6: search=yes think=yes fallback=no 1127 ms
+  qrecc-1550-t5: search=yes think=yes fallback=no 1608 ms
+  qrecc-985-t2: search=yes think=no fallback=no 974 ms
+  qrecc-943-t2: search=yes think=no fallback=no 936 ms
+  qrecc-949-t5: search=yes think=yes fallback=no 811 ms
+  qrecc-616-t2: search=yes think=no fallback=no 853 ms
+  qrecc-1847-t6: search=yes think=no fallback=no 925 ms
+  qrecc-1154-t6: search=yes think=yes fallback=no 1009 ms
+  qrecc-1789-t4: search=yes think=yes fallback=no 1056 ms
+  qrecc-1127-t2: search=yes think=yes fallback=no 919 ms
+  qrecc-206-t5: search=yes think=no fallback=no 1203 ms
+  qrecc-1152-t3: search=yes think=yes fallback=no 851 ms
+  qrecc-915-t4: search=yes think=no fallback=no 960 ms
+  qrecc-1188-t3: search=yes think=yes fallback=no 1379 ms
+  qrecc-2548-t4: search=yes think=yes fallback=no 1020 ms
+  qrecc-854-t2: search=yes think=yes fallback=no 936 ms
+  qrecc-1730-t4: search=yes think=yes fallback=no 1012 ms
+  qrecc-42-t6: search=yes think=yes fallback=no 1044 ms
+  qrecc-694-t7: search=yes think=yes fallback=no 1113 ms
+  qrecc-1791-t3: search=no think=yes fallback=no 561 ms
+  qrecc-945-t2: search=yes think=yes fallback=no 832 ms
+  qrecc-2489-t2: search=yes think=no fallback=no 1095 ms
+  qrecc-21-t4: search=yes think=yes fallback=no 1095 ms
+  qrecc-1761-t3: search=yes think=yes fallback=no 945 ms
+  qrecc-1894-t2: search=yes think=yes fallback=no 1043 ms
+  qrecc-1638-t5: search=yes think=yes fallback=no 829 ms
+  qrecc-956-t7: search=yes think=yes fallback=no 1131 ms
+  qrecc-29-t3: search=no think=no fallback=no 656 ms
+  qrecc-2502-t5: search=yes think=yes fallback=no 817 ms
+  qrecc-470-t6: search=yes think=yes fallback=no 1263 ms
+  qrecc-2236-t5: search=yes think=no fallback=no 911 ms
+  qrecc-2143-t3: search=yes think=yes fallback=no 1104 ms
+  qrecc-1556-t3: search=yes think=no fallback=no 823 ms
+  qrecc-1222-t6: search=yes think=yes fallback=no 1089 ms
+  qrecc-1033-t7: search=yes think=no fallback=no 979 ms
+  qrecc-753-t6: search=yes think=yes fallback=no 1296 ms
+  qrecc-1242-t2: search=yes think=no fallback=no 899 ms
+  qrecc-327-t4: search=yes think=yes fallback=no 1010 ms
+  qrecc-2580-t3: search=no think=no fallback=no 545 ms
+  qrecc-448-t4: search=yes think=yes fallback=no 1095 ms
+  freshqa-250: search=no think=no fallback=no 619 ms
+  freshqa-254: search=yes think=no fallback=no 630 ms
+  freshqa-257: search=yes think=no fallback=no 714 ms
+  freshqa-262: search=no think=no fallback=no 725 ms
+  freshqa-263: search=yes think=no fallback=no 787 ms
+  freshqa-272: search=yes think=no fallback=no 610 ms
+  freshqa-277: search=yes think=no fallback=no 695 ms
+  freshqa-278: search=yes think=no fallback=no 611 ms
+  freshqa-281: search=yes think=no fallback=no 873 ms
+  freshqa-283: search=yes think=no fallback=no 726 ms
+  freshqa-284: search=no think=no fallback=no 677 ms
+  freshqa-287: search=yes think=no fallback=no 650 ms
+  freshqa-290: search=yes think=no fallback=no 752 ms
+  freshqa-294: search=yes think=no fallback=no 897 ms
+  freshqa-296: search=yes think=no fallback=no 637 ms
+  freshqa-298: search=yes think=no fallback=no 650 ms
+  freshqa-300: search=yes think=no fallback=no 676 ms
+  freshqa-305: search=yes think=no fallback=no 751 ms
+  freshqa-306: search=yes think=no fallback=no 772 ms
+  freshqa-307: search=yes think=no fallback=no 669 ms
+  freshqa-309: search=yes think=no fallback=no 658 ms
+  freshqa-310: search=yes think=no fallback=no 1029 ms
+  freshqa-313: search=yes think=no fallback=no 828 ms
+  freshqa-316: search=yes think=no fallback=no 631 ms
+  freshqa-319: search=yes think=no fallback=no 810 ms
+  freshqa-322: search=yes think=no fallback=no 688 ms
+  freshqa-324: search=yes think=no fallback=no 722 ms
+  freshqa-332: search=yes think=no fallback=no 631 ms
+  freshqa-335: search=yes think=no fallback=no 715 ms
+  freshqa-338: search=yes think=yes fallback=no 935 ms
+  freshqa-339: search=yes think=no fallback=no 710 ms
+  freshqa-341: search=yes think=yes fallback=no 892 ms
+  freshqa-342: search=yes think=yes fallback=no 803 ms
+  freshqa-345: search=yes think=no fallback=no 804 ms
+  freshqa-347: search=yes think=no fallback=no 734 ms
+  freshqa-351: search=yes think=no fallback=no 732 ms
+  freshqa-353: search=yes think=yes fallback=no 906 ms
+  freshqa-355: search=yes think=no fallback=no 955 ms
+  freshqa-358: search=yes think=no fallback=no 1278 ms
+  freshqa-366: search=yes think=no fallback=no 770 ms
+  freshqa-124: search=yes think=no fallback=no 898 ms
+  freshqa-125: search=yes think=no fallback=no 828 ms
+  freshqa-131: search=yes think=no fallback=no 669 ms
+  freshqa-132: search=yes think=no fallback=no 790 ms
+  freshqa-134: search=yes think=no fallback=no 790 ms
+  freshqa-135: search=yes think=no fallback=no 791 ms
+  freshqa-142: search=yes think=no fallback=no 688 ms
+  freshqa-148: search=yes think=no fallback=no 715 ms
+  freshqa-150: search=yes think=no fallback=no 743 ms
+  freshqa-152: search=yes think=no fallback=no 638 ms
+  freshqa-154: search=yes think=no fallback=no 785 ms
+  freshqa-155: search=yes think=no fallback=no 752 ms
+  freshqa-157: search=yes think=no fallback=no 745 ms
+  freshqa-164: search=yes think=no fallback=no 721 ms
+  freshqa-165: search=yes think=no fallback=no 688 ms
+  freshqa-166: search=yes think=no fallback=no 790 ms
+  freshqa-175: search=yes think=yes fallback=no 935 ms
+  freshqa-180: search=yes think=no fallback=no 752 ms
+  freshqa-181: search=yes think=no fallback=no 892 ms
+  freshqa-185: search=yes think=no fallback=no 809 ms
+  freshqa-187: search=yes think=no fallback=no 705 ms
+  freshqa-190: search=yes think=no fallback=no 810 ms
+  freshqa-193: search=yes think=no fallback=no 919 ms
+  freshqa-194: search=yes think=no fallback=no 791 ms
+  freshqa-196: search=yes think=no fallback=no 818 ms
+  freshqa-202: search=yes think=no fallback=no 639 ms
+  freshqa-204: search=yes think=no fallback=no 819 ms
+  freshqa-205: search=yes think=no fallback=no 789 ms
+  freshqa-209: search=yes think=no fallback=no 783 ms
+  freshqa-214: search=yes think=no fallback=no 829 ms
+  freshqa-216: search=yes think=yes fallback=no 744 ms
+  freshqa-217: search=yes think=no fallback=no 874 ms
+  freshqa-224: search=yes think=yes fallback=no 973 ms
+  freshqa-226: search=yes think=yes fallback=no 942 ms
+  freshqa-227: search=yes think=yes fallback=no 814 ms
+  freshqa-229: search=yes think=no fallback=no 810 ms
+  freshqa-234: search=yes think=no fallback=no 873 ms
+  freshqa-239: search=yes think=yes fallback=no 809 ms
+  freshqa-240: search=yes think=no fallback=no 725 ms
+  freshqa-243: search=yes think=yes fallback=no 1052 ms
+  freshqa-374: search=yes think=no fallback=no 740 ms
+  freshqa-378: search=yes think=yes fallback=no 1178 ms
+  freshqa-381: search=yes think=no fallback=no 1057 ms
+  freshqa-385: search=yes think=no fallback=no 923 ms
+  freshqa-386: search=yes think=no fallback=no 744 ms
+  freshqa-393: search=yes think=no fallback=no 791 ms
+  freshqa-394: search=yes think=no fallback=no 726 ms
+  freshqa-396: search=yes think=no fallback=no 714 ms
+  freshqa-397: search=yes think=no fallback=no 783 ms
+  freshqa-400: search=yes think=no fallback=no 812 ms
+  freshqa-403: search=yes think=no fallback=no 726 ms
+  freshqa-406: search=yes think=yes fallback=no 790 ms
+  freshqa-407: search=yes think=no fallback=no 895 ms
+  freshqa-408: search=yes think=no fallback=no 694 ms
+  freshqa-410: search=yes think=no fallback=no 783 ms
+  freshqa-412: search=yes think=no fallback=no 790 ms
+  freshqa-419: search=yes think=no fallback=no 759 ms
+  freshqa-426: search=yes think=no fallback=no 1151 ms
+  freshqa-430: search=yes think=no fallback=no 807 ms
+  freshqa-439: search=yes think=no fallback=no 837 ms
+  freshqa-440: search=yes think=no fallback=no 790 ms
+  freshqa-443: search=yes think=no fallback=no 611 ms
+  freshqa-445: search=yes think=no fallback=no 713 ms
+  freshqa-446: search=yes think=no fallback=no 930 ms
+  freshqa-447: search=yes think=no fallback=no 1265 ms
+  freshqa-448: search=yes think=no fallback=no 734 ms
+  freshqa-451: search=yes think=no fallback=no 764 ms
+  freshqa-454: search=yes think=no fallback=no 752 ms
+  freshqa-456: search=yes think=no fallback=no 797 ms
+  freshqa-460: search=yes think=yes fallback=no 957 ms
+  freshqa-471: search=yes think=yes fallback=no 1144 ms
+  freshqa-472: search=yes think=yes fallback=no 786 ms
+  freshqa-474: search=yes think=no fallback=no 801 ms
+  freshqa-479: search=yes think=no fallback=no 645 ms
+  freshqa-485: search=yes think=no fallback=no 878 ms
+  freshqa-488: search=yes think=no fallback=no 843 ms
+  freshqa-491: search=yes think=no fallback=no 893 ms
+  freshqa-494: search=yes think=no fallback=no 1018 ms
+  freshqa-495: search=yes think=yes fallback=no 824 ms
+  freshqa-498: search=yes think=yes fallback=no 954 ms
+  freshqa-4: search=no think=yes fallback=no 714 ms
+  freshqa-10: search=yes think=no fallback=no 668 ms
+  freshqa-14: search=yes think=no fallback=no 740 ms
+  freshqa-19: search=yes think=no fallback=no 802 ms
+  freshqa-24: search=yes think=no fallback=no 638 ms
+  freshqa-27: search=yes think=no fallback=no 802 ms
+  freshqa-30: search=yes think=no fallback=no 695 ms
+  freshqa-35: search=yes think=no fallback=no 726 ms
+  freshqa-41: search=yes think=no fallback=no 752 ms
+  freshqa-42: search=yes think=no fallback=no 745 ms
+  freshqa-45: search=yes think=no fallback=no 677 ms
+  freshqa-50: search=yes think=no fallback=no 1284 ms
+  freshqa-53: search=yes think=no fallback=no 772 ms
+  freshqa-57: search=yes think=yes fallback=no 821 ms
+  freshqa-62: search=yes think=no fallback=no 810 ms
+  freshqa-63: search=no think=no fallback=no 517 ms
+  freshqa-66: search=yes think=yes fallback=no 980 ms
+  freshqa-67: search=yes think=no fallback=no 631 ms
+  freshqa-69: search=no think=no fallback=no 619 ms
+  freshqa-74: search=yes think=no fallback=no 688 ms
+  freshqa-75: search=yes think=no fallback=no 740 ms
+  freshqa-78: search=yes think=no fallback=no 878 ms
+  freshqa-80: search=yes think=no fallback=no 714 ms
+  freshqa-82: search=yes think=yes fallback=no 797 ms
+  freshqa-84: search=yes think=no fallback=no 863 ms
+  freshqa-86: search=yes think=no fallback=no 969 ms
+  freshqa-87: search=yes think=no fallback=no 916 ms
+  freshqa-89: search=yes think=yes fallback=no 798 ms
+  freshqa-90: search=yes think=no fallback=no 961 ms
+  freshqa-102: search=yes think=no fallback=no 766 ms
+  freshqa-103: search=yes think=no fallback=no 752 ms
+  freshqa-106: search=yes think=no fallback=no 783 ms
+  freshqa-107: search=yes think=no fallback=no 786 ms
+  freshqa-108: search=yes think=no fallback=no 687 ms
+  freshqa-112: search=yes think=no fallback=no 843 ms
+  freshqa-114: search=yes think=no fallback=no 1100 ms
+  freshqa-116: search=yes think=no fallback=no 810 ms
+  freshqa-118: search=yes think=no fallback=no 947 ms
+  freshqa-119: search=yes think=yes fallback=no 873 ms
+  freshqa-121: search=yes think=yes fallback=no 836 ms
+  gsm8k-nosearch-2: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-28: search=no think=yes fallback=no 539 ms
+  gsm8k-nosearch-82: search=no think=yes fallback=no 556 ms
+  gsm8k-nosearch-127: search=no think=yes fallback=no 549 ms
+  gsm8k-nosearch-128: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-151: search=no think=yes fallback=no 555 ms
+  gsm8k-nosearch-186: search=no think=yes fallback=no 578 ms
+  gsm8k-nosearch-191: search=no think=yes fallback=no 1278 ms
+  gsm8k-nosearch-194: search=no think=yes fallback=no 558 ms
+  gsm8k-nosearch-202: search=no think=yes fallback=no 538 ms
+  gsm8k-nosearch-206: search=no think=yes fallback=no 564 ms
+  gsm8k-nosearch-285: search=no think=yes fallback=no 548 ms
+  gsm8k-nosearch-286: search=no think=yes fallback=no 556 ms
+  gsm8k-nosearch-291: search=no think=yes fallback=no 537 ms
+  gsm8k-nosearch-300: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-391: search=no think=yes fallback=no 550 ms
+  gsm8k-nosearch-418: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-447: search=no think=yes fallback=no 537 ms
+  gsm8k-nosearch-454: search=no think=yes fallback=no 556 ms
+  gsm8k-nosearch-488: search=no think=yes fallback=no 550 ms
+  gsm8k-nosearch-499: search=no think=yes fallback=no 578 ms
+  gsm8k-nosearch-513: search=no think=yes fallback=no 549 ms
+  gsm8k-nosearch-530: search=no think=yes fallback=no 562 ms
+  gsm8k-nosearch-533: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-577: search=no think=yes fallback=no 578 ms
+  gsm8k-nosearch-621: search=no think=yes fallback=no 543 ms
+  gsm8k-nosearch-635: search=no think=yes fallback=no 562 ms
+  gsm8k-nosearch-647: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-666: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-676: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-682: search=no think=yes fallback=no 564 ms
+  gsm8k-nosearch-724: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-733: search=no think=yes fallback=no 557 ms
+  gsm8k-nosearch-788: search=no think=yes fallback=no 537 ms
+  gsm8k-nosearch-816: search=no think=yes fallback=no 564 ms
+  gsm8k-nosearch-829: search=no think=yes fallback=no 557 ms
+  gsm8k-nosearch-861: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-889: search=no think=yes fallback=no 537 ms
+  gsm8k-nosearch-906: search=no think=yes fallback=no 544 ms
+  gsm8k-nosearch-917: search=no think=yes fallback=no 549 ms
+  gsm8k-nosearch-966: search=no think=yes fallback=no 578 ms
+  gsm8k-nosearch-976: search=no think=yes fallback=no 554 ms
+  gsm8k-nosearch-995: search=no think=yes fallback=no 557 ms
+  gsm8k-nosearch-1010: search=no think=yes fallback=no 561 ms
+  gsm8k-nosearch-1033: search=no think=yes fallback=no 562 ms
+  gsm8k-nosearch-1047: search=no think=yes fallback=no 556 ms
+  gsm8k-nosearch-1067: search=no think=yes fallback=no 562 ms
+  gsm8k-nosearch-1090: search=no think=yes fallback=no 555 ms
+  gsm8k-nosearch-1112: search=no think=yes fallback=no 557 ms
+  gsm8k-nosearch-1123: search=no think=yes fallback=no 553 ms
+  gsm8k-nosearch-1131: search=no think=yes fallback=no 562 ms
+  gsm8k-nosearch-1146: search=no think=yes fallback=no 1237 ms
+  gsm8k-nosearch-1162: search=no think=yes fallback=no 563 ms
+  gsm8k-nosearch-1194: search=no think=yes fallback=no 538 ms
+  gsm8k-nosearch-1232: search=no think=yes fallback=no 547 ms
+  gsm8k-nosearch-1251: search=no think=yes fallback=no 556 ms
+  gsm8k-nosearch-1253: search=no think=yes fallback=no 557 ms
+  gsm8k-nosearch-1266: search=no think=yes fallback=no 537 ms
+  gsm8k-nosearch-1280: search=no think=yes fallback=no 558 ms
+  gsm8k-nosearch-1311: search=no think=yes fallback=no 554 ms
+  regression-chat53-t1: search=yes think=no fallback=no 827 ms
+  regression-chat53-t2: search=yes think=yes fallback=no 1177 ms
+  regression-chat53-t3: search=yes think=yes fallback=no 1153 ms
+  regression-chat53-t4: search=yes think=yes fallback=no 1249 ms
+  regression-chat53-t5: search=no think=yes fallback=no 814 ms
+  regression-chat53-t6: search=no think=no fallback=no 990 ms
+  regression-chat53-t7: search=no think=yes fallback=no 931 ms
+  regression-chat53-t8: search=yes think=yes fallback=no 1417 ms
+  regression-qwe-t1: search=yes think=no fallback=no 885 ms
+  regression-qwe-t2: search=no think=yes fallback=no 641 ms
+  regression-qwe-t3: search=no think=yes fallback=no 974 ms
+config: Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off
+items 581; fallbacks 0 (scored as the pipeline acts: search on the user text, think on)
+search rate (planner chose)    423/581 (72.8%)
+search decision agreement      419/501 (83.6%)  (null search labels skipped)
+think decision agreement       0/0 (-)  (null think labels skipped)
+follow-up query entity hits    145/259 (56.0%)  (history non-empty, labelled search, must_contain non-empty)
+all labelled entity hits       146/260 (56.2%)
+planner latency ms             p50 819, p95 1219, max 1608
+
+| source | n | search rate | search agree | think agree | query hit | fallbacks | ms p50 | ms p95 |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|
+| freshqa | 160 | 154/160 (96.2%) | 80/80 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 786 | 1052 |
+| gsm8k | 60 | 0/60 (0.0%) | 60/60 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 556 | 578 |
+| mtrag | 200 | 127/200 (63.5%) | 137/200 (68.5%) | 0/0 (-) | 36/103 (35.0%) | 0 | 854 | 1218 |
+| qrecc | 150 | 136/150 (90.7%) | 136/150 (90.7%) | 0/0 (-) | 105/147 (71.4%) | 0 | 946 | 1306 |
+| regression | 11 | 6/11 (54.5%) | 6/11 (54.5%) | 0/0 (-) | 5/10 (50.0%) | 0 | 974 | n<20 |
+
+| category | n | search rate | search agree | think agree | query hit | fallbacks | ms p50 | ms p95 |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|
+| answerable | 24 | 18/24 (75.0%) | 18/24 (75.0%) | 0/0 (-) | 0/0 (-) | 0 | 802 | 992 |
+| answerable/clarification | 25 | 13/25 (52.0%) | 13/25 (52.0%) | 0/0 (-) | 3/19 (15.8%) | 0 | 762 | 1104 |
+| answerable/follow-up | 113 | 75/113 (66.4%) | 75/113 (66.4%) | 0/0 (-) | 28/73 (38.4%) | 0 | 908 | 1260 |
+| chat53 | 8 | 5/8 (62.5%) | 5/8 (62.5%) | 0/0 (-) | 4/7 (57.1%) | 0 | 990 | n<20 |
+| conversational | 1 | 0/1 (0.0%) | 1/1 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 648 | n<20 |
+| conversational/follow-up | 9 | 0/9 (0.0%) | 9/9 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 644 | n<20 |
+| false-premise | 40 | 37/40 (92.5%) | 0/0 (-) | 0/0 (-) | 0/0 (-) | 0 | 783 | 980 |
+| fast-changing | 40 | 40/40 (100.0%) | 40/40 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 791 | 1151 |
+| maths | 60 | 0/60 (0.0%) | 60/60 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 556 | 578 |
+| never-changing | 40 | 37/40 (92.5%) | 0/0 (-) | 0/0 (-) | 0/0 (-) | 0 | 725 | 955 |
+| nq | 33 | 29/33 (87.9%) | 29/33 (87.9%) | 0/0 (-) | 27/33 (81.8%) | 0 | 904 | 1166 |
+| partial | 2 | 2/2 (100.0%) | 2/2 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 828 | n<20 |
+| partial/clarification | 3 | 2/3 (66.7%) | 2/3 (66.7%) | 0/0 (-) | 2/2 (100.0%) | 0 | 777 | n<20 |
+| partial/follow-up | 12 | 10/12 (83.3%) | 10/12 (83.3%) | 0/0 (-) | 3/9 (33.3%) | 0 | 799 | n<20 |
+| quac | 111 | 103/111 (92.8%) | 103/111 (92.8%) | 0/0 (-) | 76/109 (69.7%) | 0 | 978 | 1379 |
+| qwe | 3 | 1/3 (33.3%) | 1/3 (33.3%) | 0/0 (-) | 1/3 (33.3%) | 0 | 885 | n<20 |
+| slow-changing | 40 | 40/40 (100.0%) | 40/40 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 790 | 942 |
+| trec | 6 | 4/6 (66.7%) | 4/6 (66.7%) | 0/0 (-) | 2/5 (40.0%) | 0 | 1036 | n<20 |
+| unanswerable | 1 | 1/1 (100.0%) | 1/1 (100.0%) | 0/0 (-) | 0/0 (-) | 0 | 1030 | n<20 |
+| unanswerable/clarification | 3 | 1/3 (33.3%) | 1/3 (33.3%) | 0/0 (-) | 0/0 (-) | 0 | 604 | n<20 |
+| unanswerable/follow-up | 7 | 5/7 (71.4%) | 5/7 (71.4%) | 0/0 (-) | 0/0 (-) | 0 | 1096 | n<20 |
+
+| id | turns | label search | got search | label think | got think | fallback | ms | entities | queries |  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, planner via gateway, thinking off]
+|---|---|---|---|---|---|---|---|---|---|
+| mtrag-35e6be0f20-t6 | 10 | no | no | - | no | no | 1079 | - |  |
+| mtrag-6495c82abb-t3 | 4 | yes | yes | - | yes | no | 1041 | yes | dangers of rising sea levels; impacts of sea level rise |
+| mtrag-1be6627211-t3 | 4 | yes | no | - | yes | no | 640 | no |  |
+| mtrag-dd82f0f978-t8 | 14 | yes | yes | - | yes | no | 1208 | - | popularity of basketball in america; basketball as a popular sport in the united states |
+| mtrag-c5518952b7-t4 | 6 | yes | no | - | no | no | 605 | no |  |
+| mtrag-d2432696b3-t5 | 8 | yes | no | - | yes | no | 763 | - |  |
+| mtrag-34ac6bedd4-t4 | 6 | yes | no | - | no | no | 601 | no |  |
+| mtrag-47b2471404-t2 | 2 | yes | yes | - | no | no | 745 | yes | What is the Lite pricing plan in IBM Cloud |
+| mtrag-be461bfeda-t4 | 6 | yes | yes | - | yes | no | 860 | - | parts of a tag in software versioning |
+| mtrag-5b2404d71f-t8 | 14 | yes | yes | - | yes | no | 1278 | no | Is climate change the cause of natural disasters?; How does climate change affect natural disasters? |
+| mtrag-f05ba9633e-t6 | 10 | yes | yes | - | yes | no | 1319 | no | advantages and disadvantages of buying vs renting a home 2026; economic factors influencing home buying versus renting in 2026 |
+| mtrag-1dcbbeb35d-t4 | 6 | yes | yes | - | no | no | 1008 | - | What is a strong password?; Criteria for a strong password |
+| mtrag-d5f0e7023a-t7 | 12 | yes | yes | - | yes | no | 860 | no | largest river in North America |
+| mtrag-94d04f2cd4-t5 | 8 | yes | no | - | no | no | 682 | no |  |
+| mtrag-5600fe1c05-t6 | 10 | yes | no | - | yes | no | 755 | no |  |
+| mtrag-62a5aee8a4-t7 | 12 | yes | no | - | no | no | 715 | no |  |
+| mtrag-717ca9138f-t8 | 14 | yes | no | - | yes | no | 774 | - |  |
+| mtrag-8040ccdfc0-t3 | 4 | yes | no | - | yes | no | 799 | no |  |
+| mtrag-1534a09527-t5 | 8 | yes | no | - | yes | no | 599 | - |  |
+| mtrag-c1e53df98a-t1 | 0 | yes | yes | - | yes | no | 992 | - | Robert Louis Stevenson A Child's Garden of Verses summary; Robert Louis Stevenson A Child's Garden of Verses analysis |
+| mtrag-d5b1e735a0-t8 | 14 | yes | no | - | yes | no | 770 | - |  |
+| mtrag-95a0893567-t5 | 8 | yes | yes | - | yes | no | 1077 | - | What did Meng Tian do?; Meng Tian's contributions |
+| mtrag-cfbcfa3e38-t5 | 8 | yes | yes | - | yes | no | 1100 | - | why is guinea pig called pig; origin of the name guinea pig |
+| mtrag-ca6f0197d2-t2 | 2 | yes | no | - | no | no | 774 | - |  |
+| mtrag-a3f07e9ed5-t3 | 4 | yes | yes | - | no | no | 747 | yes | release date of grenade by bruno mars |
+| mtrag-766728e82e-t3 | 4 | yes | no | - | no | no | 566 | no |  |
+| mtrag-af57ff6995-t5 | 8 | yes | yes | - | yes | no | 858 | yes | advantages of women owned companies; benefits for women owned businesses |
+| mtrag-dc1aaac0b3-t3 | 4 | yes | yes | - | yes | no | 934 | yes | IRA account for day trading; tax implications of day trading in IRA |
+| mtrag-91715ec6ec-t4 | 6 | yes | yes | - | yes | no | 1204 | - | Can New York boating safety certificate be used in other states?; NY boating safety certificate validity in other states |
+| mtrag-4da5a7f42f-t5 | 8 | yes | no | - | yes | no | 645 | no |  |
+| mtrag-8a19ee37ca-t4 | 6 | yes | no | - | no | no | 923 | - |  |
+| mtrag-41a4006bfa-t2 | 2 | yes | yes | - | no | no | 689 | no | official reunification of Germany date |
+| mtrag-61374b240d-t7 | 12 | yes | yes | - | yes | no | 964 | - | taxation of retirement income in the United States |
+| mtrag-535ebd3063-t6 | 10 | yes | yes | - | yes | no | 1140 | - | EV used car market trends 2026; used electric vehicle market growth |
+| mtrag-13a398b300-t5 | 8 | yes | yes | - | yes | no | 1003 | no | Appalachian Mountains location; Appalachian Mountains characteristics |
+| mtrag-af5e45e59e-t2 | 2 | yes | yes | - | yes | no | 776 | no | Do US-based companies need to comply with SEC regulations? |
+| mtrag-d7b4f863ba-t4 | 6 | yes | yes | - | no | no | 961 | yes | distance from Earth to Sun; average distance to the Sun |
+| mtrag-2f94b6fb4c-t4 | 6 | yes | no | - | no | no | 907 | - |  |
+| mtrag-62888f39e7-t6 | 10 | yes | yes | - | yes | no | 1068 | yes | bicycle regulations in New York; bike safety laws in New York |
+| mtrag-0208bf26ec-t5 | 8 | yes | yes | - | yes | no | 1038 | - | Are guinea pigs raised for human consumption?; Guinea pigs as food animals |
+| mtrag-5815bb4a99-t7 | 12 | yes | no | - | yes | no | 797 | - |  |
+| mtrag-d44c3196b3-t4 | 6 | yes | yes | - | yes | no | 925 | - | systems used to protect personal information; security measures for personal information |
+| mtrag-2cc753bcef-t8 | 14 | yes | no | - | no | no | 808 | no |  |
+| mtrag-1c041ce47a-t6 | 10 | yes | yes | - | no | no | 880 | no | What is a data lake |
+| mtrag-747a810abf-t7 | 12 | yes | yes | - | yes | no | 1023 | no | Is storage included in the VPC price? IBM Cloud |
+| mtrag-4751cd8210-t7 | 12 | yes | no | - | yes | no | 901 | no |  |
+| mtrag-6a738cc02c-t5 | 8 | yes | no | - | yes | no | 766 | no |  |
+| mtrag-5503c6e98c-t2 | 2 | yes | yes | - | yes | no | 883 | no | Hydrogen on Mars for water production; Presence of hydrogen on Mars |
+| mtrag-c6c3b02ca3-t7 | 12 | yes | yes | - | yes | no | 775 | no | IBM Cloud® Container Registry |
+| mtrag-258193fc88-t7 | 12 | yes | yes | - | yes | no | 1413 | no | Can charitable donations be included in a will for tax deductions?; How to include charitable donations in a will for tax benefits |
+| mtrag-f0d2873b87-t7 | 12 | yes | yes | - | yes | no | 1259 | - | How to get enforcement support for child support in California; Child support enforcement services in California |
+| mtrag-20c2cbd18c-t2 | 2 | yes | yes | - | no | no | 673 | no | features of CIS bot |
+| mtrag-33431330ab-t8 | 14 | yes | yes | - | yes | no | 1313 | no | When did the Byzantine Empire become Catholic; When did the Byzantine Empire adopt Christianity |
+| mtrag-e9dd465e8d-t1 | 0 | yes | no | - | no | no | 658 | - |  |
+| mtrag-aea2634b0e-t6 | 10 | yes | yes | - | yes | no | 1128 | - | Can same sex couples adopt children in the United States?; Adoption rights for same sex couples |
+| mtrag-79f0d0539d-t6 | 10 | yes | yes | - | yes | no | 924 | yes | can primary sources be used in literature |
+| mtrag-f1121a39d8-t2 | 2 | yes | yes | - | yes | no | 741 | yes | reasons for failure of small businesses |
+| mtrag-927077bd89-t1 | 0 | yes | yes | - | yes | no | 919 | - | differences between version 6.15.0 and 6.14.0 |
+| mtrag-adf9b1f61c-t4 | 6 | yes | yes | - | yes | no | 1324 | yes | differences between Fixed, Metered, Tiered, and Reserved charges in IBM Cloud; types of charges in IBM Cloud and their differences |
+| mtrag-6af5334fbd-t6 | 10 | yes | no | - | no | no | 682 | no |  |
+| mtrag-b2805ee4c4-t2 | 2 | yes | yes | - | yes | no | 1089 | yes | Did the need for cotton workers increase after the invention of the cotton gin?; Impact of cotton gin on labor demand in cotton industry |
+| mtrag-81afaf82a0-t1 | 0 | yes | no | - | no | no | 701 | - |  |
+| mtrag-dcc0215a11-t3 | 4 | yes | yes | - | yes | no | 832 | - | Investing in foreign bonds: risks and benefits |
+| mtrag-2b34f5e786-t5 | 8 | no | no | - | no | no | 644 | - |  |
+| mtrag-04f83f1199-t2 | 2 | yes | yes | - | yes | no | 953 | no | Does physical activity increase a child's attention span?; Impact of physical activity on children's attention span |
+| mtrag-4fb9958d3e-t2 | 2 | yes | no | - | no | no | 600 | no |  |
+| mtrag-0ef145e499-t7 | 12 | yes | no | - | no | no | 686 | no |  |
+| mtrag-91204c45fc-t3 | 4 | yes | yes | - | no | no | 750 | - | how many films does doctor strange appear in |
+| mtrag-fdee20f7fd-t7 | 12 | yes | no | - | yes | no | 908 | - |  |
+| mtrag-72ba19c385-t3 | 4 | yes | no | - | yes | no | 712 | no |  |
+| mtrag-251e29286c-t1 | 0 | yes | yes | - | no | no | 827 | - | free medical tests with Medi-Cal; Medi-Cal coverage for free tests |
+| mtrag-a6eab3f851-t4 | 6 | yes | yes | - | yes | no | 923 | - | downsides of investing in foreign markets; risks of investing in foreign markets |
+| mtrag-f0d3086322-t2 | 2 | yes | no | - | no | no | 553 | no |  |
+| mtrag-5f9ccf0a4f-t1 | 0 | yes | yes | - | no | no | 961 | - | Where can people report a scam that they have been affected by?; How to report a scam in different countries |
+| mtrag-f5a8ca2f2b-t5 | 8 | yes | yes | - | yes | no | 847 | - | Are dialogue skills necessary for creating a chatbot? |
+| mtrag-fd99b316e5-t3 | 4 | yes | no | - | no | no | 692 | no |  |
+| mtrag-2f484ad8f3-t8 | 14 | yes | yes | - | yes | no | 1162 | - | Does Europa Clipper fly by Europa?; Europa Clipper mission details |
+| mtrag-ddbbbe7ea1-t2 | 2 | yes | no | - | yes | no | 545 | no |  |
+| mtrag-3a07680acf-t4 | 6 | yes | yes | - | yes | no | 1139 | no | origin of HIV and first cases; how HIV started and where it began |
+| mtrag-d4d8edb3e0-t2 | 2 | yes | no | - | yes | no | 720 | no |  |
+| mtrag-29e3ec96a6-t1 | 0 | yes | yes | - | no | no | 915 | - | viceroy during quit india movement; viceroy of india during 1942 |
+| mtrag-e1b602e47d-t1 | 0 | yes | no | - | no | no | 525 | - |  |
+| mtrag-e52ab8d5f6-t5 | 8 | yes | yes | - | yes | no | 798 | no | animal infected diseases causes; animal infected diseases examples |
+| mtrag-a277cf5022-t4 | 6 | yes | yes | - | yes | no | 1178 | no | Why didn't MacArthur criminalize the Emperor during World War II?; Role of the Emperor in Japan during and after World War II |
+| mtrag-fc3e765d7f-t5 | 8 | yes | yes | - | yes | no | 1137 | yes | welfare housing assistance programs in the United States; do welfare recipients get housing benefits |
+| mtrag-dd6b6ffd17-t3 | 4 | yes | yes | - | yes | no | 866 | - | Arizona Cardinals vs Chicago Cardinals same team; Arizona Cardinals and Chicago Cardinals relationship |
+| mtrag-1c0e5e78f1-t4 | 6 | yes | yes | - | yes | no | 1265 | yes | why did The Office season 9 premiere have a 46% drop in viewership compared to season 8?; who is the target audience for The Office? |
+| mtrag-9c52934a9a-t5 | 8 | yes | no | - | no | no | 909 | no |  |
+| mtrag-b4614daadc-t4 | 6 | yes | yes | - | yes | no | 970 | yes | What is the customization ID in the context of IBM Watson Speech to Text service? |
+| mtrag-a2698b2973-t3 | 4 | yes | yes | - | yes | no | 1219 | yes | Does a catchbasin effectively capture litter and debris from stormwater runoff?; How effective are catchbasins in removing debris from water runoff? |
+| mtrag-c01c8cf114-t2 | 2 | yes | yes | - | yes | no | 736 | yes | issues with installing mobile SDK using CocoaPods |
+| mtrag-674aa142d9-t4 | 6 | yes | yes | - | no | no | 881 | - | example words of disgust that IBM Watson Emotion Analysis can detect |
+| mtrag-e0f8a53d3a-t4 | 6 | yes | yes | - | yes | no | 912 | yes | online self-help resources for investing; best online self-help for investment strategies |
+| mtrag-4c86c8740c-t4 | 6 | yes | yes | - | yes | no | 791 | no | best practices for IBM Cloud Kubernetes Service |
+| mtrag-5b9edac124-t1 | 0 | yes | yes | - | yes | no | 980 | - | Shakespeare's plays popularity during his lifetime; Audience size for Shakespeare's plays in 16th century |
+| mtrag-3f5fa37823-t2 | 2 | yes | yes | - | no | no | 728 | - | average distance between moon and earth |
+| mtrag-4175fcce99-t1 | 0 | yes | yes | - | yes | no | 1050 | - | evolution of cloud computing security protocols; implications of security protocols on restoring volumes from backup snapshots in IBM Cloud VPC |
+| mtrag-2f01333723-t7 | 12 | yes | yes | - | yes | no | 913 | - | IBM Immutable Object Storage vs Immutable Data Storage |
+| mtrag-694e275f1a-t6 | 10 | yes | yes | - | yes | no | 1114 | no | special diet for becoming a good soccer player; nutrition requirements for professional athletes |
+| mtrag-941445ba11-t1 | 0 | yes | no | - | no | no | 677 | - |  |
+| mtrag-1c74814752-t7 | 12 | yes | yes | - | yes | no | 1117 | no | What are the different types of investments?; How do investments work? |
+| mtrag-1065ea5ad1-t4 | 6 | yes | no | - | yes | no | 580 | no |  |
+| mtrag-5e79e46513-t2 | 2 | yes | yes | - | yes | no | 762 | no | minimum age to get a learner's permit in California |
+| mtrag-ccdfb6b6f9-t7 | 12 | yes | yes | - | yes | no | 1260 | - | NASA Discovery Program overview; Is Deep Impact Mission part of NASA Discovery Program |
+| mtrag-f3a917e029-t5 | 8 | yes | yes | - | yes | no | 1104 | - | Is privacy protected in IBM Cloud Internet Services?; Does IBM Cloud Internet Services ensure data privacy? |
+| mtrag-4a8369b740-t3 | 4 | yes | yes | - | yes | no | 948 | no | how to buy and sell foreign markets from the US; US investors trading international markets |
+| mtrag-5c13daa943-t1 | 0 | yes | yes | - | no | no | 827 | - | where is bone marrow found; what does bone marrow do for the body |
+| mtrag-124e27c386-t1 | 0 | yes | yes | - | yes | no | 885 | - | How to file a complaint with the state; Steps to file a complaint with the state |
+| mtrag-6528deeee4-t7 | 12 | yes | yes | - | yes | no | 1023 | yes | other major industries in India; key industries in India besides agriculture and retail |
+| mtrag-7cb06b3f80-t2 | 2 | yes | no | - | yes | no | 641 | no |  |
+| mtrag-35e6be0f20-t2 | 2 | yes | yes | - | yes | no | 973 | yes | How to file a restraining order in the United States; Steps to file a restraining order without notifying the other person |
+| mtrag-6495c82abb-t2 | 2 | yes | yes | - | yes | no | 943 | - | is sea level rising 2026; current sea level rise data 2026 |
+| mtrag-1be6627211-t4 | 6 | yes | yes | - | yes | no | 826 | - | Are conversations monitored?; What are the implications of monitoring conversations? |
+| mtrag-dd82f0f978-t3 | 4 | yes | yes | - | yes | no | 889 | yes | European teams in MLS All-Star Games; history of European participation in MLS All-Star Games |
+| mtrag-c5518952b7-t2 | 2 | yes | yes | - | no | no | 877 | yes | Is it free to open a second bank account?; Cost of opening a second bank account |
+| mtrag-d2432696b3-t2 | 2 | yes | yes | - | yes | no | 991 | - | important discoveries made by Juno spacecraft during its journey to Jupiter; discoveries made by Juno spacecraft about Jupiter |
+| mtrag-34ac6bedd4-t6 | 10 | yes | yes | - | yes | no | 1293 | yes | How does Red Hat OpenShift help in managing containerized applications?; What are the benefits of using Red Hat OpenShift for enterprise workloads? |
+| mtrag-47b2471404-t8 | 14 | yes | yes | - | yes | no | 1119 | yes | types of IBM Cloud account types; IBM Cloud Enterprise account details |
+| mtrag-be461bfeda-t7 | 12 | yes | no | - | yes | no | 699 | - |  |
+| mtrag-5b2404d71f-t2 | 2 | yes | yes | - | yes | no | 821 | yes | items to keep in a safe room; essential items for shelter-in-place |
+| mtrag-f05ba9633e-t1 | 0 | yes | yes | - | yes | no | 999 | - | risks of being on a house purchase with a friend; legal implications of being a co-buyer on a house |
+| mtrag-1dcbbeb35d-t3 | 4 | yes | no | - | no | no | 670 | - |  |
+| mtrag-d5f0e7023a-t2 | 2 | yes | yes | - | yes | no | 1094 | yes | Where does the West Branch of the Penobscot River start?; Where does the West Branch of the Penobscot River end? |
+| mtrag-94d04f2cd4-t8 | 14 | yes | no | - | yes | no | 691 | no |  |
+| mtrag-5600fe1c05-t4 | 6 | yes | no | - | no | no | 638 | no |  |
+| mtrag-62a5aee8a4-t1 | 0 | yes | yes | - | no | no | 789 | - | What is groundwater contamination?; Causes and effects of groundwater contamination |
+| mtrag-717ca9138f-t3 | 4 | yes | yes | - | no | no | 920 | - | how many seasons does Friends have; when did Friends start and end |
+| mtrag-8040ccdfc0-t4 | 6 | yes | yes | - | yes | no | 1134 | - | best credit cards for rewards 2026; credit cards with no annual fee 2026 |
+| mtrag-1534a09527-t1 | 0 | yes | yes | - | no | no | 695 | - | who takes photos of planes in the air |
+| mtrag-c1e53df98a-t5 | 8 | yes | yes | - | yes | no | 1019 | - | E. E. Cummings biography; E. E. Cummings famous works |
+| mtrag-d5b1e735a0-t5 | 8 | yes | yes | - | yes | no | 777 | yes | IBM Cloudant attachment file size limits 2026 |
+| mtrag-95a0893567-t2 | 2 | yes | yes | - | no | no | 669 | yes | length of the Great Wall of China |
+| mtrag-cfbcfa3e38-t2 | 2 | yes | yes | - | yes | no | 924 | - | Where do domestic guinea pigs live?; What is the activity pattern of domestic guinea pigs? |
+| mtrag-ca6f0197d2-t3 | 4 | yes | yes | - | yes | no | 1155 | yes | What is a FICO score and how does it differ from Credit Karma scores?; Are Credit Karma scores the same as FICO scores? |
+| mtrag-a3f07e9ed5-t4 | 6 | yes | yes | - | yes | no | 929 | - | Did Grenade by Bruno Mars become a hit?; Chart performance of Grenade by Bruno Mars |
+| mtrag-766728e82e-t2 | 2 | yes | yes | - | yes | no | 974 | no | can I see jupiter's rings from away from the city; light pollution and visibility of jupiter's rings |
+| mtrag-af57ff6995-t3 | 4 | yes | yes | - | no | no | 697 | no | VA using separate procurement tool from OSG |
+| mtrag-dc1aaac0b3-t2 | 2 | yes | no | - | yes | no | 881 | no |  |
+| mtrag-91715ec6ec-t8 | 14 | yes | yes | - | yes | no | 1167 | no | safety tips for boating in New York State; important boating safety information for New York |
+| mtrag-4da5a7f42f-t6 | 10 | yes | yes | - | yes | no | 966 | - | how to dispute a wrongful credit report in the US; steps to correct a wrong credit report entry |
+| mtrag-8a19ee37ca-t2 | 2 | yes | no | - | yes | no | 517 | no |  |
+| mtrag-41a4006bfa-t1 | 0 | yes | yes | - | no | no | 676 | - | When did the Berlin Wall come down |
+| mtrag-61374b240d-t5 | 8 | yes | no | - | yes | no | 646 | no |  |
+| mtrag-535ebd3063-t3 | 4 | yes | no | - | yes | no | 697 | no |  |
+| mtrag-13a398b300-t2 | 2 | yes | no | - | no | no | 648 | no |  |
+| mtrag-af5e45e59e-t4 | 6 | yes | yes | - | yes | no | 888 | yes | filing requirements for SEC compliance; SEC filing requirements for US-based companies |
+| mtrag-d7b4f863ba-t6 | 10 | yes | yes | - | no | no | 920 | no | What is a galaxy?; Definition of a galaxy in astronomy |
+| mtrag-2f94b6fb4c-t2 | 2 | yes | yes | - | yes | no | 925 | yes | how is 401k account taxed; taxation of 401k account |
+| mtrag-62888f39e7-t1 | 0 | yes | yes | - | yes | no | 1030 | - | motorcycle collision fatalities New York City 2026; motorcycle accident deaths New York State 2026 |
+| mtrag-0208bf26ec-t3 | 4 | yes | no | - | no | no | 527 | - |  |
+| mtrag-5815bb4a99-t2 | 2 | yes | yes | - | yes | no | 935 | no | comparison of dynamic and static secrets in terms of vulnerability protection; security benefits of dynamic secrets over static secrets |
+| mtrag-d44c3196b3-t1 | 0 | yes | yes | - | yes | no | 854 | - | Web extension for federal government websites; How to ensure security of federal government websites |
+| mtrag-2cc753bcef-t5 | 8 | yes | yes | - | yes | no | 962 | yes | how to avoid missing garbage collection during holidays in piedmont; garbage collection schedule during holidays in piedmont |
+| mtrag-1c041ce47a-t7 | 12 | yes | no | - | yes | no | 702 | - |  |
+| mtrag-747a810abf-t1 | 0 | yes | no | - | yes | no | 705 | - |  |
+| mtrag-4751cd8210-t8 | 14 | yes | no | - | no | no | 571 | no |  |
+| mtrag-6a738cc02c-t1 | 0 | yes | yes | - | yes | no | 802 | - | types and causes of male infertility; types and causes of female infertility |
+| mtrag-5503c6e98c-t6 | 10 | yes | yes | - | yes | no | 934 | yes | Mars missions by NASA; Other countries' Mars missions |
+| mtrag-c6c3b02ca3-t8 | 14 | yes | yes | - | yes | no | 751 | - | How to grant access to IBM Cloud Container Registry |
+| mtrag-258193fc88-t9 | 16 | yes | no | - | yes | no | 661 | no |  |
+| mtrag-f0d2873b87-t8 | 14 | yes | yes | - | yes | no | 862 | - | Spousal support legal guidelines; Spousal support enforcement procedures |
+| mtrag-20c2cbd18c-t1 | 0 | yes | no | - | yes | no | 694 | - |  |
+| mtrag-33431330ab-t1 | 0 | yes | yes | - | no | no | 762 | - | why was the eastern roman empire called the byzantine empire |
+| mtrag-e9dd465e8d-t2 | 2 | yes | no | - | yes | no | 713 | no |  |
+| mtrag-aea2634b0e-t3 | 4 | yes | no | - | no | no | 634 | no |  |
+| mtrag-79f0d0539d-t5 | 8 | yes | yes | - | yes | no | 857 | - | importance of Celts in history; role of Celts in ancient history |
+| mtrag-f1121a39d8-t4 | 6 | yes | no | - | yes | no | 756 | no |  |
+| mtrag-927077bd89-t5 | 8 | no | no | - | no | no | 683 | - |  |
+| mtrag-adf9b1f61c-t7 | 12 | yes | no | - | yes | no | 724 | - |  |
+| mtrag-6af5334fbd-t3 | 4 | yes | yes | - | yes | no | 1084 | no | typical down payment amount for a mortgage 2026; average down payment percentage for home mortgages |
+| mtrag-b2805ee4c4-t4 | 6 | yes | yes | - | yes | no | 1098 | - | Was the invention of the cotton gin indirectly a cause of the American Civil War?; Impact of cotton gin on American Civil War |
+| mtrag-81afaf82a0-t3 | 4 | yes | no | - | yes | no | 1175 | no |  |
+| mtrag-dcc0215a11-t4 | 6 | yes | yes | - | yes | no | 933 | - | Why do municipalities issue bonds?; Purpose of municipal bond issuance |
+| mtrag-2b34f5e786-t4 | 6 | yes | yes | - | yes | no | 1052 | - | Germany's economy strength 2026; Current economic status of Germany 2026 |
+| mtrag-04f83f1199-t1 | 0 | yes | yes | - | yes | no | 922 | - | Does physical activity affect academic performance in children?; How does being active influence school performance in kids? |
+| mtrag-4fb9958d3e-t5 | 8 | yes | yes | - | yes | no | 953 | - | small business credit card options; best credit cards for small businesses |
+| mtrag-0ef145e499-t6 | 10 | yes | yes | - | yes | no | 799 | yes | gov sites hacked by another state; security measures for government websites |
+| mtrag-91204c45fc-t1 | 0 | yes | yes | - | no | no | 840 | - | Doctor Strange's powers source in Marvel Comics; Origin of Doctor Strange's abilities |
+| mtrag-fdee20f7fd-t3 | 4 | yes | no | - | yes | no | 820 | - |  |
+| mtrag-72ba19c385-t8 | 14 | yes | no | - | no | no | 684 | no |  |
+| mtrag-251e29286c-t2 | 2 | yes | yes | - | yes | no | 1051 | yes | how long does it take to get covid-19 test results with medicaid; testing result timeline for medicaid beneficiaries |
+| mtrag-a6eab3f851-t2 | 2 | yes | no | - | no | no | 524 | no |  |
+| mtrag-f0d3086322-t8 | 14 | yes | yes | - | yes | no | 1096 | - | How does the stock exchange work?; Mechanics of stock exchange trading |
+| mtrag-5f9ccf0a4f-t4 | 6 | yes | yes | - | yes | no | 1218 | yes | current mortgage scams 2026; common mortgage fraud schemes 2026 |
+| mtrag-f5a8ca2f2b-t9 | 16 | yes | yes | - | no | no | 834 | - | What is a search skill in the context of dialog systems? |
+| mtrag-fd99b316e5-t1 | 0 | yes | yes | - | no | no | 687 | - | how does the MLS All-Star Game work |
+| mtrag-2f484ad8f3-t4 | 6 | yes | yes | - | no | no | 719 | yes | Who funds NASA's Europa Clipper mission? |
+| mtrag-ddbbbe7ea1-t4 | 6 | yes | no | - | yes | no | 604 | - |  |
+| mtrag-3a07680acf-t1 | 0 | yes | yes | - | yes | no | 828 | - | categories of people who should get flu vaccine; important groups for flu vaccination |
+| mtrag-d4d8edb3e0-t4 | 6 | yes | yes | - | yes | no | 904 | - | balance transfer credit cards benefits and risks; balance transfer debt consolidation |
+| mtrag-29e3ec96a6-t5 | 8 | yes | no | - | no | no | 796 | - |  |
+| mtrag-e1b602e47d-t7 | 12 | yes | no | - | yes | no | 827 | - |  |
+| mtrag-e52ab8d5f6-t8 | 14 | yes | no | - | no | no | 649 | no |  |
+| mtrag-dc1aaac0b3-t5 | 8 | no | no | - | no | no | 579 | - |  |
+| mtrag-dc1aaac0b3-t8 | 14 | no | no | - | no | no | 722 | - |  |
+| mtrag-a6eab3f851-t3 | 4 | no | no | - | no | no | 518 | - |  |
+| mtrag-c01c8cf114-t7 | 12 | no | no | - | no | no | 653 | - |  |
+| mtrag-8040ccdfc0-t1 | 0 | no | no | - | no | no | 648 | - |  |
+| mtrag-8040ccdfc0-t5 | 8 | no | no | - | no | no | 528 | - |  |
+| mtrag-2f01333723-t9 | 16 | no | no | - | no | no | 612 | - |  |
+| qrecc-132-t2 | 2 | yes | yes | - | no | no | 936 | yes | What was the lockout in sports history?; What was the lockout in the NHL? |
+| qrecc-2192-t5 | 8 | yes | yes | - | no | no | 741 | yes | percentage of juvenile offenses committed by females |
+| qrecc-2523-t4 | 6 | yes | yes | - | no | no | 809 | yes | who wrote the film boys town |
+| qrecc-239-t3 | 4 | yes | yes | - | yes | no | 784 | yes | Bernard Lewis research work; Bernard Lewis academic research |
+| qrecc-2640-t2 | 2 | yes | yes | - | no | no | 843 | yes | When was the book 'Peter and the Starcatchers' published? |
+| qrecc-1199-t7 | 10 | yes | no | - | no | no | 577 | no |  |
+| qrecc-1627-t6 | 10 | yes | yes | - | yes | no | 1443 | yes | interesting performances Mary J. Blige 2011-2013; notable performances Mary J. Blige 2011-2013 |
+| qrecc-1618-t6 | 9 | yes | yes | - | yes | no | 961 | yes | When was The Salaminian Women written by Aeschylus? |
+| qrecc-88-t3 | 4 | yes | no | - | no | no | 917 | no |  |
+| qrecc-2598-t5 | 8 | yes | yes | - | yes | no | 997 | yes | differences between United Nations and League of Nations; how are the United Nations and League of Nations different |
+| qrecc-1170-t3 | 4 | yes | yes | - | no | no | 804 | yes | Alexander Graham Bell's age when he invented the dehusking machine |
+| qrecc-211-t5 | 8 | yes | yes | - | yes | no | 997 | yes | What debt did Frankie Laine not pay?; Debt owed by Frankie Laine to Perry Como |
+| qrecc-121-t2 | 2 | yes | yes | - | no | no | 1290 | yes | Erich Ludendorff's base after joining the 57th Infantry Regiment in 1885; Where was Erich Ludendorff stationed after 1885 |
+| qrecc-310-t6 | 9 | yes | yes | - | yes | no | 1058 | yes | Who helped Ingemar Johansson train?; Training assistance for Ingemar Johansson |
+| qrecc-237-t3 | 4 | yes | yes | - | yes | no | 1120 | no | jobs he found after returning to New York City; types of jobs he found after returning to New York City |
+| qrecc-1796-t2 | 2 | yes | yes | - | no | no | 841 | yes | Was Love Is a Four Letter Word an album by Jason Mraz? |
+| qrecc-365-t4 | 6 | yes | yes | - | no | no | 747 | yes | Hubert Humphrey's concession speech to Nixon content |
+| qrecc-2012-t4 | 6 | yes | yes | - | no | no | 922 | yes | release date of You Don't Know Me by Jax Jones |
+| qrecc-1783-t8 | 14 | yes | yes | - | yes | no | 1055 | yes | Was Federico Fellini familiar with Anthony Quinn before casting him in La Strada? |
+| qrecc-1620-t6 | 10 | yes | yes | - | no | no | 811 | yes | Where does Arnold Palmer live? |
+| qrecc-479-t2 | 2 | yes | yes | - | no | no | 722 | yes | Nikki Sixx and Courtney Bingham children |
+| qrecc-1924-t3 | 4 | yes | yes | - | yes | no | 944 | yes | meaning of glycine discovery in comet samples; significance of glycine in comets for life |
+| qrecc-2269-t2 | 2 | yes | yes | - | no | no | 739 | yes | 2018 Winter Olympic Games host city |
+| qrecc-303-t7 | 12 | yes | yes | - | yes | no | 1235 | no | Did Rogue Traders' later music do well on the charts?; Chart performance of Rogue Traders after 2004 |
+| qrecc-1181-t5 | 8 | yes | yes | - | no | no | 887 | yes | What was the documentary 'America: Imagine the World Without Her' about? |
+| qrecc-1001-t3 | 4 | yes | yes | - | yes | no | 702 | no | Bernard Lewis other places of study |
+| qrecc-186-t4 | 5 | yes | yes | - | yes | no | 901 | yes | Larry Bird's contributions to the Boston Celtics; Larry Bird's impact on his team |
+| qrecc-284-t2 | 2 | yes | yes | - | no | no | 664 | yes | Steve McQueen Ford commercials |
+| qrecc-513-t2 | 2 | yes | yes | - | yes | no | 993 | yes | John F. Kennedy Jr. academic performance at Brown University; John F. Kennedy Jr. grades during college |
+| qrecc-1949-t5 | 8 | yes | yes | - | yes | no | 823 | yes | female twin of a bull in cattle |
+| qrecc-24-t7 | 12 | yes | yes | - | yes | no | 1041 | - | cold turkey method for quitting smoking; effectiveness of cold turkey method |
+| qrecc-1923-t3 | 4 | yes | yes | - | no | no | 995 | yes | who was John Stape married to in Coronation Street; Hope's father's wife in Coronation Street |
+| qrecc-2344-t4 | 6 | yes | yes | - | no | no | 1044 | yes | where is the great bristlecone pine found; distribution of pinus longaeva |
+| qrecc-2008-t4 | 6 | yes | yes | - | no | no | 907 | yes | Viking Age timeline; Years of the Viking Age |
+| qrecc-884-t8 | 14 | yes | yes | - | yes | no | 1474 | yes | How successful was the single Midnight Marauders with the German label Sonar Kollektiv?; What was the impact of Midnight Marauders on Fat Freddy's Drop's international recognition? |
+| qrecc-2201-t3 | 4 | yes | yes | - | no | no | 1166 | yes | where was the new england patriots vs jacksonville jaguars game on 9/16/18 played |
+| qrecc-26-t6 | 10 | yes | no | - | yes | no | 716 | no |  |
+| qrecc-2247-t2 | 2 | yes | no | - | no | no | 700 | no |  |
+| qrecc-159-t7 | 12 | yes | no | - | no | no | 774 | no |  |
+| qrecc-1437-t3 | 4 | yes | no | - | yes | no | 554 | no |  |
+| qrecc-836-t4 | 6 | yes | yes | - | yes | no | 1210 | yes | Did Hedy Lamarr perform well according to people in her early film roles?; How was Hedy Lamarr received by critics and audiences in her early career? |
+| qrecc-337-t2 | 2 | yes | yes | - | yes | no | 1000 | yes | Eddie Rabbitt's music style before the crossover; Eddie Rabbitt's early music career |
+| qrecc-1063-t3 | 4 | yes | yes | - | yes | no | 896 | yes | Robert Fleischman's role in Journey; Journey band members and their roles |
+| qrecc-2675-t3 | 4 | yes | no | - | no | no | 672 | no |  |
+| qrecc-2229-t3 | 4 | yes | yes | - | yes | no | 860 | yes | first video game inventor; first video game name |
+| qrecc-641-t5 | 8 | yes | yes | - | yes | no | 1053 | yes | Vivien Leigh films after Gone With the Wind; Other films starring Vivien Leigh |
+| qrecc-1362-t2 | 2 | yes | no | - | yes | no | 557 | no |  |
+| qrecc-1258-t4 | 6 | yes | yes | - | yes | no | 1105 | yes | Weaknesses of Norm O'Neill's cricket batting style; Drawbacks in Norm O'Neill's batting technique |
+| qrecc-79-t6 | 10 | yes | yes | - | yes | no | 1036 | yes | What is the functionalist theory in sociology; Key aspects of functionalist theory |
+| qrecc-1906-t5 | 8 | yes | yes | - | no | no | 863 | yes | When was the flag of Michigan adopted? |
+| qrecc-1611-t5 | 8 | yes | yes | - | yes | no | 919 | no | interesting aspects of The Big Reunion article; additional details about The Big Reunion |
+| qrecc-2349-t2 | 2 | yes | yes | - | yes | no | 784 | yes | why does pittsburgh have an h in its name |
+| qrecc-2572-t3 | 4 | yes | yes | - | yes | no | 1161 | yes | Did anyone die during Hurricane Dora in Jacksonville in 1964?; Casualties from Hurricane Dora in Jacksonville 1964 |
+| qrecc-924-t4 | 6 | yes | yes | - | yes | no | 866 | yes | Other reasons Michael Savage was fired from MSNBC; Michael Savage MSNBC firing reasons |
+| qrecc-932-t3 | 4 | yes | yes | - | yes | no | 1181 | no | Who is Steel's main enemy in Justice League: Gods and Monsters?; Main enemy of Steel in Justice League: Gods and Monsters |
+| qrecc-100-t5 | 7 | yes | yes | - | yes | no | 1054 | yes | Kevin Durant awards 2010-2012; Kevin Durant awards during his time with the Thunder |
+| qrecc-380-t4 | 6 | yes | yes | - | yes | no | 1306 | no | Notable cases Jeanine Pirro worked on after 1994; Other significant cases handled by Jeanine Pirro as Westchester County District Attorney |
+| qrecc-449-t4 | 6 | yes | yes | - | yes | no | 1036 | yes | Etruscans conflicts with other civilizations; Etruscan wars and conflicts |
+| qrecc-1422-t9 | 12 | yes | yes | - | no | no | 655 | yes | Johnny Carson retirement |
+| qrecc-1609-t5 | 7 | yes | yes | - | yes | no | 924 | no | Events in 2010; Significant events in 2010 |
+| qrecc-457-t4 | 6 | yes | yes | - | yes | no | 980 | yes | specific people Jack Abramoff was allied with; Jack Abramoff political allies |
+| qrecc-1150-t2 | 2 | yes | yes | - | yes | no | 928 | no | What else was Yazid doing during his reign?; Other activities of Yazid during his rule |
+| qrecc-975-t6 | 8 | yes | yes | - | yes | no | 1133 | yes | Did Nightcrawler become a leader in the X-Men comics?; X-Infernus leadership role in X-Men comics |
+| qrecc-763-t7 | 12 | yes | yes | - | yes | no | 1245 | yes | Why was Suzanne Lenglen forbidden to play against Helen Wills?; Suzanne Lenglen and Helen Wills rivalry reasons |
+| qrecc-1914-t4 | 6 | yes | yes | - | yes | no | 1153 | no | What were the names of the mosques in Timbuktu; What were the mosques in Timbuktu called |
+| qrecc-651-t4 | 6 | yes | yes | - | yes | no | 1078 | yes | Did Marquis de Sade earn a degree from his military academy?; Marquis de Sade's educational background and degree status |
+| qrecc-1613-t5 | 8 | yes | no | - | no | no | 579 | no |  |
+| qrecc-579-t3 | 4 | yes | yes | - | no | no | 758 | yes | Where did he go after leaving the golden temple? |
+| qrecc-257-t7 | 12 | yes | yes | - | yes | no | 1107 | no | What happened after the Age of Discovery?; What were the consequences of the Age of Discovery? |
+| qrecc-1303-t6 | 10 | yes | yes | - | yes | no | 1132 | yes | successful singles from R.E.M.'s Murmur album; R.E.M. Murmur album singles success |
+| qrecc-2080-t3 | 4 | yes | yes | - | yes | no | 1017 | yes | When is the Praxis test required for teacher certification?; When do educators need to take the Praxis test? |
+| qrecc-1687-t5 | 7 | yes | yes | - | yes | no | 844 | yes | interesting aspects of Marge Simpson's creation process by Matt Groening |
+| qrecc-522-t2 | 2 | yes | yes | - | no | no | 1004 | yes | Tara Maclay's issues with Willow Rosenberg's use of magic in season 6 of Buffy the Vampire Slayer |
+| qrecc-1392-t8 | 9 | yes | yes | - | no | no | 1056 | yes | Did Art Bell and Airyn Ruiz stay married?; Art Bell and Airyn Ruiz divorce status |
+| qrecc-897-t2 | 2 | yes | yes | - | no | no | 847 | no | When was she born?; Birth date of she |
+| qrecc-883-t3 | 4 | yes | yes | - | no | no | 930 | no | disease in 1995; notable diseases in 1995 |
+| qrecc-1435-t4 | 5 | yes | yes | - | yes | no | 868 | yes | Maurice Malpas other teams; Maurice Malpas coaching career |
+| qrecc-779-t3 | 4 | yes | yes | - | yes | no | 1050 | - | Michelle Branch Total Request Live appearance date; When did Michelle Branch appear on Total Request Live? |
+| qrecc-775-t7 | 11 | yes | yes | - | yes | no | 1056 | yes | Did Coppi and Bartali become friends after their rivalry ended?; Relationship between Coppi and Bartali after their rivalry |
+| qrecc-761-t6 | 10 | yes | yes | - | yes | no | 961 | yes | Ricky Martin first recorded relationship; Ricky Martin earliest relationship |
+| qrecc-415-t7 | 12 | yes | yes | - | yes | no | 1465 | yes | Did Roland Grapow return to Helloween after leaving in 2003?; Did Uli Kusch return to Helloween after leaving in 2003? |
+| qrecc-1532-t5 | 8 | yes | yes | - | yes | no | 978 | yes | significant events during Lunalilo's reign; important occurrences during Lunalilo's time as king |
+| qrecc-722-t2 | 2 | yes | yes | - | no | no | 795 | yes | Where was Billy Joel's first solo album Cold Spring Harbor recorded |
+| qrecc-2592-t2 | 2 | yes | no | - | no | no | 671 | no |  |
+| qrecc-650-t5 | 8 | yes | yes | - | yes | no | 1087 | no | Who opposed the Dalai Lama in 2008; Political opposition to the Dalai Lama in 2008 |
+| qrecc-724-t12 | 21 | yes | yes | - | yes | no | 1068 | yes | Henrietta Lacks siblings; Henrietta Lacks family members |
+| qrecc-2257-t5 | 8 | yes | yes | - | yes | no | 946 | yes | weaknesses of Greek gods; Greek mythology god weaknesses |
+| qrecc-874-t2 | 2 | yes | yes | - | yes | no | 873 | yes | Tracy McGrady's most impressive accomplishments; Tracy McGrady career highlights |
+| qrecc-827-t2 | 2 | yes | yes | - | yes | no | 938 | yes | Anwar al-Awlaki al-Qaeda rank; Anwar al-Awlaki leadership role |
+| qrecc-264-t6 | 10 | yes | yes | - | yes | no | 933 | no | Edwin Booth other great accomplishments; Edwin Booth notable achievements after returning to stage |
+| qrecc-145-t3 | 4 | yes | yes | - | yes | no | 905 | yes | Dan Rooney political involvement; Dan Rooney role in politics |
+| qrecc-1474-t4 | 6 | yes | yes | - | yes | no | 994 | no | What else was said about Freddie Mercury's singing?; What are other comments on Freddie Mercury's singing abilities? |
+| qrecc-2487-t4 | 6 | yes | yes | - | yes | no | 887 | yes | is the United States the largest manufacturer of airplanes; United States largest manufacturing industry |
+| qrecc-523-t4 | 6 | yes | yes | - | yes | no | 991 | no | Cake (band) collaborators in 2004; Cake band members in 2004 |
+| qrecc-1922-t3 | 4 | yes | yes | - | no | no | 716 | yes | number of member states in CARICOM |
+| qrecc-2767-t5 | 8 | yes | yes | - | yes | no | 1340 | yes | actors who played Jason Voorhees in Friday the 13th movies; list of actors in Friday the 13th series as Jason Voorhees |
+| qrecc-413-t9 | 16 | yes | yes | - | no | no | 755 | no | Stephen Stills son treatment and recovery |
+| qrecc-698-t3 | 4 | yes | yes | - | yes | no | 1126 | yes | Did Cream tour to support the album Disraeli Gears?; Did the band Cream go on tour for the album Disraeli Gears? |
+| qrecc-1173-t3 | 4 | yes | yes | - | yes | no | 982 | yes | Robin Thicke top 10 hits; Robin Thicke songs that reached top 10 |
+| qrecc-1124-t3 | 4 | yes | yes | - | no | no | 987 | yes | Where was the album Veto by Heaven Shall Burn released?; Release location of Veto by Heaven Shall Burn |
+| qrecc-1673-t7 | 11 | yes | yes | - | yes | no | 1080 | yes | spin-offs of American Top 40; shows similar to American Top 40 |
+| qrecc-313-t6 | 10 | yes | yes | - | yes | no | 1113 | yes | original members of Chris Barber's Jazz Band when he first started; Chris Barber's original band members |
+| qrecc-1626-t3 | 4 | yes | yes | - | no | no | 849 | yes | Did Jay Aston leave Bucks Fizz?; Jay Aston Bucks Fizz exit |
+| qrecc-668-t4 | 6 | yes | yes | - | no | no | 898 | no | Did she have any siblings?; Information about her siblings |
+| qrecc-87-t5 | 8 | yes | yes | - | yes | no | 1464 | yes | What actions did Aleksandr Solzhenitsyn witness during the war crimes in East Prussia?; What specific crimes against German civilians did Solzhenitsyn observe in the Soviet military? |
+| qrecc-285-t2 | 2 | yes | yes | - | yes | no | 823 | yes | Cesar Romero co-stars; Cesar Romero film co-stars |
+| qrecc-162-t11 | 19 | yes | no | - | no | no | 637 | no |  |
+| qrecc-2748-t4 | 6 | yes | yes | - | yes | no | 904 | yes | what does left ventricular hypertrophy do; effects of left ventricular hypertrophy |
+| qrecc-1240-t8 | 14 | yes | yes | - | yes | no | 1162 | yes | Did Timur gain a following during his conquests?; What was the nature of Timur's support base? |
+| qrecc-2074-t4 | 6 | yes | yes | - | no | no | 678 | yes | Premier League confederation |
+| qrecc-941-t6 | 10 | yes | yes | - | yes | no | 1127 | yes | interesting aspects of Cho's selective mutism diagnosis and treatment; other details about Cho's selective mutism case |
+| qrecc-1550-t5 | 8 | yes | yes | - | yes | no | 1608 | yes | Did Who Is Harry Nilsson (And Why Is Everybody Talkin' About Him?) go to theaters after its initial release?; What happened to the film Who Is Harry Nilsson (And Why Is Everybody Talkin' About Him?) after its initial theatrical release? |
+| qrecc-985-t2 | 2 | yes | yes | - | no | no | 974 | yes | Mia Hamm 108th international goal team; 108th international goal match team |
+| qrecc-943-t2 | 2 | yes | yes | - | no | no | 936 | no | landmark thrash metal albums released in 1986 and 1987 |
+| qrecc-949-t5 | 7 | yes | yes | - | yes | no | 811 | no | Tab Hunter other hit singles; Tab Hunter additional hit songs |
+| qrecc-616-t2 | 2 | yes | yes | - | no | no | 853 | yes | Kevin Spacey accused of what; What was Kevin Spacey accused of |
+| qrecc-1847-t6 | 10 | yes | yes | - | no | no | 925 | no | What was Lance Bass's character name in On The Line? |
+| qrecc-1154-t6 | 10 | yes | yes | - | yes | no | 1009 | no | significant details about the Judith Miller anthrax hoax case; other important facts about the Judith Miller anthrax letter |
+| qrecc-1789-t4 | 6 | yes | yes | - | yes | no | 1056 | yes | What did Agatha Christie say about archaeology?; Agatha Christie's views on archaeology |
+| qrecc-1127-t2 | 2 | yes | yes | - | yes | no | 919 | yes | songs produced by Dan Wilson with Semisonic; Semisonic songs by Dan Wilson |
+| qrecc-206-t5 | 8 | yes | yes | - | no | no | 1203 | no | Who starred in Jim Bludso (1917)?; Cast of Jim Bludso 1917 |
+| qrecc-1152-t3 | 4 | yes | yes | - | yes | no | 851 | yes | influences on Swans' appearance; Swans fashion influences |
+| qrecc-915-t4 | 6 | yes | yes | - | no | no | 960 | yes | Guru Arjan active years; When was Guru Arjan active |
+| qrecc-1188-t3 | 4 | yes | yes | - | yes | no | 1379 | yes | Did Niki Lauda die as a result of the 1976 Nürburgring crash?; Outcome of Niki Lauda's 1976 Nürburgring crash |
+| qrecc-2548-t4 | 6 | yes | yes | - | yes | no | 1020 | yes | critical response to Suicide Squad movie 2016; reviews of Suicide Squad film 2016 |
+| qrecc-854-t2 | 2 | yes | yes | - | yes | no | 936 | no | Michael Shermer's current religious views; Religious beliefs of Michael Shermer after leaving religion |
+| qrecc-1730-t4 | 6 | yes | yes | - | yes | no | 1012 | yes | Buena Vista Social Club tour locations; Where did Buena Vista Social Club tour |
+| qrecc-42-t6 | 10 | yes | yes | - | yes | no | 1044 | no | What is Rock City and why is it famous; Rock City attractions and significance |
+| qrecc-694-t7 | 10 | yes | yes | - | yes | no | 1113 | yes | Did Simple Minds stay together or split up?; Status of Simple Minds band in 2026 |
+| qrecc-1791-t3 | 4 | yes | no | - | yes | no | 561 | no |  |
+| qrecc-945-t2 | 2 | yes | yes | - | yes | no | 832 | yes | response to Zap Comix work; public reception of Zap Comix |
+| qrecc-2489-t2 | 2 | yes | yes | - | no | no | 1095 | no | When did the episode of 'Rory pays Luke a surprise visit at the diner to find out how Lorelai is' air? |
+| qrecc-21-t4 | 6 | yes | yes | - | yes | no | 1095 | yes | differences between chemical weathering and biological weathering; how chemical weathering differs from biological weathering |
+| qrecc-1761-t3 | 4 | yes | yes | - | yes | no | 945 | yes | public reaction to Paolo Rossi's retirement; how did fans and media react to Paolo Rossi's retirement |
+| qrecc-1894-t2 | 2 | yes | yes | - | yes | no | 1043 | yes | Did The Cardigans have other great hits besides Lovefool?; Other popular songs by The Cardigans besides Lovefool |
+| qrecc-1638-t5 | 8 | yes | yes | - | yes | no | 829 | yes | Michael McDonald solo tour history; Michael McDonald solo career tours |
+| qrecc-956-t7 | 12 | yes | yes | - | yes | no | 1131 | no | What happened to Kurt Weill and how did he die; Kurt Weill death cause and circumstances |
+| qrecc-29-t3 | 4 | yes | no | - | no | no | 656 | no |  |
+| qrecc-2502-t5 | 8 | yes | yes | - | yes | no | 817 | yes | modern atomic theory accepted today; current atomic theory in science |
+| qrecc-470-t6 | 10 | yes | yes | - | yes | no | 1263 | yes | public reaction to Charles Kennedy staying in politics after resignation 2006; opinion on Charles Kennedy remaining in politics post-resignation |
+| qrecc-2236-t5 | 8 | yes | yes | - | no | no | 911 | yes | who was the author of the United States Declaration of Independence |
+| qrecc-2143-t3 | 4 | yes | yes | - | yes | no | 1104 | yes | character traits of Dashiki from Don't Be a Menace; personality of Dashiki in the movie Don't Be a Menace |
+| qrecc-1556-t3 | 4 | yes | yes | - | no | no | 823 | yes | When did Frank Zappa disband the Mothers of Invention? |
+| qrecc-1222-t6 | 9 | yes | yes | - | yes | no | 1089 | yes | sales performance of Sonata Arctica's The Days of Grays; critical reception of Sonata Arctica's The Days of Grays |
+| qrecc-1033-t7 | 12 | yes | yes | - | no | no | 979 | yes | name of the program Meredith Willson directed for Armed Forces Radio Service |
+| qrecc-753-t6 | 9 | yes | yes | - | yes | no | 1296 | - | Did Jean Lapierre have any notable enemies or allies during his time as Minister of Transport?; Notable political relationships of Jean Lapierre as Minister of Transport |
+| qrecc-1242-t2 | 2 | yes | yes | - | no | no | 899 | no | position he played in the West Indies; sport position of he in the West Indies |
+| qrecc-327-t4 | 6 | yes | yes | - | yes | no | 1010 | yes | How did Virat Kohli become successful in cricket?; Factors contributing to Virat Kohli's success in cricket |
+| qrecc-2580-t3 | 4 | yes | no | - | no | no | 545 | no |  |
+| qrecc-448-t4 | 6 | yes | yes | - | yes | no | 1095 | yes | popular dance styles during the early 20th century; dances associated with jazz music in the 1910s |
+| freshqa-250 | 0 | - | no | - | no | no | 619 | - |  |
+| freshqa-254 | 0 | - | yes | - | no | no | 630 | - | tallest mountain in Alaska |
+| freshqa-257 | 0 | - | yes | - | no | no | 714 | - | 2017 Eurovision Song Contest winner |
+| freshqa-262 | 0 | - | no | - | no | no | 725 | - |  |
+| freshqa-263 | 0 | - | yes | - | no | no | 787 | - | 2020 Formula 1 World Driver's Championship winner |
+| freshqa-272 | 0 | - | yes | - | no | no | 610 | - | David Bowie death date |
+| freshqa-277 | 0 | - | yes | - | no | no | 695 | - | Who wrote Between the World and Me? |
+| freshqa-278 | 0 | - | yes | - | no | no | 611 | - | Who founded Amazon? |
+| freshqa-281 | 0 | - | yes | - | no | no | 873 | - | Beatles album Ringo Starr quit; Ringo Starr temporary quit Beatles album |
+| freshqa-283 | 0 | - | yes | - | no | no | 726 | - | When did the Tulip mania bubble collapse? |
+| freshqa-284 | 0 | - | no | - | no | no | 677 | - |  |
+| freshqa-287 | 0 | - | yes | - | no | no | 650 | - | real name of George Eliot |
+| freshqa-290 | 0 | - | yes | - | no | no | 752 | - | How many years did the Hundred Years' War last? |
+| freshqa-294 | 0 | - | yes | - | no | no | 897 | - | Typhoon Haiyan first eye landfall municipality; Typhoon Haiyan initial landfall location |
+| freshqa-296 | 0 | - | yes | - | no | no | 637 | - | Emily Joanna Carey birthplace |
+| freshqa-298 | 0 | - | yes | - | no | no | 650 | - | Debut date of Blackpink |
+| freshqa-300 | 0 | - | yes | - | no | no | 676 | - | heaviest reptile in the world |
+| freshqa-305 | 0 | - | yes | - | no | no | 751 | - | FIFA World Cup 2026 host countries |
+| freshqa-306 | 0 | - | yes | - | no | no | 772 | - | number of property cards in Monopoly Deal's dark blue set |
+| freshqa-307 | 0 | - | yes | - | no | no | 669 | - | UMass Outing Club founding year |
+| freshqa-309 | 0 | - | yes | - | no | no | 658 | - | Kiwifruit native country |
+| freshqa-310 | 0 | - | yes | - | no | no | 1029 | - | Benjamin Franklin two things certain in this world; What two things Benjamin Franklin claimed to be certain |
+| freshqa-313 | 0 | - | yes | - | no | no | 828 | - | Disco Elysium setting city; Disco Elysium location |
+| freshqa-316 | 0 | - | yes | - | no | no | 631 | - | Declaration of Independence signing date |
+| freshqa-319 | 0 | - | yes | - | no | no | 810 | - | famous Brazilian soccer player who passed away in 2022 |
+| freshqa-322 | 0 | - | yes | - | no | no | 688 | - | Elon Musk becoming owner of Twitter date |
+| freshqa-324 | 0 | - | yes | - | no | no | 722 | - | first operational image taken by James Webb Space Telescope |
+| freshqa-332 | 0 | - | yes | - | no | no | 631 | - | Day of Eight Billion date |
+| freshqa-335 | 0 | - | yes | - | no | no | 715 | - | Taylor Swift honorary Doctor of Fine Arts degree university |
+| freshqa-338 | 0 | - | yes | - | yes | no | 935 | - | first film franchise to gross $28 billion; film franchise with 28 billion box office revenue |
+| freshqa-339 | 0 | - | yes | - | no | no | 710 | - | first African American woman on a US quarter |
+| freshqa-341 | 0 | - | yes | - | yes | no | 892 | - | Which country will host the most matches at the FIFA World Cup 2026? |
+| freshqa-342 | 0 | - | yes | - | yes | no | 803 | - | last Ballon d'Or winner before Messi and Ronaldo dominance |
+| freshqa-345 | 0 | - | yes | - | no | no | 804 | - | capital of California when it became a state; California statehood capital |
+| freshqa-347 | 0 | - | yes | - | no | no | 734 | - | Author of 'A Game of Thrones' birthplace |
+| freshqa-351 | 0 | - | yes | - | no | no | 732 | - | tectonic plate boundary yeti crabs first discovered |
+| freshqa-353 | 0 | - | yes | - | yes | no | 906 | - | primary designer of AlexNet; birthplace of AlexNet designer |
+| freshqa-355 | 0 | - | yes | - | no | no | 955 | - | Marie Curie first discovered element name origin country; Country associated with Marie Curie's first discovered element |
+| freshqa-358 | 0 | - | yes | - | no | no | 1278 | - | highest-earning woman in music Forbes' Celebrity 100 2020; top-earning female musician Forbes 2020 |
+| freshqa-366 | 0 | - | yes | - | no | no | 770 | - | Who is the King of Soccer and what caused his death? |
+| freshqa-124 | 0 | yes | yes | - | no | no | 898 | - | Leonardo DiCaprio children count; How many kids does Leonardo DiCaprio have? |
+| freshqa-125 | 0 | yes | yes | - | no | no | 828 | - | number of humans who have landed on Mars; human landings on Mars |
+| freshqa-131 | 0 | yes | yes | - | no | no | 669 | - | world record time for running a mile |
+| freshqa-132 | 0 | yes | yes | - | no | no | 790 | - | Rafael Nadal Grand Slam titles 2026 |
+| freshqa-134 | 0 | yes | yes | - | no | no | 790 | - | best-selling video game franchise of all time 2026 |
+| freshqa-135 | 0 | yes | yes | - | no | no | 791 | - | highest GDP by state in the United States 2026 |
+| freshqa-142 | 0 | yes | yes | - | no | no | 688 | - | highest goals scored in international football for Malaysia |
+| freshqa-148 | 0 | yes | yes | - | no | no | 715 | - | second largest language edition of Wikipedia by article count |
+| freshqa-150 | 0 | yes | yes | - | no | no | 743 | - | Can women attend universities in Afghanistan 2026 |
+| freshqa-152 | 0 | yes | yes | - | no | no | 638 | - | shortest war in history |
+| freshqa-154 | 0 | yes | yes | - | no | no | 785 | - | number of member states in the Eurozone 2026 |
+| freshqa-155 | 0 | yes | yes | - | no | no | 752 | - | latest country to adopt the Euro 2026 |
+| freshqa-157 | 0 | yes | yes | - | no | no | 745 | - | Colleen Hoover total books published 2026 |
+| freshqa-164 | 0 | yes | yes | - | no | no | 721 | - | biggest single-tournament payday in tennis history |
+| freshqa-165 | 0 | yes | yes | - | no | no | 688 | - | largest stadium by capacity in the world |
+| freshqa-166 | 0 | yes | yes | - | no | no | 790 | - | Taylor Swift's most recent studio album title 2026 |
+| freshqa-175 | 0 | yes | yes | - | yes | no | 935 | - | number of asteroids discovered before impacting Earth; asteroid impacts on Earth history |
+| freshqa-180 | 0 | yes | yes | - | no | no | 752 | - | highest-paid athlete in the world 2026 |
+| freshqa-181 | 0 | yes | yes | - | no | no | 892 | - | most recent outbreak declared as public health emergency of international concern by WHO 2026 |
+| freshqa-185 | 0 | yes | yes | - | no | no | 809 | - | Where were the Summer Olympics held most recently in 2026 |
+| freshqa-187 | 0 | yes | yes | - | no | no | 705 | - | next leap year after 2026 |
+| freshqa-190 | 0 | yes | yes | - | no | no | 810 | - | Who has the most followers on Twitter as of 2026 |
+| freshqa-193 | 0 | yes | yes | - | no | no | 919 | - | U.S. representative for New York's 12th congressional district 2026 |
+| freshqa-194 | 0 | yes | yes | - | no | no | 791 | - | most recently released Studio Ghibli film 2026 |
+| freshqa-196 | 0 | yes | yes | - | no | no | 818 | - | FIBA Men's World Ranking top country 2026 |
+| freshqa-202 | 0 | yes | yes | - | no | no | 639 | - | World Series titles Houston Astros |
+| freshqa-204 | 0 | yes | yes | - | no | no | 819 | - | Which country has been invading Ukraine?; Current invasion of Ukraine by which country |
+| freshqa-205 | 0 | yes | yes | - | no | no | 789 | - | English monarch 2026 |
+| freshqa-209 | 0 | yes | yes | - | no | no | 783 | - | How many Women's Rugby World Cup titles has New Zealand won? |
+| freshqa-214 | 0 | yes | yes | - | no | no | 829 | - | Amazon Prime Video most watched premiere ever; Amazon Prime Video highest viewed premiere |
+| freshqa-216 | 0 | yes | yes | - | yes | no | 744 | - | next common year starting on Saturday 2026 |
+| freshqa-217 | 0 | yes | yes | - | no | no | 874 | - | oldest Brazilian president at the time of inauguration; Brazilian president oldest inauguration age |
+| freshqa-224 | 0 | yes | yes | - | yes | no | 973 | - | Presidents visits by Joe Biden 2025; Countries visited by Joe Biden 2025 |
+| freshqa-226 | 0 | yes | yes | - | yes | no | 942 | - | number of U.S. presidents who lost reelection; presidents of the United States who lost re-election |
+| freshqa-227 | 0 | yes | yes | - | yes | no | 814 | - | number of publicly traded American companies with market cap over $4 trillion |
+| freshqa-229 | 0 | yes | yes | - | no | no | 810 | - | number of successful Space Launch System flights as of 2026 |
+| freshqa-234 | 0 | yes | yes | - | no | no | 873 | - | vice-chancellor of the largest university by enrollment in the world 2026 |
+| freshqa-239 | 0 | yes | yes | - | yes | no | 809 | - | most liked Instagram post; Instagram post with the highest number of likes |
+| freshqa-240 | 0 | yes | yes | - | no | no | 725 | - | most recent eruption of the world's largest active volcano |
+| freshqa-243 | 0 | yes | yes | - | yes | no | 1052 | - | most expensive 20th century artwork sold in public sale; highest price paid for 20th century artwork at auction |
+| freshqa-374 | 0 | yes | yes | - | no | no | 740 | - | Winner of The Voice US 2026 |
+| freshqa-378 | 0 | yes | yes | - | yes | no | 1178 | - | confirmed tornadoes with Enhanced Fujita ratings in the United States 2026; tornado count by EF rating in the US 2026 |
+| freshqa-381 | 0 | yes | yes | - | no | no | 1057 | - | current best-selling children's book on Amazon 2026; top-selling children's books on Amazon 2026 |
+| freshqa-385 | 0 | yes | yes | - | no | no | 923 | - | most popular film on Letterboxd this week 2026-09-28 |
+| freshqa-386 | 0 | yes | yes | - | no | no | 744 | - | Geoff Hinton h-index 2026 |
+| freshqa-393 | 0 | yes | yes | - | no | no | 791 | - | Latest Grammy Award winner for Best Jazz Performance 2026 |
+| freshqa-394 | 0 | yes | yes | - | no | no | 726 | - | Most recent Super Bowl winner 2026 |
+| freshqa-396 | 0 | yes | yes | - | no | no | 714 | - | Coachella festival dates 2026 |
+| freshqa-397 | 0 | yes | yes | - | no | no | 783 | - | When is this year's Black Friday 2026? |
+| freshqa-400 | 0 | yes | yes | - | no | no | 812 | - | Number of papers accepted into ACL main conference 2025 |
+| freshqa-403 | 0 | yes | yes | - | no | no | 726 | - | EMNLP 2026 conference location |
+| freshqa-406 | 0 | yes | yes | - | yes | no | 790 | - | Berber calendar present year; current year in Berber calendar |
+| freshqa-407 | 0 | yes | yes | - | no | no | 895 | - | Ramadan 2026 start date; Ramadan 2026 dates |
+| freshqa-408 | 0 | yes | yes | - | no | no | 694 | - | Thanksgiving date 2026 |
+| freshqa-410 | 0 | yes | yes | - | no | no | 783 | - | host stadium of this year's Super Bowl 2026 |
+| freshqa-412 | 0 | yes | yes | - | no | no | 790 | - | Latest Academy Award for Best Animated Feature winner 2026 |
+| freshqa-419 | 0 | yes | yes | - | no | no | 759 | - | Microsoft Patch Tuesday 2026 date North America |
+| freshqa-426 | 0 | yes | yes | - | no | no | 1151 | - | Premier League 2025-2026 season table; Top team in Premier League 2025-2026 |
+| freshqa-430 | 0 | yes | yes | - | no | no | 807 | - | latest MotoGP World Riders' Champion 2026 |
+| freshqa-439 | 0 | yes | yes | - | no | no | 837 | - | most recent Primetime Emmy Award for Outstanding Drama Series 2026 |
+| freshqa-440 | 0 | yes | yes | - | no | no | 790 | - | most recent IJCAI conference location 2026 |
+| freshqa-443 | 0 | yes | yes | - | no | no | 611 | - | Age of Donald Trump |
+| freshqa-445 | 0 | yes | yes | - | no | no | 713 | - | latest NBA championship winner 2026 |
+| freshqa-446 | 0 | yes | yes | - | no | no | 930 | - | Kylian Mbappé UEFA Champions League goals 2025-2026 season |
+| freshqa-447 | 0 | yes | yes | - | no | no | 1265 | - | longest winning streak in the Premier League 2025-2026 season; Premier League longest winning streak 2025-2026 |
+| freshqa-448 | 0 | yes | yes | - | no | no | 734 | - | latest winner of American Idol 2026 |
+| freshqa-451 | 0 | yes | yes | - | no | no | 764 | - | number 1 ranked female tennis player 2026 |
+| freshqa-454 | 0 | yes | yes | - | no | no | 752 | - | price of new Apple HomePod 2026 |
+| freshqa-456 | 0 | yes | yes | - | no | no | 797 | - | youngest age for COVID-19 vaccination in the United States |
+| freshqa-460 | 0 | yes | yes | - | yes | no | 957 | - | How many times has a player scored 60 or more points in a single game in NBA history? |
+| freshqa-471 | 0 | yes | yes | - | yes | no | 1144 | - | Who posted the most-liked Instagram post in 2025?; Most liked Instagram post of 2025 |
+| freshqa-472 | 0 | yes | yes | - | yes | no | 786 | - | Bitcoin price above $40,000 last occurrence |
+| freshqa-474 | 0 | yes | yes | - | no | no | 801 | - | Brad Pitt's most recent movie as an actor 2026 |
+| freshqa-479 | 0 | yes | yes | - | no | no | 645 | - | current Miss World birth country |
+| freshqa-485 | 0 | yes | yes | - | no | no | 878 | - | current NBA champions 2026; current NHL champions 2026 |
+| freshqa-488 | 0 | yes | yes | - | no | no | 843 | - | oldest person to sail solo across the Pacific Ocean 2026 |
+| freshqa-491 | 0 | yes | yes | - | no | no | 893 | - | Number of American companies in Fortune Global 500 list for 2025 |
+| freshqa-494 | 0 | yes | yes | - | no | no | 1018 | - | richest woman in the world birth country; current richest woman in the world country of birth |
+| freshqa-495 | 0 | yes | yes | - | yes | no | 824 | - | most recent individual recipient of Time Person of the Year and their birth country |
+| freshqa-498 | 0 | yes | yes | - | yes | no | 954 | - | Who posted the most-liked TikTok video as of 2026-09-28 |
+| freshqa-4 | 0 | - | no | - | yes | no | 714 | - |  |
+| freshqa-10 | 0 | - | yes | - | no | no | 668 | - | Dartmouth Law School founding date |
+| freshqa-14 | 0 | - | yes | - | no | no | 740 | - | When was element 120 first synthesized? |
+| freshqa-19 | 0 | - | yes | - | no | no | 802 | - | When was COVID-19 declared endemic by the World Health Organization? |
+| freshqa-24 | 0 | - | yes | - | no | no | 638 | - | Mark Zuckerberg acquire Twitter price |
+| freshqa-27 | 0 | - | yes | - | no | no | 802 | - | How many times has Jeremy Corbyn served as Prime Minister of the UK? |
+| freshqa-30 | 0 | - | yes | - | no | no | 695 | - | Yann LeCun Google join date |
+| freshqa-35 | 0 | - | yes | - | no | no | 726 | - | When did Papa John's go out of business? |
+| freshqa-41 | 0 | - | yes | - | no | no | 752 | - | When did Lionel Messi win his second FIFA World Cup? |
+| freshqa-42 | 0 | - | yes | - | no | no | 745 | - | FIFA World Cup 2026 host country |
+| freshqa-45 | 0 | - | yes | - | no | no | 677 | - | Elon Musk X Corp CEO tenure |
+| freshqa-50 | 0 | - | yes | - | no | no | 1284 | - | When did the global cumulative number of COVID-19 infections first exceed 1 billion?; How long ago did the global cumulative number of COVID-19 infections first exceed 1 billion? |
+| freshqa-53 | 0 | - | yes | - | no | no | 772 | - | biggest city in the United States and Olympics Games host city |
+| freshqa-57 | 0 | - | yes | - | yes | no | 821 | - | current Protestant majority in Northern Ireland; duration of Protestant majority in Northern Ireland |
+| freshqa-62 | 0 | - | yes | - | no | no | 810 | - | Benjamin Ruth MLB home runs; Home run statistics for Benjamin Ruth |
+| freshqa-63 | 0 | - | no | - | no | no | 517 | - |  |
+| freshqa-66 | 0 | - | yes | - | yes | no | 980 | - | Number of female members of parliament in Yugoslavia; Female representation in the Yugoslav parliament |
+| freshqa-67 | 0 | - | yes | - | no | no | 631 | - | iPhone 9 release date |
+| freshqa-69 | 0 | - | no | - | no | no | 619 | - |  |
+| freshqa-74 | 0 | - | yes | - | no | no | 688 | - | IKEA fiftieth anniversary date |
+| freshqa-75 | 0 | - | yes | - | no | no | 740 | - | Andrew Johnson election year as President of the United States |
+| freshqa-78 | 0 | - | yes | - | no | no | 878 | - | When did New York join the Confederacy?; History of New York joining the Confederacy |
+| freshqa-80 | 0 | - | yes | - | no | no | 714 | - | When did the Great Wall of China collapse? |
+| freshqa-82 | 0 | - | yes | - | yes | no | 797 | - | last time Fields Medal awarded to five mathematicians in the same year |
+| freshqa-84 | 0 | - | yes | - | no | no | 863 | - | natural wonder in the United States part of the New 7 Wonders of Nature |
+| freshqa-86 | 0 | - | yes | - | no | no | 969 | - | 2026 FIFA Women's World Cup host countries; 2026 Women's World Cup locations |
+| freshqa-87 | 0 | - | yes | - | no | no | 916 | - | Da Vinci's Salvator Mundi auction price 2017 Sotheby's |
+| freshqa-89 | 0 | - | yes | - | yes | no | 798 | - | chemical reaction between lead and another element producing gold as a byproduct |
+| freshqa-90 | 0 | - | yes | - | no | no | 961 | - | 2022 Afghan presidential election results; Which political party won the 2022 Afghan elections |
+| freshqa-102 | 0 | - | yes | - | no | no | 766 | - | 2021 Children's & Family Emmy Awards date |
+| freshqa-103 | 0 | - | yes | - | no | no | 752 | - | Joe Biden visit Russia as president of the United States date |
+| freshqa-106 | 0 | - | yes | - | no | no | 783 | - | When was ChatGPT launched in 2021? |
+| freshqa-107 | 0 | - | yes | - | no | no | 786 | - | Keegan-Michael Key directed movie 2022 |
+| freshqa-108 | 0 | - | yes | - | no | no | 687 | - | When did Google release ChatGPT? |
+| freshqa-112 | 0 | - | yes | - | no | no | 843 | - | Novak Djokovic 2022 Australian Open round of exit |
+| freshqa-114 | 0 | - | yes | - | no | no | 1100 | - | Tom Cruise breath-hold record Mission Impossible: Rogue Nation; how long did Tom Cruise hold his breath underwater in Mission Impossible: Rogue Nation |
+| freshqa-116 | 0 | - | yes | - | no | no | 810 | - | Harry Styles One Direction member duration; Harry Styles time in One Direction |
+| freshqa-118 | 0 | - | yes | - | no | no | 947 | - | Donald Trump's first tweet in 2022 after being unbanned from Twitter by Elon Musk |
+| freshqa-119 | 0 | - | yes | - | yes | no | 873 | - | release date of next season of Atlanta; days left until next season of Atlanta airs |
+| freshqa-121 | 0 | - | yes | - | yes | no | 836 | - | Federal Reserve interest rate cuts August to December 2022 basis points |
+| gsm8k-nosearch-2 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-28 | 0 | no | no | - | yes | no | 539 | - |  |
+| gsm8k-nosearch-82 | 0 | no | no | - | yes | no | 556 | - |  |
+| gsm8k-nosearch-127 | 0 | no | no | - | yes | no | 549 | - |  |
+| gsm8k-nosearch-128 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-151 | 0 | no | no | - | yes | no | 555 | - |  |
+| gsm8k-nosearch-186 | 0 | no | no | - | yes | no | 578 | - |  |
+| gsm8k-nosearch-191 | 0 | no | no | - | yes | no | 1278 | - |  |
+| gsm8k-nosearch-194 | 0 | no | no | - | yes | no | 558 | - |  |
+| gsm8k-nosearch-202 | 0 | no | no | - | yes | no | 538 | - |  |
+| gsm8k-nosearch-206 | 0 | no | no | - | yes | no | 564 | - |  |
+| gsm8k-nosearch-285 | 0 | no | no | - | yes | no | 548 | - |  |
+| gsm8k-nosearch-286 | 0 | no | no | - | yes | no | 556 | - |  |
+| gsm8k-nosearch-291 | 0 | no | no | - | yes | no | 537 | - |  |
+| gsm8k-nosearch-300 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-391 | 0 | no | no | - | yes | no | 550 | - |  |
+| gsm8k-nosearch-418 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-447 | 0 | no | no | - | yes | no | 537 | - |  |
+| gsm8k-nosearch-454 | 0 | no | no | - | yes | no | 556 | - |  |
+| gsm8k-nosearch-488 | 0 | no | no | - | yes | no | 550 | - |  |
+| gsm8k-nosearch-499 | 0 | no | no | - | yes | no | 578 | - |  |
+| gsm8k-nosearch-513 | 0 | no | no | - | yes | no | 549 | - |  |
+| gsm8k-nosearch-530 | 0 | no | no | - | yes | no | 562 | - |  |
+| gsm8k-nosearch-533 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-577 | 0 | no | no | - | yes | no | 578 | - |  |
+| gsm8k-nosearch-621 | 0 | no | no | - | yes | no | 543 | - |  |
+| gsm8k-nosearch-635 | 0 | no | no | - | yes | no | 562 | - |  |
+| gsm8k-nosearch-647 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-666 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-676 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-682 | 0 | no | no | - | yes | no | 564 | - |  |
+| gsm8k-nosearch-724 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-733 | 0 | no | no | - | yes | no | 557 | - |  |
+| gsm8k-nosearch-788 | 0 | no | no | - | yes | no | 537 | - |  |
+| gsm8k-nosearch-816 | 0 | no | no | - | yes | no | 564 | - |  |
+| gsm8k-nosearch-829 | 0 | no | no | - | yes | no | 557 | - |  |
+| gsm8k-nosearch-861 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-889 | 0 | no | no | - | yes | no | 537 | - |  |
+| gsm8k-nosearch-906 | 0 | no | no | - | yes | no | 544 | - |  |
+| gsm8k-nosearch-917 | 0 | no | no | - | yes | no | 549 | - |  |
+| gsm8k-nosearch-966 | 0 | no | no | - | yes | no | 578 | - |  |
+| gsm8k-nosearch-976 | 0 | no | no | - | yes | no | 554 | - |  |
+| gsm8k-nosearch-995 | 0 | no | no | - | yes | no | 557 | - |  |
+| gsm8k-nosearch-1010 | 0 | no | no | - | yes | no | 561 | - |  |
+| gsm8k-nosearch-1033 | 0 | no | no | - | yes | no | 562 | - |  |
+| gsm8k-nosearch-1047 | 0 | no | no | - | yes | no | 556 | - |  |
+| gsm8k-nosearch-1067 | 0 | no | no | - | yes | no | 562 | - |  |
+| gsm8k-nosearch-1090 | 0 | no | no | - | yes | no | 555 | - |  |
+| gsm8k-nosearch-1112 | 0 | no | no | - | yes | no | 557 | - |  |
+| gsm8k-nosearch-1123 | 0 | no | no | - | yes | no | 553 | - |  |
+| gsm8k-nosearch-1131 | 0 | no | no | - | yes | no | 562 | - |  |
+| gsm8k-nosearch-1146 | 0 | no | no | - | yes | no | 1237 | - |  |
+| gsm8k-nosearch-1162 | 0 | no | no | - | yes | no | 563 | - |  |
+| gsm8k-nosearch-1194 | 0 | no | no | - | yes | no | 538 | - |  |
+| gsm8k-nosearch-1232 | 0 | no | no | - | yes | no | 547 | - |  |
+| gsm8k-nosearch-1251 | 0 | no | no | - | yes | no | 556 | - |  |
+| gsm8k-nosearch-1253 | 0 | no | no | - | yes | no | 557 | - |  |
+| gsm8k-nosearch-1266 | 0 | no | no | - | yes | no | 537 | - |  |
+| gsm8k-nosearch-1280 | 0 | no | no | - | yes | no | 558 | - |  |
+| gsm8k-nosearch-1311 | 0 | no | no | - | yes | no | 554 | - |  |
+| regression-chat53-t1 | 0 | yes | yes | - | no | no | 827 | - | stocks rallying right now 2026-09-28 |
+| regression-chat53-t2 | 2 | yes | yes | - | yes | no | 1177 | yes | Palantir stock performance 2026; Palantir recent news and stock movement |
+| regression-chat53-t3 | 4 | yes | yes | - | yes | no | 1153 | yes | Nvidia stock performance 2026; Other chip companies performance 2026 |
+| regression-chat53-t4 | 6 | yes | yes | - | yes | no | 1249 | yes | ASML stock performance and analyst sentiment 2026 |
+| regression-chat53-t5 | 8 | yes | no | - | yes | no | 814 | no |  |
+| regression-chat53-t6 | 10 | yes | no | - | no | no | 990 | no |  |
+| regression-chat53-t7 | 12 | yes | no | - | yes | no | 931 | no |  |
+| regression-chat53-t8 | 14 | yes | yes | - | yes | no | 1417 | yes | Nikon and Canon's progress in EUV lithography technology; Is ASML a Dutch company? |
+| regression-qwe-t1 | 0 | yes | yes | - | no | no | 885 | yes | new model released by anthropic on 2026-09-28 |
+| regression-qwe-t2 | 2 | yes | no | - | yes | no | 641 | no |  |
+| regression-qwe-t3 | 4 | yes | no | - | yes | no | 974 | no |  |
