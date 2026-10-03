@@ -6931,3 +6931,88 @@ The boundary is sized for the worst case (think on, search on): ~32,768 - 6,144 
 **Most likely to be wrong:** L3, which assumes Auto thinks on ~30% of turns as it did on FreshQA;
 MTRAG/QReCC follow-ups may think less. And S4 may be smaller if the planner's own prefill overlaps
 the summary wait.
+
+### P6D actuals, 2026-10-03
+
+Config as the P6D header; code at `b84d347` on the box. Raw: `results/p6d-*.jsonl`, the gateway
+trace gzipped as `results/p6d-gw.jsonl.gz`, reports `results/p6d-*-report.txt`.
+
+#### W: warm-up A/B, 10-turn CONVO, search off, thinking Auto (19 of 20 turns chose to think)
+
+| # | Predicted | Measured (turns 2-10, p50) | Verdict |
+|---|---|---|---|
+| W1 | planner cached fraction warm >= 0.90, cold <= 0.80 | warm **0.86**, cold **0.62** | **warm side wrong**; see below |
+| W2 | planner 100-300 ms faster with warm-up | **1,029 vs 1,312 ms (-283)** | correct, at the edge |
+| W3 | first visible token 100-300 ms faster | **1,167 vs 1,447 ms (-280)** | correct, at the edge |
+| W4 | warm request 100-400 ms, off the critical path | **90-277 ms** | correct |
+
+The warm-up landed exactly: each planner call found everything up to the new user message cached
+(432 cached after a 451-token warm-up, 784 after 800, and so on), leaving **~350 uncached tokens
+flat on every turn**, against 800-1,080 and growing without it. W1 missed because the planner
+instruction (~300 tokens) sits AFTER the new message and is never cacheable, so the fraction is
+capped on short chats; uncached tokens are the right measure, not the fraction.
+
+#### T: turn-1, FreshQA first messages, search on, thinking Off
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| T1 | first token p50 1.3-1.7 s, from 1.83 s | **2,078 ms** | **wrong: the baseline was flattered** |
+| T2 | >= 60% of two-query plans skip the extra query | **18 of 23 (78%)** | correct |
+
+P6C-2 asked each question in four arms, so the search block was often already cached from an
+earlier arm: 35 of its 80 on/off answers had > 1,000 cached tokens. Cold against cold, 45 P6C-2
+answers against all 80 here: **first token 2,526 -> 2,078 ms (-18%)**, search span **916 -> 456 ms**,
+engine first token unchanged (795 vs 790 ms). The fix works; the 1.83 s it was measured against
+was never a cold number. Same family as incident 45: a comparison is only as clean as the cache
+state of both arms.
+
+#### L: load, 4-turn MTRAG/QReCC conversations, Poisson arrivals, 15 s reading pause, search off
+
+| rate /min | conversations | concurrent convs (mean) | streaming turns (mean) | first token p50 | p95 | end to end p50 | errors | vLLM waiting p95 |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 6 | 1.9 | 1.5 | 1,033 | 1,308 | 14,537 | 0 | 0 |
+| 4 | 18 | 6.3 | 3.4 | 1,065 | 1,462 | 12,123 | 0 | 0 |
+| 8 | 32 | 10.3 | 6.3 | 1,148 | 1,622 | 12,357 | 0 | 0 |
+| 12 | 40 | 12.8 | 7.5 | 1,187 | 1,606 | 12,227 | 0 | 0 |
+| 20 | 83 | 29.1 | 16.0 | 1,344 | **2,163** | 12,017 | 0 | 0 |
+| 30 | 128 | 45.9 | 27.7 | 1,724 | 2,842 | 13,233 | 0 | 0 |
+| 45 | 165 | 73.0 | 50.9 | 2,525 | 4,905 | 20,791 | 0 | 0 |
+
+*Qwen3-8B fp8 weights and KV, vLLM 0.27.1, 32k window, A10G, warm-up on, thinking Auto, search off.
+The at-load line is first-token p95 <= 2 x the 2/min p50 = 2,066 ms. 20-45/min ran as a second
+pass (`p6d-load2`) after the first sweep never reached the line.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| L1 | baseline first-token p50 0.9-1.4 s | **1,033 ms** | correct |
+| L2 | concurrent conversations ~2.6 / 5 / 10 / 15 | **1.9 / 6.3 / 10.3 / 12.8** | correct within a turn's noise |
+| L3 | at-load line holds at 8, breaks at 12/min | holds at **12** (1,606), breaks at **20** (2,163) | **wrong, pessimistic** |
+| L4 | vLLM waiting p95 0 through 8/min | **0 at every rate, 45/min included** | correct, and further than claimed |
+| L5 | 0 errors | **0 of 1,836 turns** | correct |
+
+**Capacity at load: between 12.8 and 29 concurrent conversations** (7.5-16 answers streaming at
+once). The first sweep (2-12/min) produced a confident null, the regime trap from Phase 6, and was
+caught only because the line was written down first. **The engine never queued**: vLLM admitted
+every request into the running batch even at 51 concurrent streams, so latency degrades by batch
+size (prefill and decode sharing the GPU), not by waiting in line. L3 was pessimistic because the
+KV budget (138,528 tokens) never binds on 4-turn chats and per-stream decode slows gently with batch.
+
+**Search on, 8/min (34 conversations, 9.3 streaming):** first token p50 **3,613** / p95 **5,890 ms**,
+end to end p50 21.6 s. Breakdown at p50: planner 1,336 + web search 1,176 (p95 2,814) + engine first
+token 871 (prefilling the new ~3k search block). Search off at the same rate: 1,148 / 1,622. The
+search round trip and its tail set the p95, not the GPU (vLLM waiting 0).
+
+#### S: long conversation, 40 turns, thinking Off, search off
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| S1 | first summary after turn 22-26, 0 failures | first used at **turn 20**; again at 27 and 36; **40/40 ok** | **wrong**: answers ran 1,400-1,700 tokens, not 930 |
+| S2 | summary call 5-9 s | **3.5-3.9 s**; prompts 11-16k tokens, 99% cached; 164-180 tokens out | **wrong, faster**: output was half the 320 cap |
+| S3 | next turn waits 3-7 s for it | ~1.5 s (summary 3.5 s after the answer, next send 2 s later) | wrong, smaller |
+| S4 | the first turn on a new summary: first token 4-7 s | **5,671 / 5,101 / 4,463 ms**, 192 tokens cached (the system prompt only) | correct |
+
+Between summaries every turn read 99.7% from cache: first token **124-172 ms at up to 22.7k tokens
+of history**. The spike on turns 20, 27 and 36 is avoidable. The summary sits right after the
+system prompt, so the whole kept history must be re-read once, and the warm-up skips while a summary
+is pending. Warming again when the summary lands (3.5-3.9 s after the answer, inside a normal
+reading pause) would move that ~4.5 s off the critical path.

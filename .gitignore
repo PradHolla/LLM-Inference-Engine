@@ -53,3 +53,4 @@ NOTES/phase7-budget-design.md
 
 # Claude Code project config (agents), private
 .claude/
+results/p6d-gw.jsonl

@@ -1,0 +1,6 @@
+## load sweep  [Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, prefix cache on, A10G, via a scratch app + gateway]
+rate/min | convs | turns | errors | conc. convs mean | streams mean | first token p50 | p95 | end to end p50 | p95 | engine waiting p95
+20 | 83 | 332 | 0 | 29.1 | 16.0 | 1,344 | 2,163 | 12,017 | 29,352 | 0
+30 | 128 | 512 | 0 | 45.9 | 27.7 | 1,724 | 2,842 | 13,233 | 36,235 | 0
+45 | 165 | 660 | 0 | 73.0 | 50.9 | 2,525 | 4,905 | 20,791 | 62,436 | 0
+threshold at load: first-token p95 <= 2 x the lowest rate's p50 = 2,688 ms
