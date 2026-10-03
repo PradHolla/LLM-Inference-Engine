@@ -1,7 +1,7 @@
 import os
 
 
-GATEWAY_URL = "http://127.0.0.1:8080"
+GATEWAY_URL = os.environ.get("APP_GATEWAY_URL", "http://127.0.0.1:8080")
 DB_PATH = os.environ.get("APP_DB_PATH", "app/chats.db")
 MODEL_ID = "Qwen/Qwen3-8B"   # fallback only, see D4
 HOST = "127.0.0.1"

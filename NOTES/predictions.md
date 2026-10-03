@@ -6863,3 +6863,71 @@ tokens for `kind` at ~20 ms, plus the longer instruction. The prediction assumed
 **Run 1 against run 2 isolates the cause of run 1's collapse**: the same schema and override with
 the isolating wording and quote removed goes 83.6% -> 93.4%. The `kind` field was never the
 problem; telling the planner to judge the message "on its own" was.
+
+## P6D  Warm-up, turn-1 fix, the app under load, and the long conversation, written 2026-10-02 with the box STOPPED
+
+Config for every row: Qwen3-8B fp8 weights, fp8 KV (KV pinned, 138,528 tokens), vLLM 0.27.1 V1
+runner, `--max-model-len 32768`, prefix caching, stock chat template (no 1826 patch on the app
+server), A10G, the 6c agent at commit after `7157e0f`. All traffic goes to a SCRATCH stack
+(`infra/p6d-runs.sh`: gateway :8082 + app :8091 with the warm-up, gateway :8083 + app :8092
+without), never the owner's app or chats. Thinking Auto unless stated.
+
+### Constants used
+
+| constant | value | source |
+|---|---|---|
+| prefill per uncached token | 0.30 ms at 1.4k context, 0.40 ms at 14.8k | P6B-1 |
+| planner p50 / p95 | 929 / 1,322 ms | P6C-3 run 2 |
+| decode | ~50 tok/s single stream | P6B, stock chat |
+| Off answer length on ordinary questions | 293 tokens p50 | P6C PA-5 |
+| first token, search on / thinking Off, FreshQA first messages | 1.83 s p50 | P6C-2 F5 |
+
+### W: the warm-up (10-turn CONVO, search off, warm app vs cold app)
+
+Without it, each turn's planner re-prefills the previous answer: ~300-900 tokens at ~0.32 ms =
+100-300 ms on the critical path. With it, that work happens while the user reads.
+
+| # | Prediction | Value |
+|---|---|---|
+| W1 | planner cached fraction, turns 2-10 p50 | warm **>= 0.90**; cold **<= 0.80** |
+| W2 | planner p50, turns 2-10 | warm lower than cold by **100-300 ms** |
+| W3 | first visible token p50, turns 2-10 | warm lower by **100-300 ms** |
+| W4 | each warm request's own e2e (off the critical path) | **100-400 ms**, `completion_tokens` 1 |
+
+### T: turn-1 (FreshQA first messages, search on, thinking Off, same 80 questions as P6C-2)
+
+| # | Prediction | Value |
+|---|---|---|
+| T1 | first visible token p50 | **1.3-1.7 s**, from 1.83 s |
+| T2 | first messages that skip the planner's extra query | **>= 60%** of those where the planner wrote one |
+
+### L: load (Poisson arrivals of 4-turn MTRAG/QReCC conversations, 15 s mean reading pause, search off)
+
+A conversation lasts ~4 x 8 s answering + 3 x 15 s reading = ~77 s, so mean concurrent
+conversations = rate x 77/60 and concurrently streaming turns ~0.42 of that. KV is not the limit
+(history <= ~4k tokens per conversation against 138,528). The limit is prefill and decode sharing
+one GPU: each turn costs a planner call plus an answer.
+
+| # | Prediction | Value |
+|---|---|---|
+| L1 | first-token p50 at 2/min (the "single user" baseline of this sweep) | **0.9-1.4 s** |
+| L2 | mean concurrent conversations at 2 / 4 / 8 / 12 per min | **~2.6 / 5 / 10 / 15** |
+| L3 | the at-load line (first-token p95 <= 2 x L1) | holds at **8/min**, breaks at **12/min** |
+| L4 | vLLM requests waiting, p95 | **0 through 8/min** |
+| L5 | errors | **0** at every rate |
+
+### S: the long conversation (40 turns, ~930-token answers, thinking Off, search off)
+
+The boundary is sized for the worst case (think on, search on): ~32,768 - 6,144 - 3,000 - system
+- summary reserve - next user = ~23k tokens of history, crossed at about turn 24.
+
+| # | Prediction | Value |
+|---|---|---|
+| S1 | first summary scheduled after turn | **22-26**; no failed sends in 40 turns |
+| S2 | summary call e2e (its prefix is the cached conversation; ~320 tokens out at ~20 ms) | **5-9 s** |
+| S3 | the next turn arrives 2 s later and waits for it, so its first token is late by | **3-7 s** |
+| S4 | the first turn on the new summary re-prefills the kept history (~13k tokens, cold) | first token **4-7 s** against ~1 s neighbours |
+
+**Most likely to be wrong:** L3, which assumes Auto thinks on ~30% of turns as it did on FreshQA;
+MTRAG/QReCC follow-ups may think less. And S4 may be smaller if the planner's own prefill overlaps
+the summary wait.

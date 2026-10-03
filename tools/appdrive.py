@@ -5,8 +5,9 @@
 # ///
 """Drive the chat app's own HTTP API as the browser does; join each turn to the gateway trace.
 
-  uv run tools/appdrive.py run --mode smoke|convo|levels --out results/p6b-app.jsonl
+  uv run tools/appdrive.py run --mode smoke|convo|levels|load --out results/p6b-app.jsonl
   uv run tools/appdrive.py report --app-out results/p6b-app.jsonl --gw-trace results/p6b-gw.jsonl
+  uv run tools/appdrive.py loadreport --app-out results/p6d-load.jsonl --gw-trace results/p6d-gw.jsonl
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import argparse
 import asyncio
 import glob
 import json
+import math
 import random
 import sys
 import time
@@ -53,6 +55,19 @@ QUESTIONS = [
 ]
 
 SMOKE = "How many times does the letter r appear in the word strawberry? Check carefully."
+
+# Long-conversation run: answers long enough to push history past the 32k summary boundary.
+LONG_TOPICS = [
+    "how a CPU pipeline works", "the causes of the First World War", "how vaccines train the immune system",
+    "how TCP congestion control works", "the history of the printing press", "how plate tectonics shapes coastlines",
+    "how compilers optimise loops", "the economics of rent control", "how photosynthesis stores energy",
+    "the rise and fall of the Roman Republic", "how public-key cryptography works", "how jet engines produce thrust",
+    "how central banks set interest rates", "the life cycle of a star", "how relational databases use indexes",
+    "the history of the Silk Road", "how noise-cancelling headphones work", "how the human kidney filters blood",
+    "how search engines rank pages", "the causes of the 1929 stock market crash",
+]
+LONG_CONVO = [f"Explain {t} in depth, in at least 700 words, with sections." for t in LONG_TOPICS] + \
+             [f"Go deeper on the hardest part of {t}, again at least 700 words." for t in LONG_TOPICS]
 
 
 # FreshQA end to end: search always on (thinking Auto/Off/Full) plus a no-search, no-think baseline.
@@ -131,6 +146,66 @@ async def new_chat(client: httpx.AsyncClient, app: str, title: str, thinking: st
     return int(r.json()["id"])
 
 
+def load_scripts(path: str, turns: int, seed: int) -> list[list[str]]:
+    """Real multi-turn user scripts (MTRAG, QReCC): each conversation's user messages, in order."""
+    scripts = []
+    for raw in open(path):
+        item = json.loads(raw)
+        if item.get("source") not in ("mtrag", "qrecc"):
+            continue
+        users = [m["content"] for m in item["history"] if m["role"] == "user"] + [item["user"]]
+        if len(users) >= turns:
+            scripts.append(users[:turns])
+    random.Random(seed).shuffle(scripts)
+    return scripts
+
+
+ACTIVE = {"conversations": 0, "streams": 0}
+
+
+async def conversation(client: httpx.AsyncClient, a: argparse.Namespace, script: list[str],
+                       conv: int, rate: float, rng: random.Random) -> None:
+    """One simulated user: a fresh chat, each turn waits for the reply, then a reading pause."""
+    ACTIVE["conversations"] += 1
+    try:
+        chat_id = await new_chat(client, a.app, f"load-{rate}-{conv}", a.load_thinking)
+        for t, text in enumerate(script, start=1):
+            ACTIVE["streams"] += 1
+            at = dict(ACTIVE)
+            try:
+                rec = await send(client, a.app, chat_id, text, a.load_thinking, a.load_search)
+            finally:
+                ACTIVE["streams"] -= 1
+            rec.update(phase="load", rate=rate, conv=conv, qid=conv, turn_index=t,
+                       active_conversations=at["conversations"], active_streams=at["streams"])
+            flush(a.out, rec)
+            if rec["status"] != "ok":
+                return
+            if t < len(script):
+                await asyncio.sleep(rng.expovariate(1 / a.think_s))
+    finally:
+        ACTIVE["conversations"] -= 1
+
+
+async def load(client: httpx.AsyncClient, a: argparse.Namespace) -> int:
+    """Poisson arrivals of whole conversations, one rate at a time, each drained before the next."""
+    scripts, rng, conv = load_scripts(a.items, a.turns, a.seed), random.Random(a.seed), 0
+    loop = asyncio.get_running_loop()
+    for rate in [float(x) for x in a.rates.split(",")]:
+        tasks, end = [], loop.time() + a.hold_s
+        print(f"  rate {rate}/min: arrivals for {a.hold_s:.0f} s", flush=True)
+        while loop.time() < end:
+            tasks.append(asyncio.create_task(
+                conversation(client, a, scripts[conv % len(scripts)], conv, rate, rng)))
+            conv += 1
+            await asyncio.sleep(rng.expovariate(rate / 60))
+        await asyncio.gather(*tasks)
+        recs = [json.loads(x) for x in open(a.out) if json.loads(x).get("rate") == rate]
+        print(f"    {len(tasks)} conversations, {len(recs)} turns, "
+              f"first-token p95 {fmt(pct([r['ttft_ms'] for r in recs], 0.95))} ms", flush=True)
+    return 0
+
+
 def flush(path: str, rec: dict) -> None:
     with open(path, "a") as f:
         f.write(json.dumps(rec) + "\n")
@@ -144,7 +219,10 @@ def line(rec: dict) -> str:
 
 async def run(a: argparse.Namespace) -> int:
     bad = 0
-    async with httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=10.0)) as client:
+    limits = httpx.Limits(max_connections=None, max_keepalive_connections=None)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=10.0), limits=limits) as client:
+        if a.mode == "load":
+            return await load(client, a)
         if a.mode == "smoke":
             for level in LEVELS:
                 chat_id = await new_chat(client, a.app, f"smoke-{level}", level)
@@ -157,7 +235,8 @@ async def run(a: argparse.Namespace) -> int:
             return smoke_verdict([json.loads(x) for x in open(a.out)
                                   if json.loads(x).get("phase") == "smoke"][-3:])
         if a.mode == "convo":
-            prompts = json.load(open(a.prompts)) if a.prompts else CONVO
+            prompts = (LONG_CONVO if a.prompts == "long" else json.load(open(a.prompts))
+                       if a.prompts else CONVO)
             chat_id = await new_chat(client, a.app, a.title, a.convo_level)
             for i, q in enumerate(prompts[:a.turns], start=1):
                 search = True if a.convo_search == "on" else a.convo_search
@@ -179,8 +258,9 @@ async def run(a: argparse.Namespace) -> int:
                     await asyncio.sleep(a.gap_s)
         if a.mode == "fresh":
             items = [json.loads(line_) for line_ in open(a.items) if line_.strip()]
+            arms = [arm for arm in FRESH_ARMS if not a.fresh_arms or "/".join(arm) in a.fresh_arms]
             for i, it in enumerate(fresh_pick(items, a.per_category, a.seed)):
-                for search, level in FRESH_ARMS[i % 4:] + FRESH_ARMS[:i % 4]:
+                for search, level in arms[i % len(arms):] + arms[:i % len(arms)]:
                     chat_id = await new_chat(client, a.app, f"fresh-{it['id']}-{search}-{level}", level)
                     rec = await send(client, a.app, chat_id, it["user"], level, search)
                     rec.update(phase="fresh", qid=it["id"], category=it["category"], turn_index=1,
@@ -238,6 +318,42 @@ def p50(xs: list[float]) -> float | None:
     return s[(len(s) - 1) // 2] if s else None
 
 
+def pct(xs: list[float], q: float) -> float | None:
+    """Nearest-rank percentile; None below 1/(1-q) samples, where it would be the max in disguise."""
+    s = sorted(x for x in xs if x is not None)
+    if not s or len(s) < round(1 / (1 - q)):
+        return None
+    return s[max(0, math.ceil(len(s) * q) - 1)]
+
+
+def loadreport(a: argparse.Namespace) -> int:
+    """Per offered rate: latency percentiles, measured concurrency, and the engine queue."""
+    recs = [json.loads(x) for x in open(a.app_out) if x.strip()]
+    recs = [r for r in recs if r.get("phase") == "load"]
+    gw = [json.loads(x) for x in open(a.gw_trace) if x.strip()]
+    rows = join(recs, gw)
+    rates = sorted({r["rate"] for r in rows})
+    print(f"## load sweep  [{a.label}]")
+    print("rate/min | convs | turns | errors | conc. convs mean | streams mean | first token p50 | "
+          "p95 | end to end p50 | p95 | engine waiting p95")
+    base = None
+    for rate in rates:
+        rs = [r for r in rows if r["rate"] == rate]
+        ok = [r for r in rs if r["status"] == "ok"]
+        ttft = [r["ttft_ms"] for r in ok]
+        base = base if base is not None else p50(ttft)
+        waiting = [r["gw_waiting"] for r in rs if r.get("gw_waiting") is not None]
+        mean = lambda xs: sum(xs) / len(xs) if xs else None
+        print(f"{rate:g} | {len({r['conv'] for r in rs})} | {len(rs)} | {len(rs) - len(ok)} | "
+              f"{fmt(mean([r['active_conversations'] for r in rs]), 1)} | "
+              f"{fmt(mean([r['active_streams'] for r in rs]), 1)} | {fmt(p50(ttft))} | "
+              f"{fmt(pct(ttft, 0.95))} | {fmt(p50([r['e2e_ms'] for r in ok]))} | "
+              f"{fmt(pct([r['e2e_ms'] for r in ok], 0.95))} | {fmt(pct(waiting, 0.95))}")
+    if base is not None:
+        print(f"threshold at load: first-token p95 <= 2 x the lowest rate's p50 = {fmt(2 * base)} ms")
+    return 0
+
+
 def load_tokenizer(path: str | None):
     """Qwen's tokenizer.json from the HF cache, so thinking and answer can be split exactly."""
     paths = [path] if path else sorted(glob.glob(
@@ -269,6 +385,7 @@ def join(app_recs: list[dict], gw_recs: list[dict]) -> list[dict]:
                     "upstream_e2e_ms": g.get("e2e_ms"), "prompt_tokens": g.get("prompt_tokens"),
                     "cached_tokens": g.get("cached_tokens"), "injected_est": g.get("injected_tokens_est"),
                     "n_sources": g.get("n_sources"), "search_error": g.get("search_error"),
+                    "gw_waiting": g.get("load_waiting"), "gw_running": g.get("load_running"),
                     "budget": g.get("thinking_budget")})
     return out
 
@@ -359,6 +476,21 @@ def selftest() -> int:
     chk("p50 odd", p50([3, 1, 2]), 2)
     chk("p50 skips None", p50([None, 5]), 5)
     chk("p50 of nothing is None, not zero", pc(p50([])), "-")
+    chk("p95 needs 20 samples", pct(list(range(19)), 0.95), None)
+    chk("p95 nearest rank of 1..20", pct(list(range(1, 21)), 0.95), 19)
+    chk("p95 nearest rank of 1..100", pct(list(range(1, 101)), 0.95), 95)
+    import os, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        hist = [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "a1"},
+                {"role": "user", "content": "u2"}]
+        for i, src in enumerate(["mtrag", "qrecc", "freshqa", "mtrag"]):
+            f.write(json.dumps({"source": src, "history": hist if i < 3 else [], "user": f"q{i}"}) + "\n")
+    scripts = load_scripts(f.name, 3, 0)
+    os.unlink(f.name)
+    chk("load scripts: multi-turn mtrag/qrecc only, user turns in order",
+        sorted(scripts), [["u1", "u2", "q0"], ["u1", "u2", "q1"]])
+    chk("long convo has 40 turns, every one asking for length",
+        (len(LONG_CONVO), all("700 words" in p for p in LONG_CONVO)), (40, True))
 
     app = [{"phase": "convo", "chat_id": 7, "turn_index": 2, "status": "ok"}]
     gw = [{"chat_id": 7, "turn_index": 1, "search_ms": 9, "fetch_ms": 9, "extract_ms": 9},
@@ -395,9 +527,16 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--app", default="http://127.0.0.1:8090")
-    r.add_argument("--mode", choices=["smoke", "convo", "levels", "fresh"], required=True)
+    r.add_argument("--mode", choices=["smoke", "convo", "levels", "fresh", "load"], required=True)
+    r.add_argument("--rates", default="2,4,8,12", help="load mode: conversations per minute, in order")
+    r.add_argument("--hold-s", type=float, default=240.0, help="load mode: seconds of arrivals per rate")
+    r.add_argument("--think-s", type=float, default=15.0, help="load mode: mean reading pause between turns")
+    r.add_argument("--load-thinking", choices=LEVELS + ["auto"], default="auto")
+    r.add_argument("--load-search", choices=["on", "auto", "off"], default="off")
     r.add_argument("--items", default="data/plansets/freshqa.jsonl", help="fresh mode: FreshQA label file")
     r.add_argument("--per-category", type=int, default=20, help="fresh mode: questions per category")
+    r.add_argument("--fresh-arms", nargs="*", default=None,
+                   help="fresh mode: only these search/thinking arms, e.g. on/off")
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--out", default="results/p6b-app.jsonl")
     r.add_argument("--turns", type=int, default=len(CONVO))
@@ -405,7 +544,8 @@ def main() -> int:
     r.add_argument("--convo-level", choices=LEVELS + ["auto"], default="brief")
     r.add_argument("--convo-search", choices=["on", "auto", "off"], default="on",
                    help="6c search mode; 'on' is sent as the legacy boolean true")
-    r.add_argument("--prompts", default=None, help="JSON list of user messages replacing CONVO")
+    r.add_argument("--prompts", default=None,
+                   help="JSON list of user messages replacing CONVO, or 'long' for LONG_CONVO")
     r.add_argument("--title", default="p6b-convo", help="chat title; not 'New chat', so no title call")
     r.add_argument("--gap-s", type=float, default=1.5, help="pause between sends; Brave rate limits")
     p = sub.add_parser("report")
@@ -414,8 +554,15 @@ def main() -> int:
     p.add_argument("--tokenizer", default=None, help="tokenizer.json; the HF cache is searched if omitted")
     p.add_argument("--label", default="Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 16k ctx, "
                    "prefix cache on, A10G, via app + gateway")
+    lr = sub.add_parser("loadreport")
+    lr.add_argument("--app-out", default="results/p6d-load.jsonl")
+    lr.add_argument("--gw-trace", default="results/p6d-gw.jsonl")
+    lr.add_argument("--label", default="Qwen3-8B fp8 weights, fp8 KV, vLLM 0.27.1 V1 runner, 32k ctx, "
+                    "prefix cache on, A10G, via a scratch app + gateway")
     a = ap.parse_args()
-    return asyncio.run(run(a)) if a.cmd == "run" else report(a)
+    if a.cmd == "run":
+        return asyncio.run(run(a))
+    return report(a) if a.cmd == "report" else loadreport(a)
 
 
 if __name__ == "__main__":
