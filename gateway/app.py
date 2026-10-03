@@ -481,6 +481,14 @@ async def _passthrough_json(body: bytes, tr: GatewayTrace) -> Response:
     tr.http_status = r.status_code
     tr.e2e_ms = tr.upstream_ms = (time.perf_counter() - t0) * 1e3
     tr.status = "ok" if r.status_code == 200 else "http_error"
+    try:
+        payload = json.loads(r.content)
+    except ValueError:
+        payload = {}
+    usage = (payload.get("usage") if isinstance(payload, dict) else None) or {}
+    tr.prompt_tokens = usage.get("prompt_tokens")
+    tr.cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    tr.completion_tokens = usage.get("completion_tokens")
     _record(tr)
     return Response(content=r.content, status_code=r.status_code,
                     media_type=r.headers.get("content-type", "application/json"))
@@ -673,6 +681,17 @@ def selftest() -> int:
                 "gw_purpose": "summary"})
             chk("summary purpose recorded without join ids", (RECENT[-1].purpose,
                 RECENT[-1].chat_id, RECENT[-1].turn_index) == ("summary", None, None))
+            chk("a reply without usage records no token counts",
+                (RECENT[-1].prompt_tokens, RECENT[-1].cached_tokens) == (None, None))
+            CLIENT._json_reply = {"id": "w", "choices": [], "usage": {
+                "prompt_tokens": 900, "completion_tokens": 1,
+                "prompt_tokens_details": {"cached_tokens": 880}}}
+            client.post("/v1/chat/completions", json={
+                "model": "m", "messages": [{"role": "user", "content": "."}], "stream": False,
+                "max_tokens": 1, "gw_purpose": "warm", "gw_chat_id": 4, "gw_turn_index": 2})
+            chk("non-streamed calls record usage, cached tokens included",
+                (RECENT[-1].purpose, RECENT[-1].prompt_tokens, RECENT[-1].cached_tokens,
+                 RECENT[-1].completion_tokens) == ("warm", 900, 880, 1))
 
             _orig_run_search = run_search
 

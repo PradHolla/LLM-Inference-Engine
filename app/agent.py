@@ -227,6 +227,15 @@ def source_cards(sources: list[gsearch.Source]) -> list[dict]:
     return cards
 
 
+def base_messages(history: list[dict], k: int, summary: str | None, today: str) -> list[dict]:
+    """[system][summary][history after k]: the shared prefix of every call in a turn."""
+    base = [{"role": "system", "content": prompts.system_prompt(today)}]
+    if summary is not None:
+        base.append(prompts.summary_message(summary))
+    base.extend(_wire(message) for message in history[k:])
+    return base
+
+
 async def load_context(state: AgentState) -> dict:
     write = get_stream_writer()
     history, today = state["history"], state["today"]
@@ -240,10 +249,7 @@ async def load_context(state: AgentState) -> dict:
             await asyncio.wait({task}, timeout=config.SUMMARY_WAIT_S)
             if task.done() and not task.cancelled() and task.exception() is None:
                 summary = task.result()
-    base = [{"role": "system", "content": prompts.system_prompt(today)}]
-    if summary is not None:
-        base.append(prompts.summary_message(summary))
-    base.extend(_wire(message) for message in history[k:])
+    base = base_messages(history, k, summary, today)
     write({"type": "_stats", "summary_used": summary is not None,
            "history_tokens": sum(budget.message_tokens(m) for m in base[1:])})
     update: dict = {"base": base}
@@ -288,11 +294,18 @@ async def search(state: AgentState) -> dict:
     write({"type": "status", "stage": "searching", "query": "; ".join(queries),
            "queries": queries})
     started = time.perf_counter()
+    outcomes: list[gsearch.SearchOutcome] = []
     try:
-        async with httpx.AsyncClient() as client:
-            outcomes = list(await asyncio.gather(*(_search_one(query, client) for query in run)))
         if spec is not None:
-            outcomes.insert(0, await spec)
+            # The early search started with the planner; when it already found enough, the
+            # planner's extra query would only add a serial round trip to the first token.
+            outcomes.append(await spec)
+            if sum(source.ok for source in outcomes[0].sources) >= config.EARLY_SEARCH_ENOUGH:
+                run, queries = [], [state["user_text"]]
+                write({"type": "status", "stage": "searching", "query": queries[0],
+                       "queries": queries})
+        async with httpx.AsyncClient() as client:
+            outcomes += await asyncio.gather(*(_search_one(query, client) for query in run))
     finally:
         if spec is not None and not spec.done():
             spec.cancel()
@@ -428,6 +441,35 @@ async def summarize(chat_id: int, history: list[dict], k: int, today: str, model
         raise ValueError("summary response was empty")
     await asyncio.to_thread(db.save_summary, covered, chat_id, text)
     return await asyncio.to_thread(db.get_summary, covered) or text
+
+
+def warm_body(path: list[dict], today: str, model: str, chat_id: int, turn_index: int) -> dict | None:
+    """The next turn's shared prefix plus a throwaway user turn, or None when it will change."""
+    k = boundary(path, "", today, user_tokens=config.NEXT_USER_TOKENS)
+    summary = None
+    if k > 0:
+        summary = db.get_summary(int(path[k - 1]["id"]))
+        if summary is None:
+            return None   # a summary is still being written; the next prefix is not known yet
+    messages = base_messages(path, k, summary, today)
+    messages.append({"role": "user", "content": config.WARM_PROBE})
+    return {"model": model, "messages": messages, "stream": False, "max_tokens": 1,
+            **sampling(False), "gw_thinking_budget": 0, "gw_purpose": "warm",
+            "gw_chat_id": chat_id, "gw_turn_index": turn_index}
+
+
+async def warm_next_turn(path: list[dict], today: str, model: str, chat_id: int,
+                         turn_index: int) -> None:
+    """After an answer: prefill the history as the next turn will render it. Never raises."""
+    try:
+        body = await asyncio.to_thread(warm_body, path, today, model, chat_id, turn_index)
+        if body is None:
+            return
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(f"{config.GATEWAY_URL}/v1/chat/completions", json=body)
+            response.raise_for_status()
+    except Exception as exc:
+        LOGGER.warning("warm-up failed chat_id=%s turn_index=%s %r", chat_id, turn_index, exc)
 
 
 async def schedule_summary(chat_id: int, path: list[dict], today: str,

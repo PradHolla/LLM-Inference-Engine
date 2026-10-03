@@ -28,6 +28,7 @@ from . import agent, config, db
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 MODEL_ID = config.MODEL_ID
+WARMING: set[asyncio.Task] = set()   # strong refs so background warm-ups are not collected
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
 
@@ -379,6 +380,12 @@ def _answer_stream(chat_id: int, user_id: int | None, assistant_parent_id: int |
                     {"id": message_id, "role": "assistant", "content": content}], today, MODEL_ID)
             except Exception as exc:
                 LOGGER.warning("summary scheduling failed chat_id=%s %r", chat_id, exc)
+            if config.WARM_NEXT_TURN:
+                warm = asyncio.create_task(agent.warm_next_turn(history + [
+                    {"id": message_id, "role": "assistant", "content": content}], today, MODEL_ID,
+                    chat_id, turn_index))
+                WARMING.add(warm)
+                warm.add_done_callback(WARMING.discard)
             if turn_index == 1:
                 current = await asyncio.to_thread(db.get_chat, chat_id)
                 if current is not None and current["title"] == "New chat":
@@ -556,7 +563,9 @@ async def _selftest_async() -> list[str]:
         if "nothing" in query:
             return gsearch.SearchOutcome(query=query, search_ms=1.0, fetch_ms=0.0,
                                          extract_ms=0.0, error="no results")
-        return gsearch.SearchOutcome(query=query, sources=[
+        extra = ([gsearch.Source(url="https://second.test/", title="Second source",
+                                 text="second body " * 50, ok=True)] if "plenty" in query else [])
+        return gsearch.SearchOutcome(query=query, sources=extra + [
             gsearch.Source(url="https://www.example.test/story", title="Fixture source",
                            text="fixture body " * 50, ok=True),
             gsearch.Source(url="https://blocked.test/", error="HTTP 403")],
@@ -749,10 +758,26 @@ async def _selftest_async() -> list[str]:
                   next(e for e in capped if e.get("stage") == "searching")["queries"] == ["many parts", "b"]
                   and _message(cap_chat, db.get_branch(cap_chat)[-1])["stats"]["search_early"] is True)
 
+            fake["plan_reply"] = {"search": True, "queries": ["x1", "x2"], "think": False}
+            n_searches = len(searched_queries)
+            plenty_chat = db.create_chat("plenty", "auto")
+            plenty = await collect(await chats_send(plenty_chat, SendBody(
+                content="plenty please", thinking="auto", search="auto")))
+            check("first message: an early search with enough sources skips the planner's query",
+                  searched_queries[n_searches:] == ["plenty please"] and
+                  [e for e in plenty if e.get("stage") == "searching"][-1]["queries"] ==
+                  ["plenty please"] and
+                  _message(plenty_chat, db.get_branch(plenty_chat)[-1])["stats"]["queries"] ==
+                  ["plenty please"] and len(next(e for e in plenty
+                                                 if e["type"] == "sources")["sources"]) == 2)
+
             fake["plan_reply"] = {"search": True, "queries": ["rewritten follow-up"], "think": False}
             follow_chat = db.create_chat("follow", "auto")
             await collect(await chats_send(follow_chat, SendBody(content="first question",
                                                                thinking="off", search="off")))
+            await asyncio.gather(*WARMING)
+            warm = [r for r in received if r.get("gw_purpose") == "warm"
+                    and r.get("gw_chat_id") == follow_chat]
             n_searches = len(searched_queries)
             follow = await collect(await chats_send(follow_chat, SendBody(
                 content="explain those", thinking="auto", search="auto")))
@@ -760,6 +785,15 @@ async def _selftest_async() -> list[str]:
                   searched_queries[n_searches:] == ["rewritten follow-up"] and
                   _message(follow_chat, db.get_branch(follow_chat)[-1])["stats"]["search_early"] is False
                   and "done" in types(follow))
+            follow_plan = [r for r in plans() if r.get("gw_chat_id") == follow_chat][-1]
+            check("after an answer, one warm-up sends the next turn's prefix and a throwaway turn",
+                  len(warm) == 1 and warm[0]["max_tokens"] == 1 and warm[0]["stream"] is False and
+                  warm[0]["gw_thinking_budget"] == 0 and warm[0]["gw_turn_index"] == 1 and
+                  warm[0]["messages"][-1] == {"role": "user", "content": config.WARM_PROBE} and
+                  [m["role"] for m in warm[0]["messages"][:-1]] == ["system", "user", "assistant"])
+            check("the next turn's planner starts with exactly the warmed prefix",
+                  follow_plan["messages"][:len(warm[0]["messages"]) - 1] ==
+                  warm[0]["messages"][:-1])
 
             fake["plan_reply"] = {"search": True, "queries": ["nothing here"], "think": False}
             empty = await collect(await chats_send(db.create_chat("empty", "auto"), SendBody(
@@ -827,7 +861,7 @@ async def _selftest_async() -> list[str]:
             title_chat = db.create_chat("New chat", "brief")
             title_events = await collect(await chats_send(title_chat, SendBody(
                 content="name this conversation", thinking="off", search=False)))
-            title_request = received[-1]
+            title_request = [r for r in received if r.get("gw_purpose") == "title"][-1]
             check("automatic title follows done", types(title_events)[-2:] == ["done", "title"])
             check("automatic title is saved", db.get_chat(title_chat)["title"] == "A useful title")
             check("title request is tagged and excludes trace join fields",

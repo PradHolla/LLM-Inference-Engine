@@ -51,5 +51,8 @@ PLAN_TIMEOUT_S = 8.0
 SUMMARY_TIMEOUT_S = 60.0
 SUMMARY_WAIT_S = 10.0    # the next turn waits this long for a pending summary, then drops the block
 MAX_QUERIES = 2
+EARLY_SEARCH_ENOUGH = 2  # first message: skip the planner's extra query when the early search found this many
+WARM_NEXT_TURN = os.environ.get("APP_WARM", "1") == "1"
+WARM_PROBE = "."         # throwaway user turn; only the history ahead of it is meant to stay cached
 TOKENIZER_PATH = os.environ.get("APP_TOKENIZER", "")
 CHARS_PER_TOKEN_FALLBACK = 3.5
