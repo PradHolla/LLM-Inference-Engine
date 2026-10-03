@@ -3,7 +3,7 @@
 # Every step talks to a SCRATCH stack (gateway :8082, apps :8091/:8092, scratch DBs), never the
 # owner's app on :8090 or its chats.db.   Runs ON the box after `app-run.sh up`:
 #   sudo systemd-run --unit=p6d-<step> --collect /bin/bash /opt/llm/infra/p6d-runs.sh <step>
-#   steps: scratch | warmcheck | turn1 | load | loadsearch | long | report
+#   steps: scratch | warmcheck | turn1 | load | loadsearch | long | report | all
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -82,6 +82,14 @@ long)
         --out results/p6d-long.jsonl
     echo "LONG_DONE rc=$?"
     ;;
+all)
+    # scratch, warmcheck, turn1, load, long, report in one unit; loadsearch is chosen afterwards.
+    for step in scratch warmcheck turn1 load long report; do
+        echo "[$(ts)] STEP $step"
+        bash "$0" "$step" || die "step $step failed"
+    done
+    echo "ALL_DONE"
+    ;;
 report)
     "$UV" run tools/appdrive.py loadreport --app-out results/p6d-load.jsonl --gw-trace $GWT \
         > results/p6d-load-report.txt 2>&1
@@ -90,6 +98,6 @@ report)
     echo "REPORT_DONE"
     ;;
 *)
-    echo "usage: $0 scratch | warmcheck | turn1 | load | loadsearch | long | report"; exit 2 ;;
+    echo "usage: $0 scratch | warmcheck | turn1 | load | loadsearch | long | report | all"; exit 2 ;;
 esac
 exit 0
