@@ -62,10 +62,11 @@ turn1)
     echo "TURN1_DONE rc=$?"
     ;;
 load)
-    rm -f results/p6d-load.jsonl
+    OUT="${OUT:-results/p6d-load.jsonl}"
+    rm -f "$OUT"
     "$UV" run tools/appdrive.py run --mode load --app http://127.0.0.1:8091 \
-        --items data/plansets/all.jsonl --turns 4 --rates 2,4,8,12 --hold-s 240 --think-s 15 \
-        --load-thinking auto --load-search off --out results/p6d-load.jsonl
+        --items data/plansets/all.jsonl --turns 4 --rates "${RATES:-2,4,8,12}" --hold-s 240 \
+        --think-s 15 --load-thinking auto --load-search off --seed "${SEED:-0}" --out "$OUT"
     echo "LOAD_DONE rc=$?"
     ;;
 loadsearch)
@@ -84,15 +85,24 @@ long)
     ;;
 all)
     # scratch, warmcheck, turn1, load, long, report in one unit; loadsearch is chosen afterwards.
-    for step in scratch warmcheck turn1 load long report; do
+    for step in scratch warmcheck turn1 load long report; do  # extend: see 'more'
         echo "[$(ts)] STEP $step"
         bash "$0" "$step" || die "step $step failed"
     done
     echo "ALL_DONE"
     ;;
+more)
+    # The 2-12/min sweep never reached the at-load line; push past it, then search on at 8/min.
+    OUT=results/p6d-load2.jsonl RATES=20,30,45 SEED=2 bash "$0" load || die "load extension failed"
+    RATE=8 bash "$0" loadsearch || die "loadsearch failed"
+    bash "$0" report
+    echo "MORE_DONE"
+    ;;
 report)
     "$UV" run tools/appdrive.py loadreport --app-out results/p6d-load.jsonl --gw-trace $GWT \
         > results/p6d-load-report.txt 2>&1
+    [ -f results/p6d-load2.jsonl ] && "$UV" run tools/appdrive.py loadreport \
+        --app-out results/p6d-load2.jsonl --gw-trace $GWT > results/p6d-load2-report.txt 2>&1
     [ -f results/p6d-loadsearch.jsonl ] && "$UV" run tools/appdrive.py loadreport \
         --app-out results/p6d-loadsearch.jsonl --gw-trace $GWT > results/p6d-loadsearch-report.txt 2>&1
     echo "REPORT_DONE"
