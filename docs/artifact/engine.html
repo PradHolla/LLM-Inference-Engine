@@ -198,6 +198,8 @@
     <li><a href="#endtoend">A real chat, end to end</a></li>
     <li><a href="#planner">A plan before every answer</a></li>
     <li><a href="#fresh">What search and thinking buy</a></li>
+    <li><a href="#load">One GPU, fifty people</a></li>
+    <li><a href="#warm">Keeping the cache warm</a></li>
     <div class="grp">Conclusions</div>
     <li><a href="#attrib">The attribution</a></li>
     <li><a href="#method">Bugs and method</a></li>
@@ -208,7 +210,7 @@
 <header>
   <p class="eyebrow">Qwen3-8B &middot; one NVIDIA A10G &middot; every number predicted before it was measured</p>
   <h1>An inference engine from scratch, and why every speed-up here is a range</h1>
-  <p class="standfirst">Nine parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest. The last part puts a search agent on top of the engine and measures what a user actually gets: live web search takes a benchmark of current-events questions from 35% to 65%, and thinking takes it to 79%.</p>
+  <p class="standfirst">Nine parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest. The last part puts a search agent on top of the engine and measures what a user actually gets: live web search takes a benchmark of current-events questions from 35% to 65%, and thinking takes it to 79%. Under load, one 24 GB card kept fifty-one people&rsquo;s answers streaming faster than anyone reads, without ever filling its memory or making anyone wait.</p>
   <div class="hstat">
     <div class="hs"><span class="k">Naive server</span><span class="v">0.332 req/s</span></div>
     <div class="hs"><span class="k">Engine from scratch</span><span class="v"><em>1.60</em> req/s</span></div>
@@ -221,6 +223,7 @@
     <div class="hs"><span class="k">Hidden reasoning, gsm8k</span><span class="v"><em>0.4</em> points for <em>160×</em> the silence</span></div>
     <div class="hs"><span class="k">Vendor&rsquo;s own stop phrase</span><span class="v"><em>42.7</em> points worse</span></div>
     <div class="hs"><span class="k">Live search, FreshQA</span><span class="v">35% &rarr; <em>79%</em></span></div>
+    <div class="hs"><span class="k">One A10G, people at once</span><span class="v"><em>51</em> at 16 tok/s</span></div>
   </div>
 </header>
 
@@ -1333,6 +1336,42 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
     <p><strong>Thinking is worth 14 more points, and most of it is one category.</strong> On questions with a false premise, full thinking scores 85% against 50% without. Reasoning is what notices that the question itself is wrong. Part eight found thinking worth almost nothing on grade-school maths; on questions about the current world it is worth the most of anything after search. The same knob, again, has no number without a workload.</p>
   </div>
   <p>The grader was checked rather than trusted. Where the judge and the string match disagreed, 23 of 240 answers, the judge was right about 18 times and wrong 3, which puts its figures within about two points. Some fast-changing &ldquo;wrong&rdquo; answers are right today and wrong only against an April gold, so that column is a floor.</p>
+</section>
+
+<section id="load">
+  <h2>One GPU, fifty people</h2>
+  <p>Everything so far measured one person at a time. The real question for a product is how many people one card can carry. Simulated users started real four-turn conversations at random moments and paused fifteen seconds to read each answer, and the arrival rate was raised until the experience clearly degraded.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8 weights and KV cache, vLLM 0.27.1, 32k window, one A10G, the agent with thinking Auto, search off, cache warm-up on. 1,836 turns, 0 errors; vLLM never had a single request waiting.</caption>
+    <thead><tr><th class="n">New chats / min</th><th class="n">People waiting at once</th><th class="n">Answer speed per person</th><th class="n">First word p50</th><th class="n">First word p95</th><th class="n">KV cache used, p95</th></tr></thead>
+    <tbody>
+      <tr><td class="n">2</td><td class="n">1.5</td><td class="n">52 tok/s</td><td class="n">1.03 s</td><td class="n">1.31 s</td><td class="n">1.5%</td></tr>
+      <tr><td class="n">12</td><td class="n">7.5</td><td class="n">45 tok/s</td><td class="n">1.19 s</td><td class="n m">1.61 s</td><td class="n">7.7%</td></tr>
+      <tr><td class="n">20</td><td class="n">16.0</td><td class="n">37 tok/s</td><td class="n">1.34 s</td><td class="n x">2.16 s</td><td class="n">16%</td></tr>
+      <tr><td class="n">30</td><td class="n">27.7</td><td class="n">28 tok/s</td><td class="n">1.72 s</td><td class="n">2.84 s</td><td class="n">24%</td></tr>
+      <tr><td class="n">45</td><td class="n">50.9</td><td class="n m">16 tok/s</td><td class="n">2.53 s</td><td class="n">4.91 s</td><td class="n m">48%</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>Memory never filled and nobody ever queued.</strong> With fifty-one people waiting on an answer at once, and up to eighty-seven requests in flight at the busiest moments, the fp8 KV cache was under half full and continuous batching admitted every request straight into the running batch. There is no wall. Everyone slows together, and at the heaviest load each answer still streamed at 16 tokens a second &mdash; about three times faster than anyone reads.</p>
+  </div>
+  <p>What a person notices first is the wait for the first word, and almost none of it is the model reading the prompt, which stays under a quarter of a second thanks to the cache. It is the planner: a roughly fifty-token JSON plan, written before every answer and never shown, generated at the same shared per-token speed as everything else. It grew from 0.9 s to 2.2 s across the sweep. <strong>The first limit on this card is a few dozen hidden tokens</strong>, so the levers are fewer of them or a much smaller model to write them.</p>
+  <p>Keeping the p95 first word within twice the single-user time holds to about eight answers in flight and is just past it at sixteen. With live search on, at eight new chats a minute, the first word is 3.6 s at the median and 5.9 s at p95, and the cause is the search round trip&rsquo;s own tail, 2.8 s at p95, with the GPU still never queueing. The first pass of this sweep stopped at twelve chats a minute and never reached the line; it reads as &ldquo;no limit found&rdquo;, which is the regime mistake from part seven, caught this time because the line was written down before the run.</p>
+</section>
+
+<section id="warm">
+  <h2>Keeping the cache warm between turns</h2>
+  <p>The app&rsquo;s own cache numbers showed the previous answer never matching. With thinking on, the chat template strips the reasoning from history, so the stored copy of the answer no longer lines up with how it is replayed; with thinking off, the four-token formatting bug from part seven does the same. Either way the planner re-read the whole previous answer on the critical path, every turn.</p>
+  <p>The fix costs one tiny background request: as soon as an answer finishes, the history exactly as the next turn will send it is pushed through the model with a one-token reply, so it is cached while the person is still reading.</p>
+  <div class="scroll"><table>
+    <caption>Same 10-turn chat, search off, thinking Auto, turns 2-10. Configuration as above.</caption>
+    <thead><tr><th></th><th class="n">Tokens re-read per turn</th><th class="n">First word p50</th></tr></thead>
+    <tbody>
+      <tr><td>Without the warm-up</td><td class="n">800&ndash;1,080, growing</td><td class="n">1,447 ms</td></tr>
+      <tr><td>With it</td><td class="n m">~350, flat</td><td class="n m">1,167 ms</td></tr>
+    </tbody>
+  </table></div>
+  <p>The remaining 350 are the planner&rsquo;s own instructions, which follow the new message and can never be cached. A forty-turn conversation then crossed the 32k summary boundary three times without a failure: ordinary turns got their first word in 124&ndash;172 ms at up to 22,700 tokens of history, 99.7% of it read from cache. The three turns right after a summary took 4.5&ndash;5.7 s, because a new summary changes the prompt directly after the system prompt and the warm-up was skipping while the summary was still being written. Warming again once it lands is the obvious next fix.</p>
 </section>
 
 <p class="part">Part ten &middot; Conclusions</p>

@@ -22,7 +22,8 @@ answers in a third of a second.
 On top of the engine sits a Perplexity-style chat app: a LangGraph agent decides per message
 whether to search the web and whether to think, and answers with citations. **Live search
 takes it from 35% to 79% on FreshQA**, with the first word on screen in 1.8 s when thinking
-is off.
+is off. Under load, **one A10G kept 51 people's answers streaming at once at 16 tokens a second**,
+about 3x faster than anyone reads, with the KV cache never past 48% full and no request ever queued.
 
 ## What this project demonstrates
 
@@ -480,6 +481,47 @@ Search is worth 30 points, almost all of it on facts that change: slow-changing 
 25% to 80%. Thinking is worth 14 more, and nearly all of that comes from questions with a false
 premise, 50% to 85%: reasoning is what notices the question itself is wrong.
 
+### Phase 6d: one 24 GB GPU under load
+
+Simulated users start real 4-turn conversations (MTRAG, QReCC) at random times and pause 15 s to
+read each answer, at rising rates, through the real app on a scratch copy of the stack:
+
+| new chats /min | people waiting on an answer at once | answer speed per person | first word p50 | first word p95 | KV cache used, p95 |
+|---|---|---|---|---|---|
+| 2 | 1.5 | 52 tok/s | 1.03 s | 1.31 s | 1.5% |
+| 12 | 7.5 | 45 tok/s | 1.19 s | 1.61 s | 7.7% |
+| 20 | 16.0 | 37 tok/s | 1.34 s | 2.16 s | 16% |
+| 30 | 27.7 | 28 tok/s | 1.72 s | 2.84 s | 24% |
+| 45 | 50.9 | 16 tok/s | 2.53 s | 4.91 s | 48% |
+
+*Qwen3-8B fp8 weights and KV, vLLM 0.27.1, 32k window, one A10G, thinking Auto, search off,
+cache warm-up on. 0 errors in 1,836 turns; vLLM never had a request waiting.*
+
+![Answer speed against reading speed, and the wait before the first word, under load](results/load-capacity.png)
+
+**Memory and queueing never became the limit.** fp8 KV left the cache under half full at the
+peak, and continuous batching admitted every request into the running batch, so the app does not
+hit a wall: everyone slows together. Answers kept streaming about 3x faster than reading speed
+(~5.6 tok/s) even at 51 concurrent. **What degrades first is a token cost nobody sees**: before
+answering, the planner writes a ~50-token JSON plan, generated at the same shared per-token speed,
+so it went from 0.9 s to 2.2 s of the first-word wait while reading the prompt stayed under
+0.25 s. Fewer planner tokens, or a much smaller planner model, is the lever. Keeping the p95 first
+word within 2x the single-user time holds up to about 8 answers in flight (13 open
+conversations) and is just past it at 16. With live search on at 8 new chats a minute, the
+first word is 3.6 s p50 / 5.9 s p95, set by the web search's own tail (2.8 s p95), not the GPU.
+
+**Warming the next turn's prefix after every answer** saves 280 ms of first word per turn: with
+thinking on, the chat template strips the reasoning from history, so the previous answer never
+matches the cache, and the planner used to re-read it on the critical path (800-1,080 uncached
+tokens a turn, against a flat ~350 with the warm-up). On a first message, skipping the planner's
+extra search query when the early search already has sources cut the cold first word 18%
+(2.53 to 2.08 s).
+
+**A 40-turn conversation** crossed the 32k summary boundary three times with no failures; normal
+turns got their first word in 124-172 ms at up to 22.7k tokens of history, 99.7% read from cache.
+The turn after each summary took 4.5-5.7 s, because the summary changes the prompt right after the
+system prompt; warming again once the summary lands would remove it.
+
 ## What is here
 
 ```
@@ -495,7 +537,8 @@ tools/specmon.py      reads speculative-decoding acceptance off vLLM's metrics;
                       reports acceptance BY DRAFT POSITION, not just the scalar
 tools/convo.py        stateful multi-turn conversation driver; measures prefix-cache
                       behaviour, which an open-loop load generator cannot see
-tools/appdrive.py     drives the chat app's own API; joins each turn to the gateway trace
+tools/appdrive.py     drives the chat app's own API; joins each turn to the gateway trace;
+                      load mode: Poisson arrivals of multi-turn conversations
 tools/planeval.py     scores the planner against labelled questions
 tools/plansets.py     builds the planner sets from MTRAG, QReCC, FreshQA and GSM8K
 tools/freshjudge.py   grades FreshQA answers with a separate Qwen3-8B judge
@@ -562,7 +605,7 @@ is true forever and would disable the guardrail entirely.
 | 3 | vLLM as an object of study; ablate every flag | done |
 | 4 | Quantization: throughput, capacity, and quality | done |
 | 5 | Speculative decoding | done |
-| 6 | The chat app and web search | done: gateway, app, search agent |
+| 6 | The chat app and web search | done: gateway, app, search agent, load test |
 | 7 | Thinking budget as a scheduling policy | done |
 
 Phase 2 hit its target (1.60 req/s at ITL p50 58 ms) and produced a negative result worth
