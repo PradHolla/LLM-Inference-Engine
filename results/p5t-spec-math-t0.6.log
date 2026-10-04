@@ -1,0 +1,25 @@
+  sampling {'temperature': 0.6, 'top_p': 0.95, 'top_k': 20, 'min_p': 0.0}
+config p5t-spec-math-t0.6  ->  results/p5t-spec-math-t0.6.jsonl
+  http://localhost:8000   concurrency 1
+
+  math/think           12 items  max_tokens=5120
+    acc 100.0%   truncated  0.0%   unparseable  0.0%   err 0
+    completion tokens p50  2195  p99  3250  batch med 1 max 1 (n=885)  think_path ['inline_tags']
+  math/nothink       skipped (capped at 0)
+
+wrote results/p5t-spec-math-t0.6.jsonl
+
+=== specmon p5t-spec-math-t0.6 ===
+  verify steps (drafts)   8499
+  draft tokens proposed   25497
+  draft tokens accepted   14782
+  k (inferred)            3
+  acceptance rate a       0.5798
+  mean emitted / step L   2.7393
+  E[L] if i.i.d.          2.1107
+  measured / i.i.d.       1.2978   (>1 = acceptance is positively correlated across positions)
+  acceptance by position:
+    pos 0  0.7752  ###############################
+    pos 1  0.5788  #######################
+    pos 2  0.3853  ###############
+  wrapped command exited 0 after 228.2s

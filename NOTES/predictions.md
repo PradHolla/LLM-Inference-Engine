@@ -7053,3 +7053,63 @@ Config as P6D S. The warm-up now also runs when a summary finishes (`schedule_su
 |---|---|---|
 | E1 | first token on the first turn using a new summary | **<= 300 ms**, from 4,463-5,671 ms |
 | E2 | that turn's cached tokens | **>= 95%** of its prompt, from 192 tokens |
+
+### P5T actuals, 2026-10-03
+
+Config as the P5T header; box at `c997a39`. Raw: `results/p5t-{spec,control}-{gsm8k,math}-t*.jsonl`,
+acceptance in `results/p5t-spec.jsonl`.
+
+| slice | T | acceptance | per position | L | spec tok/s | control tok/s | **speedup** |
+|---|---|---|---|---|---|---|---|
+| gsm8k/think | 0 | 0.491 | 0.71 / 0.47 / 0.29 | 2.47 | 96.6 | 52.3 | **1.85x** |
+| gsm8k/think | 0.3 | 0.498 | 0.71 / 0.48 / 0.30 | 2.50 | 95.3 | 51.9 | 1.84x |
+| gsm8k/think | 0.6 | 0.505 | 0.73 / 0.49 / 0.30 | 2.51 | 95.9 | 51.8 | **1.85x** |
+| gsm8k/think | 1.0 | 0.482 | 0.70 / 0.46 / 0.28 | 2.45 | 94.2 | 52.0 | 1.81x |
+| math/think | 0 | 0.596 | 0.79 / 0.60 / 0.40 | 2.79 | 106.5 | 51.9 | **2.05x** |
+| math/think | 0.3 | 0.590 | 0.78 / 0.59 / 0.39 | 2.77 | 102.4 | 51.5 | 1.99x |
+| math/think | 0.6 | 0.580 | 0.78 / 0.58 / 0.39 | 2.74 | 102.1 | 51.5 | **1.98x** |
+| math/think | 1.0 | 0.552 | 0.74 / 0.55 / 0.36 | 2.66 | 96.8 | 51.4 | 1.88x |
+
+*Qwen3-8B fp8, EAGLE3 k=3, `--max-model-len 16384`, A10G, concurrency 1, 12 items per cell, 0 truncated.
+T > 0 also sets top_p 0.95, top_k 20, min_p 0.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| T0 | T=0 reproduces P5-I 1.85x / 2.05x +/- 5% | **1.85x / 2.05x**; acceptance 0.491 / 0.596; verify steps **5,194 / 7,369, identical to P5-I** | correct, exactly: greedy at concurrency 1 replays token for token |
+| T1 | acceptance at 0.6 falls 10-20% | gsm8k **+3%**, math **-3%** | **wrong, by a factor of ~5** |
+| T2 | speedup at 0.6: gsm8k 1.55-1.75x, math 1.75-1.95x | **1.85x / 1.98x** | **wrong, pessimistic** |
+| T3 | speedup at 1.0: gsm8k 1.35-1.6x | **1.81x** (math 1.88x) | **wrong, pessimistic** |
+| T4 | monotone in T on both slices | math yes; gsm8k flat within noise (0.6 a hair above 0) | half |
+
+**The published Phase 5 speedups survive at the temperature the app serves.** At the Qwen3
+thinking settings (T 0.6, top_p 0.95, top_k 20) speculation is worth 1.85x on natural reasoning and
+1.98x on templated maths, against 1.85x and 2.05x greedy. Even at T 1.0 it keeps 1.81x / 1.88x.
+
+**Why the prediction was 5x too pessimistic.** It was anchored on the EAGLE paper's T=0 -> T=1
+drop (12-23%), which was measured on open chat with NO truncation. Here top_k 20 and top_p 0.95
+cut the tail before sampling, and T 0.6 sharpens what is left, so on most reasoning tokens the
+target's top choice still carries nearly all the mass and the greedily drafted token survives the
+rejection sampler about as often as under greedy decoding. The loss that does appear sits where
+it should: math, whose acceptance is highest, loses most (2.05 -> 1.88x at T 1.0), and it grows
+with temperature. Same family as incident 18: a constant measured in one regime (untruncated
+chat) carried into another (truncated reasoning).
+
+**Caveat kept:** 12 items per cell, as P5-I. The gsm8k ordering (0.6 above 0) is inside the noise
+of that sample; the math trend is consistent across all four points.
+
+### P6E actuals, 2026-10-03
+
+Config as P6D S, 30 turns, warm-up on summary completion. Raw: `results/p6e-long.jsonl`.
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| E1 | first token on a new-summary turn <= 300 ms | turn 28: **123 ms**; turn 20: **5,877 ms** | **half** |
+| E2 | >= 95% of that turn's prompt cached | turn 28: **99.6%** (11,120 / 11,163); turn 20: 192 tokens | half |
+
+30/30 ok; summaries 3.6 s and 5.1 s. **The fix works when the summary finishes before the next
+message, and cannot when it does not.** The driver sends 2 s after each answer. On turn 20 the
+summary (3.6 s) was still being written, so the turn waited for it and then prefilled 12.9k tokens
+cold, exactly as before. Turn 28's summary had been scheduled a turn early (the boundary uses a
+256-token estimate of the next message) and its warm-up landed in time. A person reading a
+1,500-token answer pauses far longer than 5 s, so turn 28 is the realistic case; closing the race
+outright means starting the summary one turn before the boundary rather than at it.

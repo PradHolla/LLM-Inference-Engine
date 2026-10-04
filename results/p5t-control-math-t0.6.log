@@ -1,0 +1,10 @@
+  sampling {'temperature': 0.6, 'top_p': 0.95, 'top_k': 20, 'min_p': 0.0}
+config p5t-control-math-t0.6  ->  results/p5t-control-math-t0.6.jsonl
+  http://localhost:8000   concurrency 1
+
+  math/think           12 items  max_tokens=5120
+    acc 100.0%   truncated  0.0%   unparseable  0.0%   err 0
+    completion tokens p50  1648  p99  3090  batch med 1 max 1 (n=1610)  think_path ['inline_tags']
+  math/nothink       skipped (capped at 0)
+
+wrote results/p5t-control-math-t0.6.jsonl

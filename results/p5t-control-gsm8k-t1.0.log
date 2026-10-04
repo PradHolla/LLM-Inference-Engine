@@ -1,0 +1,10 @@
+  sampling {'temperature': 1.0, 'top_p': 0.95, 'top_k': 20, 'min_p': 0.0}
+config p5t-control-gsm8k-t1.0  ->  results/p5t-control-gsm8k-t1.0.jsonl
+  http://localhost:8000   concurrency 1
+
+  gsm8k/think          12 items  max_tokens=5120
+    acc  91.7%   truncated  0.0%   unparseable  0.0%   err 0
+    completion tokens p50   886  p99  2547  batch med 1 max 1 (n=875)  think_path ['inline_tags']
+  gsm8k/nothink      skipped (capped at 0)
+
+wrote results/p5t-control-gsm8k-t1.0.jsonl
