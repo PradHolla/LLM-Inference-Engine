@@ -38,6 +38,7 @@ PLAN_SCHEMA = {
 RESPONSE_FORMAT = {"type": "json_schema",
                    "json_schema": {"name": "plan", "schema": PLAN_SCHEMA, "strict": True}}
 PENDING: dict[int, asyncio.Task] = {}
+WARMING: set[asyncio.Task] = set()   # warm-ups started from a finished summary
 # First turn only: the raw message is searched while the planner runs (see code-notes).
 SPECULATIVE: dict[tuple, asyncio.Task] = {}
 
@@ -472,9 +473,10 @@ async def warm_next_turn(path: list[dict], today: str, model: str, chat_id: int,
         LOGGER.warning("warm-up failed chat_id=%s turn_index=%s %r", chat_id, turn_index, exc)
 
 
-async def schedule_summary(chat_id: int, path: list[dict], today: str,
-                           model: str) -> asyncio.Task | None:
-    """After an answer: if the NEXT turn crosses the boundary, write its summary in the background."""
+async def schedule_summary(chat_id: int, path: list[dict], today: str, model: str,
+                           turn_index: int | None = None) -> asyncio.Task | None:
+    """After an answer: if the NEXT turn crosses the boundary, write its summary in the background,
+    then warm the prefix that summary creates so the next turn does not re-read it cold."""
     k = boundary(path, "", today, user_tokens=config.NEXT_USER_TOKENS)
     if k == 0:
         return None
@@ -486,8 +488,14 @@ async def schedule_summary(chat_id: int, path: list[dict], today: str,
 
     def _done(finished: asyncio.Task) -> None:
         PENDING.pop(covered, None)
-        if not finished.cancelled() and finished.exception() is not None:
+        if finished.cancelled():
+            return
+        if finished.exception() is not None:
             LOGGER.warning("summary failed chat_id=%s covered_through=%s %r", chat_id, covered,
                            finished.exception())
+        elif config.WARM_NEXT_TURN and turn_index is not None:
+            warm = asyncio.create_task(warm_next_turn(path, today, model, chat_id, turn_index))
+            WARMING.add(warm)
+            warm.add_done_callback(WARMING.discard)
     task.add_done_callback(_done)
     return task

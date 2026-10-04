@@ -7016,3 +7016,40 @@ of history**. The spike on turns 20, 27 and 36 is avoidable. The summary sits ri
 system prompt, so the whole kept history must be re-read once, and the warm-up skips while a summary
 is pending. Warming again when the summary lands (3.5-3.9 s after the answer, inside a normal
 reading pause) would move that ~4.5 s off the critical path.
+
+## P5T  Speculative decoding vs sampling temperature, and the post-summary warm-up, written 2026-10-03 with the box STOPPED
+
+### P5T: the P5-I recipe at the temperatures the app actually serves
+
+Every Phase 5 speedup was measured at temperature 0, the most favourable case: the draft only
+has to match the target's argmax. vLLM's draft proposes greedily and the rejection sampler keeps
+the target's sampling distribution, so a drafted token survives with roughly the target's
+probability of that token. At T > 0 that is below 1 even when the draft is the target's top
+choice. The EAGLE paper reports its speedup falling ~12-23% from T=0 to T=1 (LLaMA2-Chat 13B).
+top_k 20 / top_p 0.95 truncation sharpens the distribution and softens the fall.
+
+Config: Qwen3-8B fp8, EAGLE3 (RedHatAI speculator) k=3, `--max-model-len 16384`, no reasoning
+parser, concurrency 1, 12 items per slice from `results/phase4-items.jsonl`, thinking on,
+max 5,120 tokens; T > 0 adds top_p 0.95, top_k 20, min_p 0. Speedup = tokens/s with speculation
+over tokens/s without, each the total over the slice (the P5-I normalisation).
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| T0 | T=0 reproduces P5-I | gsm8k **1.85x +/- 5%**, math **2.05x +/- 5%**; acceptance 0.49 / 0.60 | the control: same recipe, same box class |
+| T1 | acceptance at T=0.6, relative to T=0 | **-10% to -20%** | sampled tokens leave the draft's argmax; truncation limits it |
+| T2 | speedup at T=0.6 | gsm8k **1.55-1.75x**, math **1.75-1.95x** | acceptance loss through L = 1 + sum of per-position acceptance |
+| T3 | speedup at T=1.0 | gsm8k **1.35-1.6x** | twice T1's distance from greedy |
+| T4 | ordering | monotone in T on both slices | no mechanism for a rise |
+
+**Most likely to be wrong:** T1's size. Position-0 acceptance (0.71 gsm8k) may barely move
+because the top token of a confident step stays dominant at 0.6, with the loss concentrated in
+positions 1-2.
+
+### P6E: warming after a summary lands (30-turn long conversation, thinking Off, search off)
+
+Config as P6D S. The warm-up now also runs when a summary finishes (`schedule_summary` callback).
+
+| # | Prediction | Value |
+|---|---|---|
+| E1 | first token on the first turn using a new summary | **<= 300 ms**, from 4,463-5,671 ms |
+| E2 | that turn's cached tokens | **>= 95%** of its prompt, from 192 tokens |

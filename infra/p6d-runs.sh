@@ -3,7 +3,7 @@
 # Every step talks to a SCRATCH stack (gateway :8082, apps :8091/:8092, scratch DBs), never the
 # owner's app on :8090 or its chats.db.   Runs ON the box after `app-run.sh up`:
 #   sudo systemd-run --unit=p6d-<step> --collect /bin/bash /opt/llm/infra/p6d-runs.sh <step>
-#   steps: scratch | warmcheck | turn1 | load | loadsearch | long | report | all
+#   steps: scratch | warmcheck | turn1 | load | loadsearch | long | longcheck | report | all
 set -uo pipefail
 cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv          # absolute: systemd-run is root, ~ is /root
@@ -77,10 +77,11 @@ loadsearch)
     echo "LOADSEARCH_DONE rc=$?"
     ;;
 long)
-    rm -f results/p6d-long.jsonl
+    LONG_OUT="${LONG_OUT:-results/p6d-long.jsonl}"
+    rm -f "$LONG_OUT"
     "$UV" run tools/appdrive.py run --mode convo --app http://127.0.0.1:8091 --prompts long \
-        --turns 40 --convo-level off --convo-search off --title p6d-long --gap-s 2 \
-        --out results/p6d-long.jsonl
+        --turns "${TURNS:-40}" --convo-level off --convo-search off --title p6d-long --gap-s 2 \
+        --out "$LONG_OUT"
     echo "LONG_DONE rc=$?"
     ;;
 all)
@@ -97,6 +98,12 @@ more)
     RATE=8 bash "$0" loadsearch || die "loadsearch failed"
     bash "$0" report
     echo "MORE_DONE"
+    ;;
+longcheck)
+    # The post-summary warm-up (2026-10-03): two summaries land by turn 30.
+    bash "$0" scratch || die "scratch"
+    LONG_OUT=results/p6e-long.jsonl TURNS=30 bash "$0" long || die "long"
+    echo "LONGCHECK_DONE"
     ;;
 report)
     "$UV" run tools/appdrive.py loadreport --app-out results/p6d-load.jsonl --gw-trace $GWT \

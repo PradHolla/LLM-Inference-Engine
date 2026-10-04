@@ -377,7 +377,8 @@ def _answer_stream(chat_id: int, user_id: int | None, assistant_parent_id: int |
             yield _event("done", tokens=tokens, message_id=message_id)
             try:
                 await agent.schedule_summary(chat_id, history + [
-                    {"id": message_id, "role": "assistant", "content": content}], today, MODEL_ID)
+                    {"id": message_id, "role": "assistant", "content": content}], today, MODEL_ID,
+                    turn_index)
             except Exception as exc:
                 LOGGER.warning("summary scheduling failed chat_id=%s %r", chat_id, exc)
             if config.WARM_NEXT_TURN:
@@ -792,7 +793,7 @@ async def _selftest_async() -> list[str]:
                   warm[0]["messages"][-1] == {"role": "user", "content": config.WARM_PROBE} and
                   [m["role"] for m in warm[0]["messages"][:-1]] == ["system", "user", "assistant"])
             check("the next turn's planner starts with exactly the warmed prefix",
-                  follow_plan["messages"][:len(warm[0]["messages"]) - 1] ==
+                  len(warm) == 1 and follow_plan["messages"][:len(warm[0]["messages"]) - 1] ==
                   warm[0]["messages"][:-1])
 
             fake["plan_reply"] = {"search": True, "queries": ["nothing here"], "think": False}
@@ -947,6 +948,7 @@ async def _selftest_async() -> list[str]:
                 await collect(await chats_send(long_chat, SendBody(
                     content=f"turn {turn} " + "words " * 60, thinking="off", search=False)))
                 await asyncio.gather(*list(agent.PENDING.values()), return_exceptions=True)
+                await asyncio.gather(*list(agent.WARMING), *list(WARMING), return_exceptions=True)
                 turn_prompts.append(answers()[-1]["messages"])
                 turn_stats.append(_message(long_chat, db.get_branch(long_chat)[-1])["stats"])
             summary_requests = [r for r in received[first_summary_request:]
@@ -972,6 +974,16 @@ async def _selftest_async() -> list[str]:
             check("within a block the previous prompt is a byte-identical prefix of the next",
                   len(same_block) >= 8 and all(json.dumps(b[:len(a) - 1]) == json.dumps(a[:-1])
                                                for a, b in same_block))
+            summary_warms = [r["messages"][:-1] for r in received[first_summary_request:]
+                             if r.get("gw_purpose") == "warm" and r.get("gw_chat_id") == long_chat
+                             and any(m["content"].startswith("Summary of the earlier conversation")
+                                     for m in r["messages"])]
+            fresh_summaries = [i for i in range(1, len(summaries))
+                               if summaries[i] is not None and summaries[i] != summaries[i - 1]]
+            check("once a summary lands, a warm-up sends the prefix the next turn will use",
+                  len(summary_warms) >= len(fresh_summaries) >= 2 and
+                  all(any(json.dumps(turn_prompts[i][:len(w)]) == json.dumps(w)
+                          for w in summary_warms) for i in fresh_summaries))
             check("the summary text changes only at block jumps",
                   0 < len(set(used)) <= len(used) // 5)
             check("every answer prompt plus max_tokens fits the window",
