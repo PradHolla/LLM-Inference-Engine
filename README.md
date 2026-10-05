@@ -186,6 +186,23 @@ Three whole categories reproduced identical answers on every item; all disagreem
 in the one slice where the model scores 44% and is barely above guessing. That is the
 signature of ordinary nondeterminism, not of a technique changing the answer.
 
+**Every number above was measured at temperature 0, and they hold at the temperature the app
+serves.** Greedy decoding is the friendliest case for speculation, and the Qwen3 card forbids it,
+so the headline was re-run with the identical recipe at T = 0, 0.3, 0.6 and 1.0. The T = 0 control
+reproduced Phase 5 to the verify step.
+
+| slice | T = 0 | T = 0.3 | T = 0.6 (Qwen3 thinking) | T = 1.0 |
+|---|---|---|---|---|
+| natural reasoning (GSM8K) | 1.85x | 1.84x | **1.85x** | 1.81x |
+| arithmetic with thinking | 2.05x | 1.99x | **1.98x** | 1.88x |
+
+*Qwen3-8B fp8, EAGLE3 k=3, A10G, concurrency 1, 12 items per cell; T > 0 with top_p 0.95, top_k 20.*
+
+The prediction, built from the EAGLE paper's 12-23% loss between T = 0 and 1, was 5x too
+pessimistic. That loss was measured on untruncated chat. Here top_k and top_p cut the tail before
+sampling, so on most reasoning steps the model's top token still carries nearly all the probability
+and the greedily drafted guess survives almost as often as under greedy decoding.
+
 ### Phase 6: the crossover was never a property of speculation
 
 Phase 5 watched speculation go 1.88x ahead at 2 req/s and 2.8x behind at 6, and read the
@@ -520,7 +537,10 @@ extra search query when the early search already has sources cut the cold first 
 **A 40-turn conversation** crossed the 32k summary boundary three times with no failures; normal
 turns got their first word in 124-172 ms at up to 22.7k tokens of history, 99.7% read from cache.
 The turn after each summary took 4.5-5.7 s, because the summary changes the prompt right after the
-system prompt; warming again once the summary lands would remove it.
+system prompt. The app now warms again as soon as a summary lands: when the summary finishes before
+the next message, that turn's first word drops to **123 ms** with 99.6% cached. When the next
+message arrives first (the test sends it 2 s after the answer, the summary takes 3.6-5.1 s), it
+still pays the cold read; starting the summary one turn before the boundary closes that race.
 
 ## What is here
 

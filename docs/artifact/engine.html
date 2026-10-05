@@ -793,6 +793,18 @@ int4             95,792 -> 78,272 tokens   12.7 conversations at once</pre>
   </div>
   <p>The shape of the disagreement is better evidence than its size. Three whole categories reproduced <em>identical</em> answers on every single item &mdash; natural reasoning, thinking-enabled arithmetic, document recall. All of the disagreement piled into one category: the hardest arithmetic without a thinking block, where the model scores 44% and is barely better than guessing. There, any perturbation flips answers.</p>
   <p>If the mechanism were subtly broken, errors would be spread everywhere in proportion to how much text was generated. Instead they appear only where the model was already unsure. <strong>That is the signature of ordinary nondeterminism, not of a technique quietly changing the answer</strong> &mdash; so every speed-up above is a speed-up of the same model, not a faster different one.</p>
+
+  <h3>At the temperature the app actually serves</h3>
+  <p>Every number in this part was measured at temperature 0, greedy decoding: the friendliest case for guessing, because the big model always picks its single most likely token, and the case the model&rsquo;s own card says not to use. So the headline was run again, identical in every other respect, at the temperatures a real deployment uses.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B fp8, EAGLE head guessing 3 ahead, A10G, one request at a time, 12 items per cell. Above 0, top_p 0.95 and top_k 20.</caption>
+    <thead><tr><th>Workload</th><th class="n">T = 0</th><th class="n">0.3</th><th class="n">0.6 (Qwen3 thinking)</th><th class="n">1.0</th></tr></thead>
+    <tbody>
+      <tr><td>Natural reasoning</td><td class="n">1.85&times;</td><td class="n">1.84&times;</td><td class="n m">1.85&times;</td><td class="n">1.81&times;</td></tr>
+      <tr><td>Arithmetic, thinking on</td><td class="n">2.05&times;</td><td class="n">1.99&times;</td><td class="n m">1.98&times;</td><td class="n">1.88&times;</td></tr>
+    </tbody>
+  </table></div>
+  <p>The temperature-0 run reproduced the original to the exact number of verification steps, which is what makes the rest comparable. <strong>The speed-ups survive.</strong> The prediction had them falling by a fifth or more, borrowed from the EAGLE paper&rsquo;s loss between temperature 0 and 1. That loss was measured on open chat with nothing trimming the unlikely tokens. With top_k and top_p cutting the tail, the model&rsquo;s favourite token still carries almost all of the probability on most reasoning steps, so a greedily drafted guess is accepted nearly as often as under greedy decoding. The small loss that remains lands where it should: on the arithmetic, which had the most to lose, and growing with temperature.</p>
 </section>
 
 <p class="part">Part six &middot; Where the crossover really came from</p>
@@ -1371,7 +1383,8 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
       <tr><td>With it</td><td class="n m">~350, flat</td><td class="n m">1,167 ms</td></tr>
     </tbody>
   </table></div>
-  <p>The remaining 350 are the planner&rsquo;s own instructions, which follow the new message and can never be cached. A forty-turn conversation then crossed the 32k summary boundary three times without a failure: ordinary turns got their first word in 124&ndash;172 ms at up to 22,700 tokens of history, 99.7% of it read from cache. The three turns right after a summary took 4.5&ndash;5.7 s, because a new summary changes the prompt directly after the system prompt and the warm-up was skipping while the summary was still being written. Warming again once it lands is the obvious next fix.</p>
+  <p>The remaining 350 are the planner&rsquo;s own instructions, which follow the new message and can never be cached. A forty-turn conversation then crossed the 32k summary boundary three times without a failure: ordinary turns got their first word in 124&ndash;172 ms at up to 22,700 tokens of history, 99.7% of it read from cache. The three turns right after a summary took 4.5&ndash;5.7 s, because a new summary changes the prompt directly after the system prompt and the warm-up was skipping while the summary was still being written.</p>
+  <p>The app now warms again the moment a summary lands. When the summary finished before the next message, that turn&rsquo;s first word came in <strong>123 ms</strong>, 99.6% from cache. When the next message arrived first, it still paid the cold read: the test replies two seconds after each answer and a summary takes 3.6&ndash;5.1 s to write. A person reading a fifteen-hundred-token answer pauses far longer than that, and starting the summary one turn before the boundary would close the race outright.</p>
 </section>
 
 <p class="part">Part ten &middot; Conclusions</p>
