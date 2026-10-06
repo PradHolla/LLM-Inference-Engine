@@ -7149,3 +7149,20 @@ A10G. Reference: vLLM 0.27.1 bf16, same prompt length, batch 1, captured with
 **Most likely to be wrong:** P3 and P4, which are the first numbers this project has ever had about
 the CPU side of a step. If P4 is near zero, Phase 3's attribution of 16% to per-step Python was
 wrong and the gap lives in the kernels themselves.
+
+### P8-G  The same step as a CUDA graph, written 2026-10-06 before the run (box up, profiles in hand)
+
+Written after the first P8 captures but before any graph run. From them: our B1 step is 40.7 ms
+unprofiled, ~38.3 ms of it GPU kernel time (2,154 kernels), so the GPU is idle ~2.4 ms per step;
+the profilers inflated the step to 66-74 ms, i.e. the step is close to launch-bound.
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| G1 | static cache, eager, B1 | **40-43 ms** | same kernels; the static cache attends over a fixed max length, slightly more work |
+| G2 | static cache + CUDA graph, B1 | **36-38.5 ms** | removes the ~2.4 ms idle and per-launch CPU cost; kernels unchanged except what inductor fuses |
+| G3 | graph vs dynamic at B8 | **3-8% faster** | the larger step hides more launch time already |
+| G4 | greedy tokens, graph vs dynamic | **>= 38/41 identical** | same math; compiled fusions reorder bf16 sums (incident 22), so a late divergence is allowed |
+| G5 | GPU kernels per step under the graph (nsys, node trace) | **fewer than 2,154** (inductor fuses norms, rotary, adds) | one graph launch per step on the API side |
+
+**Most likely to be wrong:** G2's floor. If inductor fuses aggressively, the kernel time itself
+drops below 38 ms and the step could reach vLLM's 34 ms.

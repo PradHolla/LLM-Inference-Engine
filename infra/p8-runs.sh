@@ -94,7 +94,23 @@ all)
     done
     echo "P8_DONE"
     ;;
+graph)
+    # The follow-up: the same step replayed as a CUDA graph (engine/graph_step.py).
+    export PATH="/opt/llm/.venv/bin:$PATH"     # inductor builds wrappers with the venv's tools
+    rm -f results/p8-graph.jsonl
+    "$PY" -m engine.graph_step --batches 1,8 --out results/p8-graph.jsonl > results/p8-graph.log 2>&1 \
+        || { tail -20 results/p8-graph.log; die "graph"; }
+    grep '^{' results/p8-graph.log | sed 's/^/  /'
+    name=p8-nsys-graph-B1
+    nsys profile --capture-range=cudaProfilerApi --capture-range-end=stop -t cuda,nvtx,osrt \
+        --cuda-graph-trace=node --force-overwrite=true -o "results/$name" \
+        "$PY" -m engine.graph_step --batches 1 --variants graph --nsys --out results/p8-graph-nsys.jsonl \
+        > "results/$name.log" 2>&1 || { tail -15 "results/$name.log"; die "$name"; }
+    nsys stats --force-export=true --report nvtx_sum,nvtx_gpu_proj_sum,cuda_gpu_kern_sum,cuda_api_sum \
+        "results/$name.nsys-rep" > "results/$name-stats.txt" 2>&1
+    echo "GRAPH_DONE"
+    ;;
 *)
-    echo "usage: $0 install | time | torch | nsys | vllm | all"; exit 2 ;;
+    echo "usage: $0 install | time | torch | nsys | vllm | graph | all"; exit 2 ;;
 esac
 exit 0
