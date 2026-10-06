@@ -1,0 +1,1 @@
+{"variant": "graph", "batch": 1, "prompt_len": 334, "steps": 40, "itl_ms_p50": 38.77294799997344, "itl_ms_min": 37.961384000027465, "itl_ms_max": 39.05141299992465, "warmup_s": 8.538747734999902, "tokens_match_dynamic": "51/51"}

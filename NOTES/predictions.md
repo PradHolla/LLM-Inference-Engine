@@ -7166,3 +7166,60 @@ the profilers inflated the step to 66-74 ms, i.e. the step is close to launch-bo
 
 **Most likely to be wrong:** G2's floor. If inductor fuses aggressively, the kernel time itself
 drops below 38 ms and the step could reach vLLM's 34 ms.
+
+### P8 and P8-G actuals, 2026-10-06
+
+Config as the P8 header; box at `75a3358`. Raw: `results/p8-time.jsonl`, `p8-torch*.{jsonl,json.gz,-ops.txt}`,
+`p8-nsys-*.nsys-rep` and `-stats.txt`, `p8-graph.jsonl`. Per-step figures below are from the nsys
+kernel tables (CUPTI kernel records); the step time is the unprofiled `time` mode.
+
+#### One decode step, decomposed
+
+| Qwen3-8B bf16, A10G, 334-token prompt | step (unprofiled) | kernels / step | kernel time / step | of which GEMM | non-GEMM kernels | GPU idle | attention kernel |
+|---|---|---|---|---|---|---|---|
+| our engine, B1 | **40.7 ms** | **2,079** | 38.2 ms | 32.3 ms | 5.9 ms | **2.5 ms** | flash_fwd_splitkv, 0.51 ms |
+| our engine, B8 | 43.5 ms | 2,079 | 41.0 ms | -- | -- | 2.5 ms | flash_fwd_splitkv, 1.50 ms |
+| our engine, B8 with real padding | 51.7 ms | 2,301 | 49.3 ms | -- | -- | 2.4 ms | **fmha_cutlassF (mem-efficient), 4.69 ms** |
+| our engine as a CUDA graph, B1 | **37.2 ms** | **653** | 36.3 ms | 32.3 ms | 4.0 ms | **0.9 ms** | fmha_cutlassF, 1.42 ms |
+| vLLM 0.27.1, B1 | **34.6 ms** | **450** | 34.5 ms | ~33.0 ms | ~1.5 ms | **~0.1 ms** | flash_fwd_splitkv, 0.68 ms |
+
+*vLLM: 574 steps in a 20 s nsys window, one cudaGraphLaunch per step. The GEMM kernels are the same
+cuBLAS family (`ampere_bf16_s16816gemm_bf16_64x64_*`) in our engine and in vLLM. B8 GEMM totals are
+omitted because some cutlass GEMMs report only a generic short name.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| P1 | B1 step 40-42 ms | **40.7** | correct |
+| P2 | GEMM 29-33 ms | **32.3** | correct |
+| P3 | 1,500-2,500 kernels / step | **2,079** | correct |
+| P4 | GPU idle 4-8 ms | **2.5 ms** | **wrong, high** |
+| P5 | non-GEMM kernels 2-5 ms | **5.9 ms** | wrong, low |
+| P6 | vLLM 400-700 kernels, 1-3 graph launches | **450**, one launch per step | correct |
+| P7 | vLLM idle < 1 ms | **~0.1 ms** | correct |
+| P8 | B8 padded: +8-12 ms, attention kernel changes | **+8.3 ms**; flash_fwd_splitkv -> fmha_cutlassF (mem-efficient) | correct; but attention itself is only +3.2 ms, the other ~5 ms is 222 extra mask-handling kernels |
+| P9 | profiler overhead < 15% | **+63% (nsys), +83% (torch)** | **wrong by 5x**; see below |
+| G1 | static cache eager, B1 40-43 ms | **44.4** | wrong: the static cache forces the masked attention path |
+| G2 | CUDA graph, B1 36-38.5 ms | **37.2 (-8.6%)** | correct |
+| G3 | CUDA graph faster at B8 by 3-8% | **45.6 vs 43.6, 4.6% slower** | **wrong** |
+| G4 | tokens >= 38/41 identical | **51/51** at B1 and B8 | correct |
+| G5 | fewer kernels, one launch per step | **653, 1 launch** | correct |
+
+**The 6.1 ms gap to vLLM, attributed for the first time by measurement instead of arithmetic.**
+GEMM time is the same (32.3 vs ~33 ms, same cuBLAS kernels). The gap is **~4.4 ms of small
+unfused kernels** (norms, rotary, residual adds, cache writes: 5.9 ms here against ~1.5 ms where vLLM
+fuses them) plus **~2.4 ms of GPU idle** between launches (2.5 vs ~0.1 ms). Phase 3 put ~16% of the
+step on per-step Python; the real split is ~6% launch idle and ~11% missing fusion. Half right,
+and the larger half was the one not named.
+
+**The CUDA graph closes 3.5 of the 6.1 ms** without touching the GEMMs: launches go from 2,079 to
+one graph replay, idle from 2.5 to 0.9 ms, and inductor fuses the step down to 653 kernels. What it
+cannot close is the attention path: a static cache must mask its empty slots, which moves attention
+from FlashAttention's split-KV kernel to PyTorch's mem-efficient kernel (0.51 -> 1.42 ms at B1), the
+same masked-path tax Phase 2 measured. At B8 that tax outweighs the launch savings (static eager
+52.3 ms, graph 45.6, dynamic eager 43.6). Fixing it means a static cache that keeps the flash path
+(vLLM's paged attention does exactly this), not a different graph.
+
+**P9: the profilers' overhead is a finding, not noise.** At 2,079 launches per step the engine
+issues kernels only about as fast as the GPU retires them (~18 us of kernel per launch). Any added
+per-launch cost lands straight on the step: nsys and the PyTorch profiler inflated it to 66-74 ms.
+A launch-bound step is exactly what a CUDA graph is for, which G2 then confirmed.

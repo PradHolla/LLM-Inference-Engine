@@ -1,0 +1,67 @@
+Generating SQLite file results/p8-nsys-vllm-B1.sqlite from results/p8-nsys-vllm-B1.nsys-rep
+Processing [results/p8-nsys-vllm-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     43.7       8659942129      20618   420018.5   419971.0    417347    424004        808.3  ampere_bf16_s16816gemm_bf16_64x64_ldg8_f2f_stages_64x5_tn                                           
+     32.8       6487492462      41236   157325.9   156433.0     74849    244226      80649.0  ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f_stages_64x5_tn                                 
+     10.9       2161494972      20619   104830.3   104769.0    103841    111297        363.3  void cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x2_tn_align8>(T1::Par…
+      7.5       1482839392        574  2583343.9  2583475.0   2576467   2593588       2000.5  void gemv2T_kernel_val<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, (int)128, (int…
+      1.2        247464320      20618    12002.3    11968.0     11168     13184        355.7  void flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (int)128, (int)4, (…
+      0.8        167823392        144  1165440.2  1160232.5    447971   1896814     718963.3  ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn                                         
+      0.7        135533104      20618     6573.5     6560.0      6528      6625         17.6  void flash::flash_fwd_splitkv_combine_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (int)128, (…
+      0.5         89747803        144   623248.6   623396.5    316451    929639     306957.2  void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(T1::Par…
+      0.4         75396095      20690     3644.1     3552.0      3264     36833       1795.7  triton_red_fused_fused_add_rms_norm_2                                                               
+      0.3         64053480      20690     3095.9     3040.0      2912     17376        797.5  triton_red_fused_fused_add_rms_norm_0                                                               
+      0.3         51592347      20690     2493.6     2464.0      2400      9441        375.9  void vllm::reshape_and_cache_flash_kernel<__nv_bfloat16, __nv_bfloat16, (vllm::Fp8KVCacheDataType)0…
+      0.3         50061554      20618     2428.1     2432.0      2272      2721         53.6  void cublasLt::splitKreduce_kernel<(int)32, (int)16, int, __nv_bfloat16, __nv_bfloat16, float, __nv…
+      0.2         43827719      20115     2178.9     2112.0      2016     19968       1017.3  triton_red_fused_3                                                                                  
+      0.2         40571858      20690     1960.9     1760.0      1600     59905       3361.3  triton_poi_fused_mul_silu_slice_1                                                                   
+      0.0          8551327        574    14897.8    14912.0     12640     17024        647.7  _gumbel_sample_kernel                                                                               
+      0.0          4840901         72    67234.7    67296.5     66273     68033        411.3  void flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (int)128, (int)4, (…
+      0.0          3321847        574     5787.2     5792.0      5632      5952         61.7  void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void …
+      0.0          2947414        574     5134.9     5152.0      4960      5376         68.6  void at::native::reduce_kernel<(int)512, (int)1, at::native::ReduceOp<float, at::native::ArgMaxOps<…
+      0.0          2559054        574     4458.3     4448.0      4352      4640         50.2  void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void …
+      0.0          2506130        575     4358.5     4352.0      4256      4768         55.9  _gather_block_tables_kernel                                                                         
+      0.0          2390553        574     4164.7     4192.0      3424      4928        228.7  _post_update_kernel                                                                                 
+      0.0          2138762        575     3719.6     3712.0      3296      4128         67.7  _combine_sampled_and_draft_tokens_kernel                                                            
+      0.0          2093043        575     3640.1     3584.0      3488     16672        764.6  triton_red_fused__to_copy_embedding_rms_norm_0                                                      
+      0.0          2060139        574     3589.1     3584.0      3488      3968         61.6  _get_num_sampled_and_rejected_kernel                                                                
+      0.0          1949135        574     3395.7     3424.0      3264      3616         90.0  void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void …
+      0.0          1720782        575     2992.7     2976.0      2944      3168         21.1  _compute_slot_mappings_kernel                                                                       
+      0.0          1404521        574     2446.9     2432.0      2368      2624         34.9  void at::native::_scatter_gather_elementwise_kernel<(int)128, (int)8, void at::native::_cuda_scatte…
+      0.0          1366216       1149     1189.0     1184.0      1152      1248         24.3  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<cha…
+      0.0          1248942        575     2172.1     2112.0      2016     19968       1042.7  triton_red_fused_1                                                                                  
+      0.0           902500        575     1569.6     1568.0      1536      1600         12.7  _prepare_pos_seq_lens_kernel                                                                        
+      0.0           746438        577     1293.7     1280.0      1248      1472         18.9  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<bool>, std::array<ch…
+      0.0           685314        575     1191.9     1184.0      1184      1408         16.3  void <unnamed>::elementwise_kernel_with_index<int, at::native::arange_cuda_out(const c10::Scalar &,…
+      0.0           188997         44     4295.4     4256.0      3808      4864        299.8  _apply_write_kernel                                                                                 
+      0.0             9184          2     4592.0     4592.0      4576      4608         22.6  _prepare_prefill_inputs_kernel                                                                      
+
+Processing [results/p8-nsys-vllm-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)    Med (ns)   Min (ns)  Max (ns)   StdDev (ns)             Name           
+ --------  ---------------  ---------  ----------  ----------  --------  ---------  -----------  --------------------------
+     96.7      18372672722        576  31897001.3  31669936.5  28974637  126874548    5605741.1  cudaEventSynchronize      
+      2.4        465076999        648    717711.4    785093.5     23630    1177060     252504.6  cudaGraphLaunch           
+      0.3         63827324       5906     10807.2      8690.0      5850     203703       7481.8  cudaLaunchKernel          
+      0.2         43795832       4078     10739.5     10020.0      6740      47251       3740.1  cuLaunchKernelEx          
+      0.1         24620342       2348     10485.7     10915.5      4680      56411       4587.6  cudaMemcpyAsync           
+      0.1         12194877       4678      2606.9      2320.0       690      54751       1989.2  cudaEventQuery            
+      0.1          9886347       3500      2824.7      2520.0       830      96722       2765.0  cudaEventRecordWithFlags  
+      0.0          4995325       6424       777.6       590.0       410      48811       1005.0  cudaStreamIsCapturing     
+      0.0          2883944       5906       488.3       430.0       240      15720        279.0  cuKernelGetName           
+      0.0          2036755       1152      1768.0      1940.0       900      16890        880.7  cudaEventCreateWithFlags  
+      0.0          1864945       1152      1618.9      1565.0       940      24930       1235.3  cudaEventDestroy          
+      0.0          1475858        576      2562.3      2465.0      2080       4261        355.4  cudaStreamWaitEvent       
+      0.0           104400        235       444.3       350.0       310       5730        386.1  cudaGetDevice             
+      0.0            40780         48       849.6       745.0       320       2610        517.2  cuPointerGetAttribute     
+      0.0            31490         93       338.6       250.0       170       7080        711.9  cuDevicePrimaryCtxGetState
+      0.0            14770          2      7385.0      7385.0      3110      11660       6045.8  cudaPointerGetAttributes  
+      0.0             4800         15       320.0       240.0       170        870        187.5  cudaGetLastError          
+      0.0             2970          8       371.3       315.0       260        550        106.2  cuCtxGetCurrent           
+

@@ -1,0 +1,143 @@
+Generating SQLite file results/p8-nsys-graph-B1.sqlite from results/p8-nsys-graph-B1.nsys-rep
+Processing [results/p8-nsys-graph-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances   Avg (ns)    Med (ns)   Min (ns)  Max (ns)  StdDev (ns)   Style         Range      
+ --------  ---------------  ---------  ----------  ----------  --------  --------  -----------  -------  -----------------
+      2.5         38820949          1  38820949.0  38820949.0  38820949  38820949          0.0  PushPop  :graph B1 step 10
+      2.5         38731008          1  38731008.0  38731008.0  38731008  38731008          0.0  PushPop  :graph B1 step 20
+      2.5         38711117          1  38711117.0  38711117.0  38711117  38711117          0.0  PushPop  :graph B1 step 26
+      2.5         38675406          1  38675406.0  38675406.0  38675406  38675406          0.0  PushPop  :graph B1 step 30
+      2.5         38637176          1  38637176.0  38637176.0  38637176  38637176          0.0  PushPop  :graph B1 step 17
+      2.5         38635726          1  38635726.0  38635726.0  38635726  38635726          0.0  PushPop  :graph B1 step 43
+      2.5         38632456          1  38632456.0  38632456.0  38632456  38632456          0.0  PushPop  :graph B1 step 28
+      2.5         38623275          1  38623275.0  38623275.0  38623275  38623275          0.0  PushPop  :graph B1 step 27
+      2.5         38621476          1  38621476.0  38621476.0  38621476  38621476          0.0  PushPop  :graph B1 step 29
+      2.5         38618325          1  38618325.0  38618325.0  38618325  38618325          0.0  PushPop  :graph B1 step 23
+      2.5         38610005          1  38610005.0  38610005.0  38610005  38610005          0.0  PushPop  :graph B1 step 22
+      2.5         38608935          1  38608935.0  38608935.0  38608935  38608935          0.0  PushPop  :graph B1 step 21
+      2.5         38603115          1  38603115.0  38603115.0  38603115  38603115          0.0  PushPop  :graph B1 step 25
+      2.5         38598565          1  38598565.0  38598565.0  38598565  38598565          0.0  PushPop  :graph B1 step 44
+      2.5         38596535          1  38596535.0  38596535.0  38596535  38596535          0.0  PushPop  :graph B1 step 33
+      2.5         38593295          1  38593295.0  38593295.0  38593295  38593295          0.0  PushPop  :graph B1 step 46
+      2.5         38583995          1  38583995.0  38583995.0  38583995  38583995          0.0  PushPop  :graph B1 step 31
+      2.5         38570285          1  38570285.0  38570285.0  38570285  38570285          0.0  PushPop  :graph B1 step 16
+      2.5         38568585          1  38568585.0  38568585.0  38568585  38568585          0.0  PushPop  :graph B1 step 45
+      2.5         38567894          1  38567894.0  38567894.0  38567894  38567894          0.0  PushPop  :graph B1 step 42
+      2.5         38567395          1  38567395.0  38567395.0  38567395  38567395          0.0  PushPop  :graph B1 step 47
+      2.5         38557975          1  38557975.0  38557975.0  38557975  38557975          0.0  PushPop  :graph B1 step 24
+      2.5         38549675          1  38549675.0  38549675.0  38549675  38549675          0.0  PushPop  :graph B1 step 15
+      2.5         38546675          1  38546675.0  38546675.0  38546675  38546675          0.0  PushPop  :graph B1 step 11
+      2.5         38541114          1  38541114.0  38541114.0  38541114  38541114          0.0  PushPop  :graph B1 step 19
+      2.5         38530764          1  38530764.0  38530764.0  38530764  38530764          0.0  PushPop  :graph B1 step 18
+      2.5         38529044          1  38529044.0  38529044.0  38529044  38529044          0.0  PushPop  :graph B1 step 12
+      2.5         38510484          1  38510484.0  38510484.0  38510484  38510484          0.0  PushPop  :graph B1 step 48
+      2.5         38507504          1  38507504.0  38507504.0  38507504  38507504          0.0  PushPop  :graph B1 step 14
+      2.5         38489814          1  38489814.0  38489814.0  38489814  38489814          0.0  PushPop  :graph B1 step 32
+      2.5         38288760          1  38288760.0  38288760.0  38288760  38288760          0.0  PushPop  :graph B1 step 13
+      2.5         38249379          1  38249379.0  38249379.0  38249379  38249379          0.0  PushPop  :graph B1 step 36
+      2.5         38063986          1  38063986.0  38063986.0  38063986  38063986          0.0  PushPop  :graph B1 step 35
+      2.5         38034176          1  38034176.0  38034176.0  38034176  38034176          0.0  PushPop  :graph B1 step 34
+      2.5         37954604          1  37954604.0  37954604.0  37954604  37954604          0.0  PushPop  :graph B1 step 41
+      2.5         37954564          1  37954564.0  37954564.0  37954564  37954564          0.0  PushPop  :graph B1 step 38
+      2.5         37935294          1  37935294.0  37935294.0  37935294  37935294          0.0  PushPop  :graph B1 step 49
+      2.5         37907213          1  37907213.0  37907213.0  37907213  37907213          0.0  PushPop  :graph B1 step 37
+      2.5         37904983          1  37904983.0  37904983.0  37904983  37904983          0.0  PushPop  :graph B1 step 40
+      2.5         37846913          1  37846913.0  37846913.0  37846913  37846913          0.0  PushPop  :graph B1 step 39
+
+Processing [results/p8-nsys-graph-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/nvtx_gpu_proj_sum.py]... 
+
+ ** NVTX GPU Projection Summary (nvtx_gpu_proj_sum):
+
+       Range         Style   Total Proj Time (ns)  Total Range Time (ns)  Range Instances  Proj Avg (ns)  Proj Med (ns)  Proj Min (ns)  Proj Max (ns)  Proj StdDev (ns)  Total GPU Ops  Avg GPU Ops  Avg Range Lvl  Avg Num Child
+ -----------------  -------  --------------------  ---------------------  ---------------  -------------  -------------  -------------  -------------  ----------------  -------------  -----------  -------------  -------------
+ :graph B1 step 20  PushPop              38606738               38731008                1     38606738.0     38606738.0       38606738       38606738               0.0              4          4.0            0.0            0.0
+ :graph B1 step 10  PushPop              38576530               38820949                1     38576530.0     38576530.0       38576530       38576530               0.0              4          4.0            0.0            0.0
+ :graph B1 step 26  PushPop              38571826               38711117                1     38571826.0     38571826.0       38571826       38571826               0.0              4          4.0            0.0            0.0
+ :graph B1 step 30  PushPop              38551826               38675406                1     38551826.0     38551826.0       38551826       38551826               0.0              4          4.0            0.0            0.0
+ :graph B1 step 17  PushPop              38514897               38637176                1     38514897.0     38514897.0       38514897       38514897               0.0              4          4.0            0.0            0.0
+ :graph B1 step 28  PushPop              38509266               38632456                1     38509266.0     38509266.0       38509266       38509266               0.0              4          4.0            0.0            0.0
+ :graph B1 step 33  PushPop              38506674               38596535                1     38506674.0     38506674.0       38506674       38506674               0.0              4          4.0            0.0            0.0
+ :graph B1 step 43  PushPop              38502706               38635726                1     38502706.0     38502706.0       38502706       38502706               0.0              4          4.0            0.0            0.0
+ :graph B1 step 27  PushPop              38497329               38623275                1     38497329.0     38497329.0       38497329       38497329               0.0              4          4.0            0.0            0.0
+ :graph B1 step 22  PushPop              38496850               38610005                1     38496850.0     38496850.0       38496850       38496850               0.0              4          4.0            0.0            0.0
+ :graph B1 step 23  PushPop              38494194               38618325                1     38494194.0     38494194.0       38494194       38494194               0.0              4          4.0            0.0            0.0
+ :graph B1 step 29  PushPop              38494066               38621476                1     38494066.0     38494066.0       38494066       38494066               0.0              4          4.0            0.0            0.0
+ :graph B1 step 21  PushPop              38490481               38608935                1     38490481.0     38490481.0       38490481       38490481               0.0              4          4.0            0.0            0.0
+ :graph B1 step 44  PushPop              38481490               38598565                1     38481490.0     38481490.0       38481490       38481490               0.0              4          4.0            0.0            0.0
+ :graph B1 step 31  PushPop              38474354               38583995                1     38474354.0     38474354.0       38474354       38474354               0.0              4          4.0            0.0            0.0
+ :graph B1 step 46  PushPop              38466481               38593295                1     38466481.0     38466481.0       38466481       38466481               0.0              4          4.0            0.0            0.0
+ :graph B1 step 47  PushPop              38457329               38567395                1     38457329.0     38457329.0       38457329       38457329               0.0              4          4.0            0.0            0.0
+ :graph B1 step 25  PushPop              38450449               38603115                1     38450449.0     38450449.0       38450449       38450449               0.0              4          4.0            0.0            0.0
+ :graph B1 step 45  PushPop              38449105               38568585                1     38449105.0     38449105.0       38449105       38449105               0.0              4          4.0            0.0            0.0
+ :graph B1 step 16  PushPop              38445521               38570285                1     38445521.0     38445521.0       38445521       38445521               0.0              4          4.0            0.0            0.0
+ :graph B1 step 42  PushPop              38442353               38567894                1     38442353.0     38442353.0       38442353       38442353               0.0              4          4.0            0.0            0.0
+ :graph B1 step 15  PushPop              38441393               38549675                1     38441393.0     38441393.0       38441393       38441393               0.0              4          4.0            0.0            0.0
+ :graph B1 step 24  PushPop              38433650               38557975                1     38433650.0     38433650.0       38433650       38433650               0.0              4          4.0            0.0            0.0
+ :graph B1 step 11  PushPop              38432497               38546675                1     38432497.0     38432497.0       38432497       38432497               0.0              4          4.0            0.0            0.0
+ :graph B1 step 12  PushPop              38428625               38529044                1     38428625.0     38428625.0       38428625       38428625               0.0              4          4.0            0.0            0.0
+ :graph B1 step 18  PushPop              38420433               38530764                1     38420433.0     38420433.0       38420433       38420433               0.0              4          4.0            0.0            0.0
+ :graph B1 step 48  PushPop              38419249               38510484                1     38419249.0     38419249.0       38419249       38419249               0.0              4          4.0            0.0            0.0
+ :graph B1 step 19  PushPop              38417617               38541114                1     38417617.0     38417617.0       38417617       38417617               0.0              4          4.0            0.0            0.0
+ :graph B1 step 14  PushPop              38387473               38507504                1     38387473.0     38387473.0       38387473       38387473               0.0              4          4.0            0.0            0.0
+ :graph B1 step 32  PushPop              38378066               38489814                1     38378066.0     38378066.0       38378066       38378066               0.0              4          4.0            0.0            0.0
+ :graph B1 step 13  PushPop              38193073               38288760                1     38193073.0     38193073.0       38193073       38193073               0.0              4          4.0            0.0            0.0
+ :graph B1 step 36  PushPop              38156496               38249379                1     38156496.0     38156496.0       38156496       38156496               0.0              4          4.0            0.0            0.0
+ :graph B1 step 35  PushPop              37995983               38063986                1     37995983.0     37995983.0       37995983       37995983               0.0              4          4.0            0.0            0.0
+ :graph B1 step 34  PushPop              37968559               38034176                1     37968559.0     37968559.0       37968559       37968559               0.0              4          4.0            0.0            0.0
+ :graph B1 step 38  PushPop              37893103               37954564                1     37893103.0     37893103.0       37893103       37893103               0.0              4          4.0            0.0            0.0
+ :graph B1 step 49  PushPop              37877327               37935294                1     37877327.0     37877327.0       37877327       37877327               0.0              4          4.0            0.0            0.0
+ :graph B1 step 41  PushPop              37858702               37954604                1     37858702.0     37858702.0       37858702       37858702               0.0              4          4.0            0.0            0.0
+ :graph B1 step 37  PushPop              37844718               37907213                1     37844718.0     37844718.0       37844718       37844718               0.0              4          4.0            0.0            0.0
+ :graph B1 step 40  PushPop              37843663               37904983                1     37843663.0     37843663.0       37843663       37843663               0.0              4          4.0            0.0            0.0
+ :graph B1 step 39  PushPop              37786574               37846913                1     37786574.0     37786574.0       37786574       37786574               0.0              4          4.0            0.0            0.0
+
+Processing [results/p8-nsys-graph-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     42.7        620142230       2880   215327.2   215329.0    212897    218561        848.0  ampere_bf16_s16816gemm_bf16_64x64_ldg8_f2f_stages_64x5_tn                                           
+     39.1        568642319       4320   131630.2    80353.0     74177    242785      75677.2  ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f_stages_64x5_tn                                 
+      7.1        103325981         40  2583149.5  2583388.0   2578251   2587692       2292.3  void gemv2T_kernel_val<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, (int)128, (int…
+      3.9         56911295       2880    19760.9    19712.0     19200     20704        211.9  std::enable_if<!T7, void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __n…
+      3.9         56885513       1440    39503.8    39520.0     38816     40160        226.8  fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16…
+      1.4         20898238       2880     7256.3     7120.5      5216      9632       1946.0  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_add_arange_bmm_cat_c…
+      0.2          3616401       1400     2583.1     2592.0      2496      2720         39.3  triton_per_fused__to_copy__unsafe_view_add_arange_bmm_cat_cos_expand_index_copy_mean_mul_neg_pow_rs…
+      0.2          3237426       1440     2248.2     2240.0      2144      2528         56.1  triton_per_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_add_arange_bmm_cat_c…
+      0.2          2457993        680     3614.7     3616.0      3456      3840         61.1  triton_red_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_14                                    
+      0.2          2453996       1440     1704.2     1696.0      1600      2048         58.3  triton_poi_fused__unsafe_view_mul_silu_7                                                            
+      0.2          2284524        680     3359.6     3360.0      3264      3552         45.0  triton_red_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_13                                    
+      0.1          1970595        680     2897.9     2880.0      2784      3264         70.0  triton_red_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_11                                    
+      0.1          1949067       1440     1353.5     1344.0      1280      1504         37.5  triton_poi_fused_add_copy__17                                                                       
+      0.1          1906859        680     2804.2     2816.0      2720      2976         39.1  triton_red_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_12                                    
+      0.1          1863112       1440     1293.8     1280.0      1248      1536         24.6  triton_poi_fused__scaled_dot_product_efficient_attention__to_copy__unsafe_view_add_arange_bmm_cat_c…
+      0.1          1717963       1440     1193.0     1184.0      1152      1217         16.1  triton_poi_fused__unsafe_view_add_arange_index_copy_transpose_view_3                                
+      0.1          1679749         40    41993.7    42064.5     40640     43232        600.6  triton_red_fused__unsafe_view_argmax_select_16                                                      
+      0.0           151585         40     3789.6     3808.0      3680      3873         44.1  triton_red_fused__to_copy__unsafe_view_add_embedding_mean_mul_pow_rsqrt_10                          
+      0.0           137249         40     3431.2     3424.0      3392      3552         35.1  triton_red_fused__to_copy__unsafe_view_add_embedding_mean_mul_pow_rsqrt_6                           
+      0.0           125889         40     3147.2     3136.0      3104      3296         40.1  triton_red_fused__to_copy__unsafe_view_add_embedding_mean_mul_pow_rsqrt_8                           
+      0.0           115840         40     2896.0     2848.0      2816      3328        145.3  triton_red_fused__to_copy_add_embedding_mean_mul_pow_rsqrt_0                                        
+      0.0           102753         40     2568.8     2560.0      2528      2656         30.7  triton_red_fused__to_copy__unsafe_view_add_mean_mul_pow_rsqrt_15                                    
+      0.0            97793         40     2444.8     2432.0      2368      2656         46.8  void at::native::<unnamed>::multi_tensor_apply_kernel<at::native::<unnamed>::TensorListMetadata<(in…
+      0.0            96352         40     2408.8     2400.0      2400      2432         14.5  triton_per_fused__to_copy__unsafe_view_add_arange_bmm_cat_cos_expand_index_copy_mean_mul_neg_pow_rs…
+      0.0            79073         40     1976.8     1984.0      1920      2080         34.4  void at::native::vectorized_elementwise_kernel<(int)2, at::native::CUDAFunctorOnSelf_add<long>, std…
+
+Processing [results/p8-nsys-graph-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)    Med (ns)   Min (ns)  Max (ns)  StdDev (ns)           Name          
+ --------  ---------------  ---------  ----------  ----------  --------  --------  -----------  -----------------------
+     95.7       1404666021         40  35116650.5  35107157.0  34939404  35288230      64572.8  cudaStreamSynchronize  
+      3.9         57026670         40   1425666.8   1449484.0   1269671   1565876      67516.8  cudaGraphLaunch        
+      0.2          2647435         80     33092.9     26090.0     16070     65271      13384.7  cudaLaunchKernel       
+      0.1          2039665         80     25495.8     23530.5     14040     58461       8412.2  cudaMemcpyAsync        
+      0.1          1145919         80     14324.0     14165.5      3360     42421      11306.0  cudaDeviceSynchronize  
+      0.0           101581         80      1269.8      1295.0       560      1860        334.1  cuKernelGetName        
+      0.0             6410          1      6410.0      6410.0      6410      6410          0.0  cuProfilerStart        
+      0.0             3390          2      1695.0      1695.0       630      2760       1506.1  cudaGetDeviceProperties
+      0.0             1600          1      1600.0      1600.0      1600      1600          0.0  cuModuleGetLoadingMode 
+

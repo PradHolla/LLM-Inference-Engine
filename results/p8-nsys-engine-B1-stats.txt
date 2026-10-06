@@ -1,0 +1,119 @@
+Generating SQLite file results/p8-nsys-engine-B1.sqlite from results/p8-nsys-engine-B1.nsys-rep
+Processing [results/p8-nsys-engine-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances   Avg (ns)    Med (ns)   Min (ns)  Max (ns)  StdDev (ns)   Style      Range   
+ --------  ---------------  ---------  ----------  ----------  --------  --------  -----------  -------  -----------
+     47.8       1267417891         20  63370894.5  63371986.5  62232342  65325655     615531.9  PushPop  :forward   
+      2.6         68233134          1  68233134.0  68233134.0  68233134  68233134          0.0  PushPop  :B1 step 25
+      2.5         66974283          1  66974283.0  66974283.0  66974283  66974283          0.0  PushPop  :B1 step 10
+      2.5         66631857          1  66631857.0  66631857.0  66631857  66631857          0.0  PushPop  :B1 step 18
+      2.5         66580516          1  66580516.0  66580516.0  66580516  66580516          0.0  PushPop  :B1 step 16
+      2.5         66537235          1  66537235.0  66537235.0  66537235  66537235          0.0  PushPop  :B1 step 11
+      2.5         66531886          1  66531886.0  66531886.0  66531886  66531886          0.0  PushPop  :B1 step 22
+      2.5         66455454          1  66455454.0  66455454.0  66455454  66455454          0.0  PushPop  :B1 step 23
+      2.5         66387942          1  66387942.0  66387942.0  66387942  66387942          0.0  PushPop  :B1 step 20
+      2.5         66349832          1  66349832.0  66349832.0  66349832  66349832          0.0  PushPop  :B1 step 15
+      2.5         66331952          1  66331952.0  66331952.0  66331952  66331952          0.0  PushPop  :B1 step 19
+      2.5         66249971          1  66249971.0  66249971.0  66249971  66249971          0.0  PushPop  :B1 step 12
+      2.5         66188660          1  66188660.0  66188660.0  66188660  66188660          0.0  PushPop  :B1 step 14
+      2.5         66111728          1  66111728.0  66111728.0  66111728  66111728          0.0  PushPop  :B1 step 21
+      2.5         66089628          1  66089628.0  66089628.0  66089628  66089628          0.0  PushPop  :B1 step 24
+      2.5         65986056          1  65986056.0  65986056.0  65986056  65986056          0.0  PushPop  :B1 step 17
+      2.5         65969916          1  65969916.0  65969916.0  65969916  65969916          0.0  PushPop  :B1 step 26
+      2.5         65740052          1  65740052.0  65740052.0  65740052  65740052          0.0  PushPop  :B1 step 13
+      2.5         65726122          1  65726122.0  65726122.0  65726122  65726122          0.0  PushPop  :B1 step 29
+      2.5         65653380          1  65653380.0  65653380.0  65653380  65653380          0.0  PushPop  :B1 step 27
+      2.5         65179852          1  65179852.0  65179852.0  65179852  65179852          0.0  PushPop  :B1 step 28
+      2.1         56155108         20   2807755.4   2805488.0   2772958   2841728      18464.9  PushPop  :sample    
+
+Processing [results/p8-nsys-engine-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/nvtx_gpu_proj_sum.py]... 
+
+ ** NVTX GPU Projection Summary (nvtx_gpu_proj_sum):
+
+    Range      Style   Total Proj Time (ns)  Total Range Time (ns)  Range Instances  Proj Avg (ns)  Proj Med (ns)  Proj Min (ns)  Proj Max (ns)  Proj StdDev (ns)  Total GPU Ops  Avg GPU Ops  Avg Range Lvl  Avg Num Child
+ -----------  -------  --------------------  ---------------------  ---------------  -------------  -------------  -------------  -------------  ----------------  -------------  -----------  -------------  -------------
+ :forward     PushPop            1320728451             1267417891               20     66036422.5     66054027.5       64951110       67961716          598251.8          42960       2148.0            1.0            0.0
+ :B1 step 25  PushPop              68198389               68233134                1     68198389.0     68198389.0       68198389       68198389               0.0           2154       2154.0            0.0            2.0
+ :B1 step 10  PushPop              66793135               66974283                1     66793135.0     66793135.0       66793135       66793135               0.0           2154       2154.0            0.0            2.0
+ :B1 step 18  PushPop              66598349               66631857                1     66598349.0     66598349.0       66598349       66598349               0.0           2154       2154.0            0.0            2.0
+ :B1 step 16  PushPop              66534574               66580516                1     66534574.0     66534574.0       66534574       66534574               0.0           2154       2154.0            0.0            2.0
+ :B1 step 11  PushPop              66503341               66537235                1     66503341.0     66503341.0       66503341       66503341               0.0           2154       2154.0            0.0            2.0
+ :B1 step 22  PushPop              66498158               66531886                1     66498158.0     66498158.0       66498158       66498158               0.0           2154       2154.0            0.0            2.0
+ :B1 step 23  PushPop              66422093               66455454                1     66422093.0     66422093.0       66422093       66422093               0.0           2154       2154.0            0.0            2.0
+ :B1 step 20  PushPop              66353389               66387942                1     66353389.0     66353389.0       66353389       66353389               0.0           2154       2154.0            0.0            2.0
+ :B1 step 15  PushPop              66315181               66349832                1     66315181.0     66315181.0       66315181       66315181               0.0           2154       2154.0            0.0            2.0
+ :B1 step 19  PushPop              66298572               66331952                1     66298572.0     66298572.0       66298572       66298572               0.0           2154       2154.0            0.0            2.0
+ :B1 step 12  PushPop              66215756               66249971                1     66215756.0     66215756.0       66215756       66215756               0.0           2154       2154.0            0.0            2.0
+ :B1 step 14  PushPop              66154988               66188660                1     66154988.0     66154988.0       66154988       66154988               0.0           2154       2154.0            0.0            2.0
+ :B1 step 21  PushPop              66078316               66111728                1     66078316.0     66078316.0       66078316       66078316               0.0           2154       2154.0            0.0            2.0
+ :B1 step 24  PushPop              66056940               66089628                1     66056940.0     66056940.0       66056940       66056940               0.0           2154       2154.0            0.0            2.0
+ :B1 step 17  PushPop              65953291               65986056                1     65953291.0     65953291.0       65953291       65953291               0.0           2154       2154.0            0.0            2.0
+ :B1 step 26  PushPop              65929707               65969916                1     65929707.0     65929707.0       65929707       65929707               0.0           2154       2154.0            0.0            2.0
+ :B1 step 13  PushPop              65704618               65740052                1     65704618.0     65704618.0       65704618       65704618               0.0           2154       2154.0            0.0            2.0
+ :B1 step 29  PushPop              65693482               65726122                1     65693482.0     65693482.0       65693482       65693482               0.0           2154       2154.0            0.0            2.0
+ :B1 step 27  PushPop              65618633               65653380                1     65618633.0     65618633.0       65618633       65618633               0.0           2154       2154.0            0.0            2.0
+ :B1 step 28  PushPop              65147304               65179852                1     65147304.0     65147304.0       65147304       65147304               0.0           2154       2154.0            0.0            2.0
+ :sample      PushPop                327713               56155108               20        16385.7        16096.0          13152          20769            2358.1             60          3.0            1.0            0.0
+
+Processing [results/p8-nsys-engine-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     40.6        310142612       1440   215376.8   215329.0    213121    218881        729.0  ampere_bf16_s16816gemm_bf16_64x64_ldg8_f2f_stages_64x5_tn                                           
+     37.2        284304192       2160   131622.3    79392.0     74784    243713      76056.6  ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f_stages_64x5_tn                                 
+      6.8         51666347         20  2583317.4  2583580.0   2577452   2587372       2543.8  void gemv2T_kernel_val<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, (int)128, (int…
+      3.8         28781034       1440    19986.8    19936.0     19488     21248        238.6  std::enable_if<!T7, void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __n…
+      1.4         11057849       4320     2559.7     2528.0      2336      3072        181.6  void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::n…
+      1.3          9813251       2900     3383.9     3616.0      2912      3936        350.8  void at::native::reduce_kernel<(int)512, (int)1, at::native::ReduceOp<float, at::native::MeanOps<fl…
+      1.2          9091589       2920     3113.6     3040.0      1888      3712        303.8  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIterator…
+      1.0          7496199        720    10411.4    10400.0     10272     10560         43.3  void pytorch_flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (int)128, (…
+      0.8          6016885       2900     2074.8     2048.0      1824      2368         95.0  void at::native::elementwise_kernel<(int)128, (int)2, void at::native::gpu_kernel_impl_nocast<at::n…
+      0.7          5299029       1440     3679.9     3712.0      3200      4224        405.8  void at::native::<unnamed>::CatArrayBatchedCopy<at::native::<unnamed>::OpaqueType<(unsigned int)2>,…
+      0.7          5216530       1440     3622.6     3616.0      3296      4192        161.9  void at::native::<unnamed>::CatArrayBatchedCopy_vectorized<at::native::<unnamed>::OpaqueType<(unsig…
+      0.7          5124555       2880     1779.4     1696.5      1344      2432        377.5  void at::native::vectorized_elementwise_kernel<(int)4, at::native::CUDAFunctor_add<c10::BFloat16>, …
+      0.6          4474868       2900     1543.1     1472.0      1376      1824        116.1  void at::native::vectorized_elementwise_kernel<(int)4, at::native::rsqrt_kernel_cuda(at::TensorIter…
+      0.6          4318069       2900     1489.0     1440.0      1344      1856        124.6  void at::native::vectorized_elementwise_kernel<(int)4, void at::native::<unnamed>::pow_tensor_scala…
+      0.5          4129489       2900     1424.0     1376.0      1280      1664        105.5  void at::native::vectorized_elementwise_kernel<(int)4, at::native::CUDAFunctorOnSelf_add<float>, st…
+      0.5          4095253       2940     1392.9     1408.0      1312      1472         34.2  void at::native::vectorized_elementwise_kernel<(int)4, at::native::bfloat16_copy_kernel_cuda(at::Te…
+      0.5          3961235       2180     1817.1     1664.0      1536      2560        277.2  void at::native::vectorized_elementwise_kernel<(int)4, at::native::BinaryFunctor<c10::BFloat16, c10…
+      0.5          3645422       1440     2531.5     2528.0      2336      2752        157.9  void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::n…
+      0.4          2893803        720     4019.2     4032.0      3872      4064         23.9  void pytorch_flash::flash_fwd_splitkv_combine_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (in…
+      0.3          1928136        720     2678.0     2688.0      2560      3008         72.7  void at::native::vectorized_elementwise_kernel<(int)4, at::native::<unnamed>::silu_kernel(at::Tenso…
+      0.0           190913         20     9545.6     9536.0      9440      9696         75.6  void at::native::reduce_kernel<(int)512, (int)1, at::native::ReduceOp<c10::BFloat16, at::native::Ar…
+      0.0            67232         20     3361.6     3440.0      3104      3584        174.8  void at::native::reduce_kernel<(int)512, (int)1, at::native::ReduceOp<long, at::native::func_wrappe…
+      0.0            60576         20     3028.8     3040.0      2720      3168         97.0  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIterator…
+      0.0            56928         20     2846.4     2848.0      2592      3008        109.6  void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIterator…
+      0.0            55266         40     1381.7     1376.0      1344      1408         23.9  void at::native::vectorized_elementwise_kernel<(int)4, at::native::AUnaryFunctor<float, float, floa…
+      0.0            53728         20     2686.4     2624.0      2592      3008        134.8  void at::native::<unnamed>::indexSelectSmallIndex<c10::BFloat16, long, unsigned int, (int)2, (int)2…
+      0.0            52800         20     2640.0     2592.0      2432      3008        185.6  void at::native::<unnamed>::CatArrayBatchedCopy_alignedK_contig<at::native::<unnamed>::OpaqueType<(…
+      0.0            47490         20     2374.5     2368.0      2304      2496         66.0  void at::native::vectorized_elementwise_kernel<(int)4, at::native::sin_kernel_cuda(at::TensorIterat…
+      0.0            47041         20     2352.1     2368.0      2304      2400         28.4  void at::native::vectorized_elementwise_kernel<(int)4, at::native::cos_kernel_cuda(at::TensorIterat…
+      0.0            41568         20     2078.4     2080.0      2048      2112         22.0  void at::native::<unnamed>::CatArrayBatchedCopy_vectorized<at::native::<unnamed>::OpaqueType<(unsig…
+      0.0            39936         20     1996.8     1984.0      1920      2080         46.9  void at::native::vectorized_elementwise_kernel<(int)2, at::native::CUDAFunctorOnSelf_add<long>, std…
+      0.0            31905         20     1595.3     1600.0      1440      1792         99.2  void at::native::vectorized_elementwise_kernel<(int)4, at::native::AUnaryFunctor<long, long, bool, …
+      0.0            30976         20     1548.8     1536.0      1536      1600         19.1  _bmm_outer_product_kernel                                                                           
+      0.0            24480         20     1224.0     1216.0      1184      1408         45.1  void at::native::vectorized_elementwise_kernel<(int)2, at::native::FillFunctor<long>, std::array<ch…
+
+Processing [results/p8-nsys-engine-B1.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)          Name         
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ---------------------
+     79.6        316013063      41560     7603.8     6961.0      5151    238104       2829.4  cudaLaunchKernel     
+     13.7         54464129         40  1361603.2  1337688.0     10140   2753887    1367560.6  cudaMemcpyAsync      
+      3.4         13549163      41560      326.0      300.0       180     21781        454.7  cuKernelGetName      
+      2.9         11424350       1460     7824.9     7970.0      5590     26370       2467.1  cudaMemsetAsync      
+      0.1           469578          4   117394.5   113832.0    112142    129772       8330.1  cuMemSetAccess       
+      0.1           373476          4    93369.0    93156.0     75922    111242      14916.0  cuMemCreate          
+      0.1           242711         20    12135.5    11945.0     11140     13940        764.0  cuLaunchKernelEx     
+      0.1           241486         40     6037.1     6135.5      4860      7880        607.7  cudaStreamSynchronize
+      0.1           211985         40     5299.6     5605.0      1980     28001       4985.8  cudaDeviceSynchronize
+      0.0           138522          4    34630.5    31780.5     30410     44551       6662.6  cuMemMap             
+      0.0            62620         40     1565.5     1030.0       880     18340       2733.2  cudaStreamIsCapturing
+      0.0             7410          1     7410.0     7410.0      7410      7410          0.0  cuProfilerStart      
+
