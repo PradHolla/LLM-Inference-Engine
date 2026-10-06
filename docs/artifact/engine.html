@@ -200,6 +200,9 @@
     <li><a href="#fresh">What search and thinking buy</a></li>
     <li><a href="#load">One GPU, fifty people</a></li>
     <li><a href="#warm">Keeping the cache warm</a></li>
+    <div class="grp">Inside one token</div>
+    <li><a href="#profile">Where 41 ms goes</a></li>
+    <li><a href="#graph">Replaying the step</a></li>
     <div class="grp">Conclusions</div>
     <li><a href="#attrib">The attribution</a></li>
     <li><a href="#method">Bugs and method</a></li>
@@ -210,7 +213,7 @@
 <header>
   <p class="eyebrow">Qwen3-8B &middot; one NVIDIA A10G &middot; every number predicted before it was measured</p>
   <h1>An inference engine from scratch, and why every speed-up here is a range</h1>
-  <p class="standfirst">Nine parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest. The last part puts a search agent on top of the engine and measures what a user actually gets: live web search takes a benchmark of current-events questions from 35% to 65%, and thinking takes it to 79%. Under load, one 24 GB card kept fifty-one people&rsquo;s answers streaming faster than anyone reads, without ever filling its memory or making anyone wait.</p>
+  <p class="standfirst">Ten parts on one GPU and one model. A performance model built from memory bandwidth and parameter count alone, then a deliberately naive server, then an engine written from scratch, then vLLM — each measured by the same client over the same protocol. Then the same discipline turned on the techniques the field quotes as single numbers: quantization, guessing ahead, and the cache underneath both. Every value was predicted in writing before it was measured, which is the only way a wrong prediction becomes information rather than embarrassment; about a third of them were wrong, and those are the ones worth reading. The recurring finding is that none of these techniques has a number. The same quantization flag is worth 1.07× or 2.35×; the same guessing 1.19× or 2.25×; the same cache nothing or 13.8×. What decides it is never the technique, it is whether anything was pressing against the limit it relieves. The last part turns that lesson on this document and retires one of its own explanations. A final part asks what a reasoning model&rsquo;s hidden thinking is actually worth, and finds the same answer in a fourth place: on one workload it is worth 0.4 points for eighteen seconds of silence, and the cleverest way to spend it loses to the simplest. The last part puts a search agent on top of the engine and measures what a user actually gets: live web search takes a benchmark of current-events questions from 35% to 65%, and thinking takes it to 79%. Under load, one 24 GB card kept fifty-one people&rsquo;s answers streaming faster than anyone reads, without ever filling its memory or making anyone wait. A final part opens a single generated token with a profiler and finds the gap to vLLM is not the math at all.</p>
   <div class="hstat">
     <div class="hs"><span class="k">Naive server</span><span class="v">0.332 req/s</span></div>
     <div class="hs"><span class="k">Engine from scratch</span><span class="v"><em>1.60</em> req/s</span></div>
@@ -223,6 +226,7 @@
     <div class="hs"><span class="k">Hidden reasoning, gsm8k</span><span class="v"><em>0.4</em> points for <em>160×</em> the silence</span></div>
     <div class="hs"><span class="k">Vendor&rsquo;s own stop phrase</span><span class="v"><em>42.7</em> points worse</span></div>
     <div class="hs"><span class="k">Live search, FreshQA</span><span class="v">35% &rarr; <em>79%</em></span></div>
+    <div class="hs"><span class="k">Gap to vLLM, same math</span><span class="v"><em>2,079</em> launches vs <em>1</em> graph</span></div>
     <div class="hs"><span class="k">One A10G, people at once</span><span class="v"><em>51</em> at 16 tok/s</span></div>
   </div>
 </header>
@@ -1387,7 +1391,50 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
   <p>The app now warms again the moment a summary lands. When the summary finished before the next message, that turn&rsquo;s first word came in <strong>123 ms</strong>, 99.6% from cache. When the next message arrived first, it still paid the cold read: the test replies two seconds after each answer and a summary takes 3.6&ndash;5.1 s to write. A person reading a fifteen-hundred-token answer pauses far longer than that, and starting the summary one turn before the boundary would close the race outright.</p>
 </section>
 
-<p class="part">Part ten &middot; Conclusions</p>
+<p class="part">Part ten &middot; Inside one token</p>
+
+<section id="profile">
+  <h2>Where 41 milliseconds go</h2>
+  <p>Every explanation in this document so far came from arithmetic and matched pairs: change one thing, measure the difference, reason about the cause. This part finally opened the step itself. Two profilers &mdash; PyTorch&rsquo;s own, and NVIDIA&rsquo;s Nsight Systems, which records every job the GPU runs on a timeline &mdash; were pointed at the engine from part two and at vLLM, to see where each millisecond of one generated token actually goes.</p>
+  <div class="concept">
+    <span class="tag">Concept</span>
+    <h4>Kernels and launches</h4>
+    <p>The GPU does not decide what to run. Python, through PyTorch, tells it one job at a time; each job is a <em>kernel</em> and each instruction to run one is a <em>launch</em>, which costs the CPU a few microseconds. A big job, like multiplying by a weight matrix, keeps the GPU busy long enough for Python to prepare the next instruction. A tiny job &mdash; normalising a vector, adding two results &mdash; finishes before the next instruction arrives, and the GPU waits.</p>
+  </div>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B bf16, A10G, 334-token prompt, batch 1. Per-step figures from Nsight Systems kernel records; step times measured with no profiler attached.</caption>
+    <thead><tr><th></th><th class="n">Per token</th><th class="n">GPU launches</th><th class="n">Matrix multiplies</th><th class="n">Everything else</th><th class="n">GPU idle</th></tr></thead>
+    <tbody>
+      <tr><td>The engine from part two</td><td class="n">40.7 ms</td><td class="n x">2,079</td><td class="n">32.3 ms</td><td class="n x">5.9 ms</td><td class="n x">2.5 ms</td></tr>
+      <tr><td>vLLM</td><td class="n m">34.6 ms</td><td class="n m">1 graph (450 kernels)</td><td class="n">~33 ms</td><td class="n m">~1.5 ms</td><td class="n m">~0.1 ms</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>The heavy math is identical.</strong> Both engines run the same NVIDIA matrix-multiply kernels for the same 32&ndash;33 ms &mdash; reading sixteen gigabytes of weights is the floor, and nobody beats it on this card. The 6.1 ms gap is everything around it: about 4.4 ms of small kernels that vLLM fuses into fewer, larger ones, and about 2.4 ms of the GPU idling while Python issues the next of 2,079 launches.</p>
+  </div>
+  <p>Part three had put that gap down to per-step Python overhead. That was the smaller half. The larger half was the fusion, and only a profiler could tell the two apart.</p>
+  <p>One result was not predicted at all. Attaching the profilers slowed the engine from 40.7 ms to 66&ndash;74 ms a token, against a forecast of under fifteen percent. With two thousand launches a token, the engine issues work only about as fast as the GPU finishes it, so every microsecond a profiler adds per launch lands directly on the step. The instrument disturbed exactly the thing it measured &mdash; which was itself the diagnosis.</p>
+</section>
+
+<section id="graph">
+  <h2>Replaying the step instead of narrating it</h2>
+  <p>vLLM&rsquo;s answer to launch overhead is a <em>CUDA graph</em>: record the whole step once, then replay it with a single instruction. The same trick was applied to the engine from part two &mdash; a fixed-size KV cache so every step has identical shapes, and PyTorch&rsquo;s compiler in its CUDA-graph mode, which also fuses small kernels on the way.</p>
+  <div class="scroll"><table>
+    <caption>Same model, card and prompt. Output compared token by token against the original engine under greedy decoding.</caption>
+    <thead><tr><th></th><th class="n">Batch 1</th><th class="n">Batch 8</th><th class="n">Tokens identical</th></tr></thead>
+    <tbody>
+      <tr><td>Original engine</td><td class="n">41.0 ms</td><td class="n m">43.6 ms</td><td class="n">&mdash;</td></tr>
+      <tr><td>Fixed-size cache, normal launches</td><td class="n">44.4 ms</td><td class="n x">52.3 ms</td><td class="n">51/51</td></tr>
+      <tr><td>Fixed-size cache, replayed as a CUDA graph</td><td class="n m">37.2 ms</td><td class="n">45.6 ms</td><td class="n m">51/51</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding">
+    <p><strong>At one request the graph closes 3.5 of the 6.1 ms</strong>, with identical output: 2,079 launches become one replay, the compiler fuses them down to 653 kernels, and the idle time falls from 2.5 ms to 0.9 &mdash; without touching a single matrix multiply.</p>
+  </div>
+  <p>At eight requests it made things worse, and the timeline says why. A fixed-size cache has empty slots that must be masked out every step, and the mask moves attention off FlashAttention onto PyTorch&rsquo;s slower memory-efficient kernel &mdash; the same masked-path tax part two measured with padding, now visible by name. With one request the graph&rsquo;s savings win; with eight, the slower attention costs more than the graph saves. That is precisely what paged attention exists for: a fixed memory layout that never leaves the fast kernel. <strong>The allocator part two declined to build turns out to be half of a pair</strong>; the other half is the kernel that reads it, and a CUDA graph needs both.</p>
+</section>
+
+<p class="part">Part eleven &middot; Conclusions</p>
 
 <section id="attrib">
   <h2>The attribution</h2>
@@ -1451,7 +1498,7 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
 
 <footer>
   Qwen3-8B on a single NVIDIA A10G (g5.2xlarge), vLLM 0.27.1. Parts one to three run bfloat16;
-  parts four to nine run fp8 unless a table says otherwise, and part nine runs the chat app with a 32k window and one user; parts one to seven sample greedily and part eight uses the vendor&rsquo;s recommended sampling, for the reason part eight gives, and every table states the configuration
+  parts four to nine run fp8 unless a table says otherwise, part nine runs the chat app with a 32k window, and part ten profiles bf16; parts one to seven sample greedily and part eight uses the vendor&rsquo;s recommended sampling, for the reason part eight gives, and every table states the configuration
   it was measured under. All three engines speak the same streaming protocol on the same port and were
   measured by the same benchmark client with no modifications — the constraint that makes
   <code>0.332 &rarr; 1.60 &rarr; 5.70</code> a ladder rather than three unrelated numbers.
