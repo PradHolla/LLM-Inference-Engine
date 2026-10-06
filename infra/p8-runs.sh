@@ -80,7 +80,9 @@ vllm)
         --force-overwrite=true -o "results/$name" \
         "$VLLM" bench latency --model Qwen/Qwen3-8B --dtype bfloat16 --max-model-len 4096 \
         --input-len 412 --output-len 256 --batch-size 1 --num-iters-warmup 3 --num-iters 60 \
-        > "results/$name.log" 2>&1 || { tail -20 "results/$name.log"; die "$name"; }
+        > "results/$name.log" 2>&1
+    # --duration ends the app with SIGTERM, so nsys exits non-zero on success; the report decides.
+    [ -s "results/$name.nsys-rep" ] || { tail -20 "results/$name.log"; die "$name"; }
     grep -iE "avg latency|latency" "results/$name.log" | tail -3 | sed 's/^/  /'
     nsys stats --force-export=true --report cuda_gpu_kern_sum,cuda_api_sum \
         "results/$name.nsys-rep" > "results/$name-stats.txt" 2>&1
