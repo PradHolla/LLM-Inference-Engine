@@ -10,9 +10,11 @@ export HF_HOME=/opt/llm/hf-cache HF_HUB_OFFLINE=1 PYTHONUNBUFFERED=1
 ts() { date -u +%H:%M:%S; }
 die() { echo "ABORT: $*"; exit 1; }
 
-find_nsys() {
-    command -v nsys 2>/dev/null && return 0
-    ls -1d /opt/nvidia/nsight-systems*/bin/nsys /usr/local/cuda*/bin/nsys 2>/dev/null | head -1
+find_nsys() {   # the real binary, never a link: the package itself installs /usr/local/bin/nsys
+    local n
+    n=$(command -v nsys 2>/dev/null) && [ -x "$(readlink -f "$n")" ] && { readlink -f "$n"; return 0; }
+    ls -1d /opt/nvidia/nsight-systems*/*/bin/nsys /opt/nvidia/nsight-systems*/bin/nsys \
+        /usr/local/cuda*/bin/nsys 2>/dev/null | head -1
 }
 
 case "${1:-}" in
@@ -32,7 +34,7 @@ install)
         N=$(find_nsys)
     fi
     [ -n "$N" ] || die "nsys still not found"
-    ln -sf "$N" /usr/local/bin/nsys
+    [ "$N" = /usr/local/bin/nsys ] || ln -sf "$N" /usr/local/bin/nsys   # never link it to itself
     nsys --version
     "$PY" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
     echo "INSTALL_DONE"
