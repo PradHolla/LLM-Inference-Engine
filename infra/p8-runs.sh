@@ -68,6 +68,8 @@ nsys)
     echo "NSYS_DONE"
     ;;
 vllm)
+    # vLLM JIT-builds kernels with ninja from its own venv; systemd's PATH lacks it (incident 38).
+    export PATH="/opt/llm/.venv-vllm/bin:$PATH"
     echo "[$(ts)] vLLM's own profiler options in this version (looked up, not assumed):"
     "$VLLM" bench latency --help=all 2>/dev/null | grep -iE "profil|input-len|output-len|batch-size|num-iters" | sed 's/^/  /'
     name=p8-nsys-vllm-B1
