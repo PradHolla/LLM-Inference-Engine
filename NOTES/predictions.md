@@ -7113,3 +7113,39 @@ cold, exactly as before. Turn 28's summary had been scheduled a turn early (the 
 256-token estimate of the next message) and its warm-up landed in time. A person reading a
 1,500-token answer pauses far longer than 5 s, so turn 28 is the realistic case; closing the race
 outright means starting the summary one turn before the boundary rather than at it.
+
+## P8  Profiling one decode step of our own engine, written 2026-10-05 with the box STOPPED
+
+Config: Qwen3-8B **bf16**, HF transformers eager (the Phase 2 engine path: `engine/profile_step.py`
+reproduces `static_batch.py`'s load and decode call, with an explicit attention mask and
+position_ids as `continuous.py` passes them), 412-token prompt, 10 warm-up then 20 measured steps,
+A10G. Reference: vLLM 0.27.1 bf16, same prompt length, batch 1, captured with
+`nsys --cuda-graph-trace=node`. Tools: PyTorch profiler and Nsight Systems, both new to this project.
+
+### Constants used
+
+| constant | value | source |
+|---|---|---|
+| weight-read floor per step | 16.38 GB / 600 GB/s = **27.3 ms** | roofline, Phase 1 |
+| our offline batch-1 step | 40.5 ms (bare loop), 41.1 ms (engine) | Phase 2 step 1, Phase 3 |
+| vLLM batch-1 step, bf16 | 34.0 ms | Phase 3 |
+| mask tax, B8, real zeros vs none | +10.7 ms (43.9 -> 54.6 ms) | Phase 2 step 4 |
+| Qwen3-8B shape | 36 layers, 7 GEMMs per layer + lm_head | config |
+
+### Predictions
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| P1 | our B1 step, unprofiled | **40-42 ms** | Phase 2 and 3 measured it |
+| P2 | time inside GEMM kernels per B1 step | **29-33 ms** | the weight read at the ~0.80 efficiency cuBLAS reaches when it runs alone (vLLM's whole-step figure) |
+| P3 | GPU kernels launched per B1 step, our engine | **1,500-2,500** | eager HF: ~40-60 small kernels per layer (norms, rotary, cache writes, SiLU, adds) x 36 |
+| P4 | GPU idle inside a B1 step (step wall time minus kernel time) | **4-8 ms (10-20%)** | small kernels finish faster than Python can launch the next one |
+| P5 | the remainder: non-GEMM kernels per B1 step | **2-5 ms** | 41 - P2 - P4 |
+| P6 | vLLM kernels per step, and graph launches | **~400-700 kernels, ~1-3 graph launches** | fused norm/rotary/activation; the step replays as a CUDA graph |
+| P7 | vLLM GPU idle per step | **< 1 ms** | a graph replay has no Python between kernels |
+| P8 | B8 masked vs B8 unmasked: extra attention-kernel time | **+8-12 ms**, and the attention kernel NAME changes (flash -> a masked path) | Phase 2's 10.7 ms tax, now seen as a kernel |
+| P9 | profiler overhead on ITL (torch mode vs time mode) | **< 15%** | CUPTI tracing adds per-launch cost |
+
+**Most likely to be wrong:** P3 and P4, which are the first numbers this project has ever had about
+the CPU side of a step. If P4 is near zero, Phase 3's attribution of 16% to per-step Python was
+wrong and the gap lives in the kernels themselves.

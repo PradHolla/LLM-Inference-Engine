@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command each way, correct flags baked in. Written because hand-typed rsync and ssh
 # invocations failed three times this week for reasons unrelated to the work.
-#   ./sync.sh push          code up (labbench, gateway, tools, infra, app)
+#   ./sync.sh push          code up (labbench, gateway, tools, infra, app, engine)
 #   ./sync.sh pull          results down
 #   ./sync.sh run '<cmd>'   run a command on the box, from /opt/llm
 set -uo pipefail
@@ -16,7 +16,7 @@ RS=(rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache_
 
 case "${1:-}" in
   push)
-    for d in labbench gateway tools infra app; do
+    for d in labbench gateway tools infra app engine; do
         "${RS[@]}" "$d/" "ubuntu@$IP:/opt/llm/$d/" || exit 1
     done
     # Evaluation inputs live in gitignored data/; send the label files, never the dataset caches.
