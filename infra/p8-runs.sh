@@ -20,12 +20,10 @@ install)
     N=$(find_nsys)
     if [ -z "$N" ]; then
         echo "[$(ts)] nsys not found; installing nsight-systems-cli from NVIDIA's devtools repo"
-        KEY=/usr/share/keyrings/cuda-archive-keyring.gpg
-        if [ ! -f "$KEY" ]; then
-            wget -q -O /tmp/cuda-keyring.deb \
-                https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
-                && dpkg -i /tmp/cuda-keyring.deb || die "cuda-keyring install failed"
-        fi
+        # The devtools repo is signed with NVIDIA's older 7fa2af80 key, not the CUDA keyring's.
+        KEY=/usr/share/keyrings/nvidia-devtools.gpg
+        wget -q -O - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub \
+            | gpg --dearmor --yes -o "$KEY" || die "devtools key fetch failed"
         echo "deb [signed-by=$KEY] https://developer.download.nvidia.com/devtools/repos/ubuntu2404/amd64/ /" \
             > /etc/apt/sources.list.d/nvidia-devtools.list
         apt-get update -q >/tmp/apt-update.log 2>&1 || { tail -5 /tmp/apt-update.log; die "apt update"; }
