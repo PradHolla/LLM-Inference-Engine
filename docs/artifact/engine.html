@@ -170,6 +170,7 @@
     <li><a href="#quant">What quantization buys</a></li>
     <li><a href="#workload">1.07&times; or 2.35&times;</a></li>
     <li><a href="#quality">Measuring damage</a></li>
+    <li><a href="#perplexity">What perplexity misses</a></li>
     <li><a href="#thinking">A backwards prediction</a></li>
     <div class="grp">Guessing ahead</div>
     <li><a href="#spec">The idle GPU</a></li>
@@ -622,6 +623,22 @@ int4  19 users   6.12 GB     12.71 GB       18.83 GB</pre>
   </table></div>
   <p><strong>Zero, three, nine, thirty-seven.</strong> The damage grows with the length of the reasoning required, exactly as compounding error should. At 32 steps int4 destroys more than a third of what the full model solved &mdash; while the headline figure politely reports two points.</p>
   <p>And the last row matters just as much. Retrieval &mdash; finding one buried fact among decoys in a long document &mdash; was <strong>perfect for all three, 270 out of 270, at every depth</strong>. The damage is not general. It is specific to multi-step reasoning, and it leaves the thing a search-backed chat app spends most of its time doing completely untouched.</p>
+
+  <h3 id="perplexity">What the standard check would have said</h3>
+  <p>The usual first test of a quantized model is perplexity: feed it a fixed text and measure how surprised it is by each next token. It was run later on general text and on the one text where the damage was already known &mdash; the full-precision model&rsquo;s own correct answers to the 32-step problems above.</p>
+  <div class="scroll"><table>
+    <caption>Qwen3-8B, A10G, vLLM 0.27.1. Perplexity from the server&rsquo;s per-token probabilities; full precision scores 10.49 on WikiText and 1.017 on the answers.</caption>
+    <thead><tr><th>Text scored</th><th>Weights</th><th class="n">Perplexity change</th><th class="n">Answers broken when it writes them</th></tr></thead>
+    <tbody>
+      <tr><td>WikiText, 95,000 tokens</td><td>int4</td><td class="n">+4.6%</td><td class="n">&mdash;</td></tr>
+      <tr><td>The 27 correct 32-step answers</td><td>fp8</td><td class="n">+0.06%</td><td class="n">3 of 27</td></tr>
+      <tr><td>The 27 correct 32-step answers</td><td>int4</td><td class="n m">+0.22%</td><td class="n x">10 of 27 (37%)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding warn">
+    <p><strong>On the exact text where int4 gets 37% of the answers wrong, perplexity says it is 0.2% worse.</strong> Perplexity gives the model the correct previous token at every step, so a slip never gets to feed the next one &mdash; and that compounding is the whole mechanism of the damage. Token by token, int4 agrees with the full model 99.6% of the time; over a nine-hundred-token answer, a slip somewhere is close to certain, and when it lands on a digit the answer is gone.</p>
+  </div>
+  <p>The check ranks the formats in the right order and understates the damage by about a hundredfold. Recent papers report the same thing on other models; this measured it on the very failures it would have missed.</p>
 </section>
 
 <section id="thinking">
@@ -1322,6 +1339,7 @@ give the solution based on the thinking directly now.\n&lt;/think&gt;]  &rarr;  
   <div class="finding">
     <p><strong>The cheapest win in the whole project was a system prompt.</strong> The app had none. Adding one that asks for a direct answer of a few hundred words halved the answer on the same twelve questions, 644 tokens to 293, and halved the time to a finished answer, <strong>14.4 s to 7.0 s</strong>. No kernel, no quantization, no GPU time.</p>
   </div>
+  <p>Holding the plan to a JSON schema turned out to cost nothing. The same hundred planner prompts with and without the schema took 19.02 and 19.01 ms per token; vLLM&rsquo;s grammar engine precomputes which tokens are allowed, so the check is microseconds against a nineteen-millisecond step, plus twelve milliseconds to compile the grammar the first time. Left to itself the model wrote valid JSON a hundred times out of a hundred, so the schema is insurance rather than a cost. The planner&rsquo;s second of waiting is simply its prompt and its forty-odd tokens.</p>
 </section>
 
 <section id="fresh">

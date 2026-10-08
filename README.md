@@ -49,6 +49,7 @@ Each phase ends with something runnable and a measurement. The full write-up of 
 | 7 | **Thinking budgets as a scheduling policy** | A middling budget is the worst one: 1,024 tokens scored 83.1% against 94.4% at 128, and took 24 s longer, because it cuts the reasoning off before the answer | [report](docs/REPORT.md#phase-7-budget) |
 | 6b-d | **The app as an agent, end to end and under load** | A LangGraph planner decides search and thinking per message (93% agreement on 581 labelled questions). One A10G held 51 concurrent conversations' answers at 16 tok/s | [report](docs/REPORT.md#phase-6b) |
 | 8 | **Inside one decode step** with Nsight Systems and the PyTorch profiler | The 6 ms gap to vLLM is not the math (identical cuBLAS kernels) but 2,079 unfused launches and the GPU idling between them. Replaying the step as a CUDA graph closed 3.5 ms of it | [report](docs/REPORT.md#phase-8) |
+| 9 | **Checking the book's checks**: perplexity as a quality test, and the cost of forcing JSON | Perplexity moved 0.2% on the exact arithmetic where int4 breaks 37% of answers: it never lets an error feed the next token. The planner's JSON schema costs 0.05% per token | [report](docs/REPORT.md#phase-9) |
 
 ## A few results worth a picture
 
@@ -127,6 +128,7 @@ tools/appdrive.py     drives the chat app's own API; joins each turn to the gate
 tools/planeval.py     scores the planner against labelled questions
 tools/plansets.py     builds the planner sets from MTRAG, QReCC, FreshQA and GSM8K
 tools/freshjudge.py   grades FreshQA answers with a separate Qwen3-8B judge
+tools/p9eval.py       perplexity from vLLM's prompt logprobs; JSON-schema cost pairs
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock

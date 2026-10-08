@@ -22,6 +22,7 @@ every table states its configuration.
 9. [Phase 6c: the app as an agent](#phase-6c)
 10. [Phase 6d: one 24 GB GPU under load](#phase-6d)
 11. [Phase 8: inside one decode step](#phase-8)
+12. [Phase 9: checking two of the book's checks](#phase-9)
 
 <a id="phase-1-3"></a>
 
@@ -586,3 +587,51 @@ profile to see where the time goes.
 The recordings open in the free Nsight Systems desktop app:
 `results/p8-nsys-engine-B1.nsys-rep` (a dense comb of thousands of launches per step),
 `results/p8-nsys-graph-B1.nsys-rep` and `results/p8-nsys-vllm-B1.nsys-rep` (one graph per step).
+
+<a id="phase-9"></a>
+
+## Phase 9: checking two of the book's checks
+
+Two cheap experiments, each testing a piece of standard advice against data this project already had.
+
+### Perplexity cannot see the damage that matters
+
+Perplexity is the simplest quality check for a quantized model (Baseten's *Inference Engineering*,
+5.1.3): score a fixed text one token at a time and see how surprised the model is. It was run on
+general text and on the one text where the damage is already known, bf16's own correct answers to
+the 32-step arithmetic problems from Phase 4.
+
+| text scored | config | perplexity change vs bf16 | top choice = next token | answers broken when generating (Phase 4) |
+|---|---|---|---|---|
+| WikiText-2, 95k tokens | fp8 | -0.30% | 53.16% | -- |
+| WikiText-2, 95k tokens | int4 | +4.60% | 52.58% | -- |
+| 27 correct 32-step answers, 24k tokens | fp8 | +0.06% | 99.84% | 3 of 27 (11%) |
+| 27 correct 32-step answers, 24k tokens | **int4** | **+0.22%** | 99.61% | **10 of 27 (37%)** |
+
+*Qwen3-8B, A10G, vLLM 0.27.1 `prompt_logprobs`, bf16 KV; bf16 itself scores 10.49 and 1.017.*
+
+**On the exact text where int4 gets 37% of the answers wrong, perplexity says it is 0.2% worse.**
+Perplexity hands the model the correct previous token at every step, so a mistake never gets to
+feed the next one, and that compounding is the whole mechanism of the damage. Per token, int4 picks
+the same token as bf16 99.6% of the time; over a ~900-token answer, that small gap makes some slip
+almost certain, and when it lands on a digit the answer is wrong. Perplexity ranks the formats
+correctly and understates the real damage by about a hundredfold. Recent papers report the same
+pattern; this confirms it on our model, on the exact text of failures already measured.
+
+### Forcing JSON on the planner is free
+
+The planner's output is held to a JSON schema by masking forbidden tokens at every step. The same
+100 planner prompts were sent with and without the schema:
+
+| 100 planner prompts | time to first token | time per token | tokens out | valid JSON |
+|---|---|---|---|---|
+| without schema | 274.7 ms | 19.01 ms | 40 | 100/100 |
+| with schema | 275.4 ms | 19.02 ms | 39 | 100/100 |
+
+*Qwen3-8B fp8, fp8 KV, prefix caching off, thinking off, one request at a time. First schema use:
++12 ms to compile the grammar, then cached.*
+
+**The schema costs 0.05% per token.** vLLM's grammar engine (XGrammar) precomputes which tokens are
+allowed, so the per-step check is microseconds against a 19 ms step. The model also wrote valid
+JSON unprompted 100 times out of 100, so the schema is insurance, not a cost. The planner's ~1 s is
+its prompt plus ~40 tokens at 19 ms each; the only levers are fewer tokens or a smaller model.
