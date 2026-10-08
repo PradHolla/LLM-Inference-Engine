@@ -7223,3 +7223,45 @@ same masked-path tax Phase 2 measured. At B8 that tax outweighs the launch savin
 issues kernels only about as fast as the GPU retires them (~18 us of kernel per launch). Any added
 per-launch cost lands straight on the step: nsys and the PyTorch profiler inflated it to 66-74 ms.
 A launch-bound step is exactly what a CUDA graph is for, which G2 then confirmed.
+
+## P9  Perplexity vs real quantization damage, and the JSON schema's cost, written 2026-10-07 with the box STOPPED
+
+Lookups first: vLLM's `/v1/completions` returns per-token `prompt_logprobs` (non-streaming), so
+perplexity needs no new library; several 2026 papers already report quantized models keeping
+perplexity while losing correct answers ("The Illusion of Equivalency", "Accuracy is Not Enough"),
+so P9-A is a confirmation with a sharper test, not a discovery. XGrammar, vLLM's default
+structured-output backend, reports < ~50 us per token and a one-time 20-50 ms compile per schema.
+
+### P9-A  Perplexity (`tools/p9eval.py ppl`)
+
+Config: Qwen3-8B bf16 / fp8 (weights only, Phase 4's fp8) / int4 w4a16 (RedHatAI, Phase 4's int4),
+bf16 KV, `--max-model-len 8192`, vLLM 0.27.1, A10G. Corpora: (wiki) WikiText-2 test, 100 chunks of
+4,000 characters; (k32) bf16's own CORRECT no-think answers to the 32-step arithmetic items from
+`results/phase4-bf16-a.jsonl`, answer tokens only, the exact text where Phase 4 measured int4
+breaking 37% of what bf16 solved. Top-1 match = share of tokens that were the model's own first choice.
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| A1 | bf16 perplexity, wiki | **7-14** | a chat-tuned 8B on encyclopedic text; an anchor, not a test |
+| A2 | fp8 vs bf16 perplexity, both corpora | **+0.1% to +1%** | Phase 4: fp8 within the accuracy noise floor |
+| A3 | int4 vs bf16 perplexity, wiki | **+2% to +5%** | typical w4a16 GPTQ deltas on 7-8B models |
+| A4 | bf16 perplexity on its own k32 answers | **1.02-1.15** | greedy text scored by the model that wrote it |
+| A5 | int4 vs bf16 on k32 | **+2% to +8%**, against **37%** of answers broken in generation | teacher forcing never lets an error feed the next step |
+| A6 | top-1 match on k32: bf16 / int4 | **>= 98% / 96-98.5%** | a sub-2% per-token disagreement is enough to break a long arithmetic chain when errors compound |
+
+### P9-B  What the JSON schema costs the planner (`tools/p9eval.py json`)
+
+Config: the app's server (Qwen3-8B fp8, fp8 KV, 32k, reasoning parser, V1 runner) with **prefix
+caching OFF** so both arms prefill cold; 100 planner prompts from `data/plansets/all.jsonl`, with and
+without `response_format`, alternating order per item, thinking off, concurrency 1, streaming.
+
+| # | Prediction | Value | Why |
+|---|---|---|---|
+| B1 | time per output token, plain | **18-21 ms** | fp8 decode at batch 1 (P8, Phase 6) |
+| B2 | schema overhead per token | **< 2%** | XGrammar's < ~50 us against ~19 ms |
+| B3 | schema overhead on time to first token, cached grammar | **< 10 ms** | one bitmask on the first step |
+| B4 | first schema request, cold compile | **+20-100 ms** over the plain request | XGrammar's reported compile cost |
+| B5 | plain arm still parses as JSON | **>= 85%** | the instruction asks for JSON only; an 8B mostly complies without a grammar |
+
+**Most likely to be wrong:** A6, the first per-token agreement figure this project has measured, and
+B5, which depends on how the model formats unconstrained JSON (code fences would fail the parse).
