@@ -1,0 +1,14 @@
+## Perplexity vs generation damage  [Qwen3-8B, A10G, vLLM 0.27.1, prompt_logprobs, bf16 KV; k32 = bf16's correct no-think 32-step answers, answer tokens only]
+corpus | config | units | tokens | perplexity | vs bf16 | top-1 match
+wiki | bf16 | 100 | 95,190 | 10.4922 | +0.00% | 53.17%
+wiki | fp8 | 100 | 95,190 | 10.4610 | -0.30% | 53.16%
+wiki | int4 | 100 | 95,190 | 10.9749 | +4.60% | 52.58%
+k32 | bf16 | 27 | 24,291 | 1.0169 | +0.00% | 99.94%
+k32 | fp8 | 27 | 24,291 | 1.0176 | +0.06% | 99.84%
+k32 | int4 | 27 | 24,291 | 1.0192 | +0.22% | 99.61%
+
+## JSON schema cost  [Qwen3-8B fp8, fp8 KV, prefix caching OFF, thinking off, concurrency 1, planner prompts]
+arm | n | ttft p50 | time per token p50 | out tokens p50 | parses as JSON
+plain | 100 | 274.7 ms | 19.01 ms | 40.0 | 100/100
+schema | 100 | 275.4 ms | 19.02 ms | 39.0 | 100/100
+first schema request ttft 284.3 ms vs plain 272.2 ms (grammar compile, cold)

@@ -7265,3 +7265,65 @@ without `response_format`, alternating order per item, thinking off, concurrency
 
 **Most likely to be wrong:** A6, the first per-token agreement figure this project has measured, and
 B5, which depends on how the model formats unconstrained JSON (code fences would fail the parse).
+
+### P9 actuals, 2026-10-07
+
+Config as the P9 header; box at `5b29ff2`. Raw: `results/p9-ppl.jsonl`, `results/p9-json.jsonl`,
+`results/p9-report.txt`. Every step passed its smoke check first; no rerun.
+
+#### P9-A  Perplexity
+
+| corpus | config | tokens | perplexity | vs bf16 | top-1 match | answers broken in generation (Phase 4) |
+|---|---|---|---|---|---|---|
+| WikiText-2 | bf16 | 95,190 | 10.492 | -- | 53.17% | -- |
+| WikiText-2 | fp8 | 95,190 | 10.461 | -0.30% | 53.16% | -- |
+| WikiText-2 | int4 | 95,190 | 10.975 | **+4.60%** | 52.58% | -- |
+| 32-step answers | bf16 | 24,291 | 1.0169 | -- | 99.94% | 0 of 27 (reference) |
+| 32-step answers | fp8 | 24,291 | 1.0176 | +0.06% | 99.84% | **3 of 27 (11%)** |
+| 32-step answers | int4 | 24,291 | 1.0192 | **+0.22%** | 99.61% | **10 of 27 (37%)** |
+
+*Qwen3-8B, A10G, vLLM 0.27.1 `prompt_logprobs`, bf16 KV. The 27 answers are bf16's correct no-think
+32-step answers from Phase 4; breakage recounted from `results/phase4-{fp8,int4}.jsonl` on the same 27.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| A1 | bf16 wiki perplexity 7-14 | **10.49** | correct |
+| A2 | fp8 +0.1% to +1% | **-0.30% / +0.06%** | correct within noise |
+| A3 | int4 wiki +2% to +5% | **+4.60%** | correct |
+| A4 | bf16 on its own answers 1.02-1.15 | **1.017** | correct, at the floor |
+| A5 | int4 on k32 +2% to +8%, against 37% broken | **+0.22%** against 37% broken | **wrong, and the finding is stronger for it** |
+| A6 | top-1 match bf16 >= 98%, int4 96-98.5% | **99.94% / 99.61%** | wrong: agreement far higher than predicted |
+
+**Perplexity says int4 is 0.2% worse on exactly the text where it gets 37% of the answers wrong.**
+On general text it reports a 4.6% change, which reads as "mild"; on the reasoning text where the
+damage actually lives it reports almost nothing, because teacher forcing hands the model bf16's
+correct previous token at every step, so an error never gets to feed the next one. Per token, int4
+agrees with bf16's choice 99.6% of the time. Over a ~900-token answer, a 0.3-point per-token
+disagreement (99.94 -> 99.61) makes some divergence near-certain, and whether it lands on a digit
+decides the answer. The book's simplest quality check (5.1.3) is structurally blind to the failure
+mode Phase 4 found; it ranks the formats correctly and sizes the damage wrongly by two orders of
+magnitude. The literature reports the same pattern (A5's lookup), so this is a confirmation on our
+model, made sharper by measuring it on the exact text of the known failures.
+
+#### P9-B  JSON schema cost
+
+| arm | n | time to first token p50 | time per token p50 | tokens out p50 | parses as JSON |
+|---|---|---|---|---|---|
+| plain | 100 | 274.7 ms | 19.01 ms | 40 | 100/100 |
+| schema | 100 | 275.4 ms | 19.02 ms | 39 | 100/100 |
+
+*Qwen3-8B fp8, fp8 KV, prefix caching OFF, thinking off, concurrency 1, 100 planner prompts.
+First schema request (cold compile): 284.3 ms against 272.2 ms plain.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| B1 | 18-21 ms per token | **19.01 ms** | correct |
+| B2 | schema < 2% per token | **+0.05%** | correct |
+| B3 | < 10 ms on first token, cached | **+0.7 ms** | correct |
+| B4 | cold compile +20-100 ms | **+12 ms** | wrong, cheaper |
+| B5 | plain parses >= 85% | **100/100** | correct |
+
+**Forcing JSON is free on this stack.** The planner's cost is its prompt and its ~40 tokens at
+19 ms each, nothing else; the grammar adds a twentieth of a percent. And on these prompts the
+unconstrained model produced valid JSON 100 times out of 100, so the schema is insurance against a
+rare failure, not a cost. The lever on the planner is still fewer tokens or a smaller model.
