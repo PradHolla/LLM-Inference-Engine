@@ -226,6 +226,50 @@ async def run_point(args, rate: float, out, lock) -> list[Record]:
     return recs
 
 
+def replay_plan(spec: str) -> list[tuple[float, list[float], int]]:
+    """(rate, arrival offsets, pool start) for each requested load point of an earlier run."""
+    path, _, idx = spec.rpartition(":")
+    blocks: list[list[dict]] = []
+    for line in open(path):
+        if line.strip():
+            r = json.loads(line)
+            if not blocks or blocks[-1][0]["rate"] != r["rate"]:
+                blocks.append([])
+            blocks[-1].append(r)
+    plan = []
+    for i in (int(x) for x in idx.split(",")):
+        b = sorted(blocks[i], key=lambda r: r["t_arrival"])
+        chars = [r["prompt_chars"] for r in b]
+        # Records carry no prompt id, so find the one pool offset whose lengths match.
+        starts = [s for s in range(len(POOL))
+                  if all(len(POOL[(s + k) % len(POOL)]) == c for k, c in enumerate(chars))]
+        if len(starts) != 1:
+            raise SystemExit(f"replay block {i}: {len(starts)} pool offsets match its prompts")
+        t0 = b[0]["t_arrival"]
+        plan.append((b[0]["rate"], [r["t_arrival"] - t0 for r in b], starts[0]))
+    return plan
+
+
+async def run_replay(args, rate: float, offsets: list[float], out, lock) -> list[Record]:
+    """run_point on a recorded arrival schedule instead of a fresh Poisson draw."""
+    recs: list[Record] = []
+    limits = httpx.Limits(max_connections=len(offsets) + 16,
+                          max_keepalive_connections=len(offsets) + 16)
+    async with httpx.AsyncClient(limits=limits) as client:
+        t0, tasks = time.perf_counter(), []
+        for off in offsets:
+            await asyncio.sleep(max(0.0, t0 + off - time.perf_counter()))
+            t = asyncio.create_task(one_request(client, args, rate,
+                                                t0 + off, out, lock))
+            t.add_done_callback(
+                lambda f: recs.append(f.result()) if not f.cancelled()
+                and f.exception() is None else None)
+            tasks.append(t)
+        await asyncio.gather(*tasks, return_exceptions=True)
+    recs.sort(key=lambda r: r.t_sent)
+    return recs
+
+
 async def run_serial(args, out, lock) -> tuple[list[Record], float]:
     """Closed-loop: one request at a time, each awaited before the next. Deliberate
     EXCEPTION to the open-loop rule at the top of this file; see NOTES/code-notes.md."""
@@ -319,20 +363,26 @@ async def main() -> None:
     ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--out", default="results/bench.jsonl")
     ap.add_argument("--settle", type=float, default=3, help="seconds between load points")
+    ap.add_argument("--replay", metavar="FILE:I,J",
+                    help="re-send the exact arrival times and prompts of load points I,J "
+                         "(0-indexed runs of equal rate) of an earlier JSONL; needs --prompts-file")
     args = ap.parse_args()
     if args.prompts_file:
         POOL.extend(load_prompts(args.prompts_file))
         print(f"prompts: {len(POOL)} real prompts from {args.prompts_file}, "
               f"cycled in a fixed order")
 
-    if not args.rate and not args.sweep and not args.serial:
-        ap.error("need --rate, --sweep, or --serial")
+    if not args.rate and not args.sweep and not args.serial and not args.replay:
+        ap.error("need --rate, --sweep, --serial or --replay")
+    if args.replay and not POOL:
+        ap.error("--replay needs the --prompts-file the original run used")
     rates = [float(x) for x in args.sweep.split(",")] if args.sweep else [args.rate]
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     lock = asyncio.Lock()
     mode = (f"serial (closed loop) · {args.serial} requests + {args.warmup} warmup"
             if args.serial else
+            f"replay of {args.replay}" if args.replay else
             f"open-loop · Poisson arrivals · {args.duration:.0f}s per point")
     print(f"\n\033[1m{mode} · "
           f"{args.prompt_tokens} prompt / {args.max_tokens} max out"
@@ -370,8 +420,9 @@ async def main() -> None:
         print()
         return
 
+    plan = replay_plan(args.replay) if args.replay else [(r, None, 0) for r in rates]
     with open(args.out, "a") as out:
-        for i, rate in enumerate(rates):
+        for i, (rate, offsets, start) in enumerate(plan):
             if i:
                 await asyncio.sleep(args.settle)
             # Restart the pool at every rate. Without this the cursor carries over, so
@@ -379,8 +430,12 @@ async def main() -> None:
             # took all 90 long-context items and read as a capacity cliff that vanished
             # at the next rate up.
             global _pool_i
-            _pool_i = 0
-            recs = await run_point(args, rate, out, lock)
+            _pool_i = start
+            if offsets is None:
+                recs = await run_point(args, rate, out, lock)
+            else:
+                print(f"  replaying {len(offsets)} arrivals from pool offset {start}")
+                recs = await run_replay(args, rate, offsets, out, lock)
             s = summarize(rate, recs, args.duration)
             summaries.append(s)
             print_row(s)

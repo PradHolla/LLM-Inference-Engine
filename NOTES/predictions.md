@@ -7327,3 +7327,98 @@ First schema request (cold compile): 284.3 ms against 272.2 ms plain.*
 19 ms each, nothing else; the grammar adds a twentieth of a percent. And on these prompts the
 unconstrained model produced valid JSON 100 times out of 100, so the schema is insurance against a
 rare failure, not a cost. The lever on the planner is still fewer tokens or a smaller model.
+
+---
+
+## P10  L4 vs A10G, 2026-10-08, before the run
+
+**Question.** The L4 (g6.2xlarge, $0.98/hr) has the same 24 GB as the A10G (g5.2xlarge, $1.21/hr),
+half the memory bandwidth (300 against 600 GB/s), about the same bf16 compute (121 against 125
+TFLOPS dense), and native fp8 (242 TFLOPS dense), which the A10G lacks. Does native fp8 earn back
+the bandwidth it gives up? Hosts match: 8 vCPU and 32 GiB on both, so only the GPU differs.
+
+**Configuration, every arm.** Qwen3-8B, vLLM 0.27.1, fp16 KV, `--max-model-len 16384`, no
+speculation, `results/phase4-items.jsonl` prompts, 128 output tokens, thinking on, temperature 0.
+KV pinned to the A10G's own Phase 6B budgets (33,312 / 74,880 / 101,920 tokens) so cache size is
+identical across cards. Runner `infra/l4-runs.sh`, report `tools/l4report.py`.
+
+**What vLLM does with `--quantization fp8` on each card** (source, v0.27.1,
+`kernels/linear/__init__.py` and `scaled_mm/marlin.py`). The CUDA kernel order is Marlin,
+FlashInfer, CUTLASS. Marlin declines sm89+ unless `VLLM_TEST_FORCE_FP8_MARLIN=1`; FlashInfer needs
+sm100. So the A10G runs weight-only fp8 through Marlin (dequantize to bf16 inside the GEMM), and the
+L4 runs CUTLASS W8A8 with **dynamic per-token activation quantization** -- real fp8 math, and
+activations rounded to fp8 too. Forcing Marlin on the L4 gives a control on ONE card: same
+bandwidth, same weights, only the kernel differs. That isolates native fp8 more cleanly than any
+cross-card comparison can.
+
+**The A10G side is not rerun.** It is Phase 6B's spec-off rows. `tools/l4report.py` recomputes
+them from `results/phase6-bombard.jsonl` with the same code that scores the L4, and refuses to
+report unless they reproduce the published 34.2 / 18.9 / 11.9 ms and 1.72 / 1.65 / 1.65 and
+3.58 / 4.52 / 4.73 req/s. They do, exactly.
+
+**Two corrections to Phase 6B, found while preparing this.** Appended here, not edited above.
+
+1. *The derived bandwidth table overstated the Marlin tax.* It charged every format 8.19e9
+   parameters at its own width. But the input embedding is a gather (one row per token, not the
+   0.62e9-parameter table), and `lm_head` stays bf16 under both fp8 and w4a16. Bytes actually read
+   per decode step: bf16 **15.14 GB**, fp8 **8.19 GB**, int4 **4.83 GB** (4-bit body, group-128
+   bf16 scales, bf16 lm_head). Re-derived A10G efficiency: bf16 **73.8%**, fp8 via Marlin **72.4%**,
+   int4 via Marlin **67.5%** of 600 GB/s -- not 79.8 / 72.2 / 57.4. Marlin costs fp8 about 2% of
+   decode at batch 1, not 10%, and int4 about 9%, not 39%. L4-6 below tests the byte count: if
+   lm_head were quantized, fp8's loaded weights would be 7.6 GiB, not 8.8.
+2. *The 6 req/s windows were not matched across quantizations.* The prompt pool is ordered math
+   (0-359), longctx (360-449, ~4k tokens each), gsm8k; before the 2026-09-07 bench fix the cursor
+   carried over from the 2 req/s window, so the 6 req/s window began wherever that random draw
+   ended. bf16's window held **21** long prompts, fp8's **10**, int4's **0**. Part of int4's lead
+   at 6 req/s (TTFT p95 446 ms against 2,204 and 17,348) is a lighter workload, not a faster
+   format. The cross-quantization ranking at 6 req/s is confounded; within one format it is fine.
+   Because of (2), the L4 does not draw fresh Poisson arrivals: `bench.py --replay` re-sends each
+   A10G load point's exact arrival times and prompts (pool offset recovered by matching prompt
+   lengths, unique for all ten points), and the report aborts if any L4 window's prompt sequence
+   differs from its A10G twin.
+
+### Predictions
+
+Decode at batch 1 is memory-bound: ITL = bytes per step / (peak x efficiency). Efficiency is taken
+from the A10G's corrected values, on the assumption that it is a property of the kernels more
+than the card.
+
+| # | Quantity (L4) | Predicted | Derivation |
+|---|---|---|---|
+| L4-1 | bf16 ITL p50 | **68 ms**, range 62-76 | 15.14 GB / (300 GB/s x 0.738) = 68.4 ms |
+| L4-2 | fp8 forced-Marlin ITL p50 | **38 ms**, range 34-42 | 8.19 / (300 x 0.724) = 37.7 ms |
+| L4-3 | fp8 CUTLASS ITL vs forced Marlin | **1.00-1.10x Marlin's** (no faster) | identical bytes read; W8A8 adds a per-token activation-quant kernel before each of 144 linears, and CUTLASS fp8 is not built for M=1 |
+| L4-4 | int4 ITL p50 | **24 ms**, range 21-27 | 4.83 / (300 x 0.675) = 23.8 ms |
+| L4-5 | L4/A10G ITL ratio, every format | **1.85-2.1x** | the bandwidth ratio; a fixed ~1.5 ms of non-GEMM work per step (Phase 8) pulls it slightly under 2 |
+| L4-6 | "Model loading took" | bf16 **15.3**, fp8 **8.8**, int4 **5.7 GiB** | 15.14+1.24 embed / 1.074; fp8 body 6.95 + bf16 embed and lm_head 2.49 = 9.44 GB; int4 3.47+0.11+2.49 = 6.07 GB |
+| L4-7 | fp8 kernel selected | CUTLASS (`fp8`), Marlin (`fp8m`) | source above; the runner aborts on a mismatch |
+| L4-8 | all four launch at the pinned KV | **yes** | the L4 has ~300 MiB more addressable memory than the A10G (spec sheet; not yet measured) |
+
+**Prefill**, L4 only (no matched A10G measurement exists at this shape; scope cut, stated). A
+~4,096-token prompt: linear FLOPs 2 x 6.95e9 x 4096 = 5.69e13, causal attention ~4.9e12, total
+~6.2e13. At 121 TFLOPS bf16 that is 0.51 s at 100% MFU.
+
+| # | Quantity (L4, ~4k-token prompt, max_tokens 1) | Predicted | Derivation |
+|---|---|---|---|
+| L4-9 | bf16 TTFT p50 | **1.0 s**, range 0.85-1.35 | 0.51 s at 40-60% MFU, plus one decode step; the 72 W power cap throttles clocks under sustained tensor load |
+| L4-10 | fp8 CUTLASS vs bf16 | **1.6x faster**, range 1.4-1.9 | linears at 242 TFLOPS halve; attention stays bf16 (~8% of FLOPs); the power cap bites harder at 2x throughput |
+| L4-11 | fp8 forced-Marlin vs bf16 | **0.75-1.0x bf16's speed** | Marlin computes in bf16 and adds dequantization; it is a small-batch kernel, and vLLM warns it "may degrade performance for compute-heavy workloads" |
+| L4-12 | **CUTLASS / Marlin prefill speed, same card** | **1.6-2.4x** | the native-fp8 compute gain in isolation: L4-10 / L4-11 |
+| L4-13 | int4 (w4a16 Marlin) vs bf16 | **0.75-1.0x** | same reasoning as L4-11 |
+| L4-14 | power during prefill | p95 **>= 70 W** of a 72 W limit | sustained tensor work on a 72 W card |
+
+**Under load**, the L4 replaying the A10G's exact arrivals.
+
+| # | Quantity | Predicted | Derivation |
+|---|---|---|---|
+| L4-15 | fp8 (both kernels) and int4 at 2 req/s | keep up: served req/s within 0.05 of the A10G's, TTFT p95 < 400 ms | int4 and fp8 need ~250 tok/s at ~1.9 req/s x 128; even at batch 1 they decode 26-42 tok/s per stream, and batching ~10 streams costs little extra |
+| L4-16 | bf16 at 2 req/s | **keeps up, barely**: served 1.6-1.75 req/s, ITL p50 70-90 ms | Little's law: ~19 concurrent streams at ~72 ms per step = 264 tok/s against 247 needed. Prefill chunks of arriving requests add to every step |
+| L4-17 | L4/A10G output tok/s at 6 req/s, bf16, fp8-Marlin, int4 | **0.55-0.75** | A10G bf16 ITL under this load was 53 ms against 34 at batch 1, so ~19 ms per step is not weight reads; the L4 doubles only the weight part (34 -> 68) |
+| L4-18 | **fp8 CUTLASS over forced Marlin at 6 req/s, same card** | **+5% to +25% tok/s** | batched decode and prefill are where compute shows; this is native fp8's only chance to pay |
+| L4-19 | cost per output token, L4 / A10G, same format | **above 1.0 for bf16, Marlin and int4**; fp8 CUTLASS at 6 req/s a coin flip around 1.0 | price ratio 0.98 / 1.21 = 0.81; the L4 needs >= 0.81 of the A10G's throughput to break even, and L4-17 says 0.55-0.75 |
+
+**The headline prediction:** the L4 is the trap the spec sheet says it is for single-user decode
+(~2x slower, cheaper by only 19%), and native fp8 does not change that, because a memory-bound
+step reads the same 8.19 GB whichever kernel multiplies it. Native fp8 shows up only where compute
+matters: prefill (L4-12) and saturated batches (L4-18). Whether that is enough to make the L4 the
+cheaper card per token under load is the one open call (L4-19).

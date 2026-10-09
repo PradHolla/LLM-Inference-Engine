@@ -4,6 +4,7 @@
 #   ./infra/launch.sh              # on-demand g5.xlarge  (default; use this)
 #   USE_SPOT=1 ./infra/launch.sh   # spot -- capacity escape hatch, see NOTES/PROJECT.md
 #   FROM_AMI=ami-... AZ=us-east-1b ./infra/launch.sh   # restore from our baked image
+#   INIT_RATE=300 DELETE_ROOT=true BOX_NAME=x INSTANCE_TYPE=... FROM_AMI=...   # throwaway box
 set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
@@ -117,7 +118,7 @@ SUBNET=$(aws ec2 describe-subnets --region "$REGION" \
 
 # --- the stop-vs-terminate split --------------------------------------------
 # on-demand STOPS (root volume survives); spot TERMINATES. See NOTES/code-notes.md.
-SHUTDOWN_BEHAVIOR="stop"; DELETE_ROOT="false"; MARKET_ARGS=()
+SHUTDOWN_BEHAVIOR="stop"; DELETE_ROOT="${DELETE_ROOT:-false}"; MARKET_ARGS=()
 if [ "$USE_SPOT" = "1" ]; then
     SHUTDOWN_BEHAVIOR="terminate"; DELETE_ROOT="true"
     MARKET_ARGS=(--instance-market-options \
@@ -143,15 +144,23 @@ SZ=$(wc -c < "$UD")
 [ "$SZ" -lt 16384 ] || die "user-data is ${SZ} bytes, over the 16 KB EC2 limit"
 
 UD_ARGS=(--user-data "file://$UD"); [ -n "$FROM_AMI" ] && UD_ARGS=()
+# A restored volume lazy-loads from S3 on first read (incident 58); a provisioned rate
+# (100-300 MiB/s, billed per GiB of snapshot data) fills it up front instead.
+INIT_JSON=""
+if [ -n "${INIT_RATE:-}" ]; then
+    [ -n "$FROM_AMI" ] || die "INIT_RATE only applies to a volume restored from FROM_AMI"
+    INIT_JSON=",\"VolumeInitializationRate\":$INIT_RATE"
+fi
+BOX_NAME="${BOX_NAME:-$PROJECT}"
 say "launching $INSTANCE_TYPE in $AZ (shutdown -> $SHUTDOWN_BEHAVIOR)"
 IID=$(aws ec2 run-instances --region "$REGION" \
     --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
     --key-name "$KEY_NAME" --security-group-ids "$SG" --subnet-id "$SUBNET" \
     --instance-initiated-shutdown-behavior "$SHUTDOWN_BEHAVIOR" \
     --metadata-options 'HttpTokens=required,HttpEndpoint=enabled' \
-    --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$ROOT_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":$DELETE_ROOT}}]" \
+    --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$ROOT_GB,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":$DELETE_ROOT$INIT_JSON}}]" \
     ${UD_ARGS[@]+"${UD_ARGS[@]}"} \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Project,Value=$PROJECT},{Key=Name,Value=$PROJECT}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Project,Value=$PROJECT},{Key=Name,Value=$BOX_NAME}]" \
     ${MARKET_ARGS[@]+"${MARKET_ARGS[@]}"} \
     --query 'Instances[0].InstanceId' --output text)
 

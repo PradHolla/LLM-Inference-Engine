@@ -16,6 +16,9 @@ PIN_ARGS=""
 ENVARGS=()
 [ -n "${VLLM_USE_V2_MODEL_RUNNER:-}" ] && \
     ENVARGS+=("--setenv=VLLM_USE_V2_MODEL_RUNNER=$VLLM_USE_V2_MODEL_RUNNER")
+# sm89+ skips the Marlin fp8 kernel unless forced; forcing it is the L4 run's control arm.
+[ -n "${VLLM_TEST_FORCE_FP8_MARLIN:-}" ] && \
+    ENVARGS+=("--setenv=VLLM_TEST_FORCE_FP8_MARLIN=$VLLM_TEST_FORCE_FP8_MARLIN")
 VENV=/opt/llm/.venv-vllm
 
 sudo systemctl stop vllm 2>/dev/null
@@ -90,6 +93,9 @@ echo "$L" | grep -oE 'Available KV cache memory: [0-9.]+ GiB'             | tail
 echo "$L" | grep -oE 'Maximum concurrency for [0-9,]+ tokens per request: [0-9.]+x' | tail -1 | sed 's/^/  /'
 echo "$L" | grep -oE 'speculative_config=SpeculativeConfig\([^)]*\)|speculative_config=None' | tail -1 | sed 's/^/  /'
 echo "$L" | grep -oE "rejection_sample_method='[a-z]*'"                   | tail -1 | sed 's/^/  /'
+echo "$L" | grep -oE 'Selected [A-Za-z0-9]+ for [A-Za-z0-9]+'             | sort -u | sed 's/^/  /'
+echo "$L" | grep -oE 'Using [A-Za-z0-9_]+ (attention )?backend'           | sort -u | sed 's/^/  /'
+echo "$L" | grep -oE 'Model loading took [0-9.]+ GiB'                     | tail -1 | sed 's/^/  /'
 echo "  vram: $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
 # vLLM prints this on EVERY startup, success included, and the launcher ignored it for
 # three phases while the reproducibility problem it solves went unfixed.
