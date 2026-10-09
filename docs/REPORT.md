@@ -23,6 +23,7 @@ every table states its configuration.
 10. [Phase 6d: one 24 GB GPU under load](#phase-6d)
 11. [Phase 8: inside one decode step](#phase-8)
 12. [Phase 9: checking two of the book's checks](#phase-9)
+13. [Phase 10: the L4 is the trap for one user and a bargain under load](#phase-10)
 
 <a id="phase-1-3"></a>
 
@@ -635,3 +636,86 @@ The planner's output is held to a JSON schema by masking forbidden tokens at eve
 allowed, so the per-step check is microseconds against a 19 ms step. The model also wrote valid
 JSON unprompted 100 times out of 100, so the schema is insurance, not a cost. The planner's ~1 s is
 its prompt plus ~40 tokens at 19 ms each; the only levers are fewer tokens or a smaller model.
+
+<a id="phase-10"></a>
+
+## Phase 10: the L4 is the trap for one user and a bargain under load
+
+The L4 (g6.2xlarge, $0.98/hr) has the A10G's 24 GB, half its memory bandwidth (300 against 600
+GB/s), about the same bf16 compute, and one thing the A10G lacks: native fp8. The spec-sheet verdict
+is that it is a trap, half the decode speed for 19% less money. The question was whether native fp8
+earns the bandwidth back.
+
+The comparison was built so that only the GPU could differ:
+
+- **Same host.** g6.2xlarge against g5.2xlarge: 8 vCPU and 32 GiB on both.
+- **Same KV cache.** Pinned to the A10G's own budgets, which the L4 fit exactly.
+- **Same workload, to the request.** The A10G side is Phase 6's sweep, not rerun. The L4 replayed its
+  exact arrival times and prompts (`bench.py --replay`), and the report refuses to print unless every
+  window matches. That replay was necessary: the original 6 req/s windows had drawn 21, 10 and 0 of
+  the ~4,000-token prompts for bf16, fp8 and int4 by arrival luck, which alone skews a saturated result.
+- **A control on one card.** vLLM runs fp8 on the A10G through Marlin, which stores weights in fp8
+  and expands them to bf16 for every multiply. On the L4 it switches to CUTLASS, real fp8 math. A
+  flag forces Marlin back on the L4, so the same card runs both kernels and the difference is the
+  kernel alone.
+
+### One user: the trap is real, and native fp8 does not help
+
+| card | weights | per token | of peak bandwidth |
+|---|---|---|---|
+| A10G | bf16 | 34.2 ms | 74% |
+| L4 | bf16 | 59.9 ms | 84% |
+| A10G | fp8, Marlin | 18.9 ms | 72% |
+| L4 | fp8, Marlin | 33.4 ms | 82% |
+| L4 | **fp8, native** | **37.2 ms** | 73% |
+| A10G | int4 | 11.9 ms | 68% |
+| L4 | int4 | 21.0 ms | 77% |
+
+*Qwen3-8B, vLLM 0.27.1, fp16 KV, 16,384 ctx, batch 1, 128 output tokens, arithmetic prompts.*
+
+**The L4 is 1.75x slower in every format,** not the 2x the bandwidth ratio says, because it uses its
+bandwidth better. At 81% of the price that is about 1.4x the cost per token. **Native fp8 is 11%
+slower than Marlin** on the same card: one user's decode step is limited by reading the weights, both
+kernels read the same 8.2 GB, and native fp8 adds a step that rounds each layer's input to fp8.
+
+### Many users: native fp8 is the difference between collapsing and keeping up
+
+The A10G's 6 req/s burst (290 requests in 45 s), replayed on the L4:
+
+| card | fp8 kernel | tokens/s served | first token p95 | per token p50 |
+|---|---|---|---|---|
+| A10G | Marlin | 578 | 2.2 s | 64 ms |
+| L4 | Marlin | 418 | **25.4 s** | 128 ms |
+| L4 | **native** | **565** | **1.4 s** | 92 ms |
+
+| L4, one 3,221-token prompt | time to first token | vs bf16 |
+|---|---|---|
+| bf16 | 1,022 ms | 1.00x |
+| fp8, Marlin | 1,255 ms | 0.81x |
+| **fp8, native** | **705 ms** | **1.45x** |
+| int4 | 1,014 ms | 1.01x |
+
+**On the same card, native fp8 serves at least 35% more and reads a long prompt 1.78x faster.**
+Batching many users and reading prompts are compute work, which is exactly what fp8 hardware speeds
+up. With it, the L4 served the A10G's own burst with a better first-token tail for 19% less per hour.
+On the A10G's kernel the same card fell into a queue it never left. bf16, saturated on both cards,
+ran at 0.71 of the A10G's throughput, about 1.14x the cost per token.
+
+### The real limit is power
+
+The L4 ran at its 72 W limit in every phase, single-user decode included. Its clock sat at 50-85% of
+its 2,040 MHz boost, around 1,050 MHz when reading prompts, which is why bf16 prefill reached only
+40% of the spec sheet's compute. Against the clock it actually held, that is about 80%.
+
+**The verdict depends on the workload, as every result in this project has.** For a chat app with one
+person waiting, the A10G wins: the L4 is the trap the spec sheet describes. For many people at once,
+the L4 with native fp8 matches it for less money. Two things were not measured: whether native fp8's
+rounded activations change answers (this run measured speed), and the true capacity ceilings for fp8
+and int4, which the original 6 req/s windows never reached on the A10G. Full tables:
+`results/l4-report.md`.
+
+**Two corrections to Phase 6 came out of this.** The bandwidth table there counted every weight at its
+own width, but the output layer (`lm_head`) stays bf16 under both fp8 and int4, and the input
+embedding is a lookup, not a read. Counted properly, Marlin costs fp8 about 2% of single-user speed,
+not 10%, and int4 about 9%, not 39%. And int4's lead at 6 req/s was partly a lighter window: none of
+its requests were long prompts.

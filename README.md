@@ -50,6 +50,7 @@ Each phase ends with something runnable and a measurement. The full write-up of 
 | 6b-d | **The app as an agent, end to end and under load** | A LangGraph planner decides search and thinking per message (93% agreement on 581 labelled questions). One A10G held 51 concurrent conversations' answers at 16 tok/s | [report](docs/REPORT.md#phase-6b) |
 | 8 | **Inside one decode step** with Nsight Systems and the PyTorch profiler | The 6 ms gap to vLLM is not the math (identical cuBLAS kernels) but 2,079 unfused launches and the GPU idling between them. Replaying the step as a CUDA graph closed 3.5 ms of it | [report](docs/REPORT.md#phase-8) |
 | 9 | **Checking the book's checks**: perplexity as a quality test, and the cost of forcing JSON | Perplexity moved 0.2% on the exact arithmetic where int4 breaks 37% of answers: it never lets an error feed the next token. The planner's JSON schema costs 0.05% per token | [report](docs/REPORT.md#phase-9) |
+| 10 | **L4 vs A10G**: half the bandwidth, native fp8, the A10G's exact traffic replayed | 1.75x slower for one user in every format, and native fp8 is no help there. Under load it is the difference between collapsing (25 s waits) and matching the A10G for 19% less per hour | [report](docs/REPORT.md#phase-10) |
 
 ## A few results worth a picture
 
@@ -113,7 +114,9 @@ The prediction log, with every forecast, its arithmetic and the result next to i
 ```
 tools/roofline.py     predicts memory budget, KV capacity, decode roofline,
                       batch scaling, and prefill/TTFT from hardware specs alone
-tools/bench.py        open-loop Poisson load generator; per-request TTFT/ITL/E2E
+tools/bench.py        open-loop Poisson load generator; per-request TTFT/ITL/E2E;
+                      --replay re-sends a past run's exact arrivals and prompts
+tools/l4report.py     L4 vs A10G from raw records, one set of definitions for both cards
 tools/curve.py        collapses a sweep into latency-vs-throughput curve points
 tools/kvprobe.py      measures the KV cache off the GPU directly
 tools/mkitems.py      generates the quality-eval item set; --selftest re-derives
@@ -184,4 +187,5 @@ would disable the guardrail entirely.
 
 Single NVIDIA A10G. Sold as 24 GB; `nvidia-smi` reports 22.49 GiB; CUDA can actually address
 **22.06 GiB** (the difference is driver/ECC reserve). ~600 GB/s memory bandwidth. Every number in
-this repo is specific to that card, and `tools/roofline.py` will recompute them for others.
+this repo is specific to that card except Phase 10's, which ran on an L4, and `tools/roofline.py`
+will recompute them for others.
