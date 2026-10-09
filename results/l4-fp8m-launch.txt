@@ -1,0 +1,9 @@
+### l4-fp8m READY
+  args: --model Qwen/Qwen3-8B --quantization fp8 --max-model-len 16384
+  GPU KV cache size: 74,880 tokens
+  Maximum concurrency for 16,384 tokens per request: 4.57x
+  speculative_config=None
+  Selected MarlinFP8ScaledMMLinearKernel for Fp8PerTensorOnlineLinearMethod
+  Using FLASH_ATTN attention backend
+  Model loading took 8.8 GiB
+  vram: 21978 MiB

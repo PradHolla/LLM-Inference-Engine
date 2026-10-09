@@ -46,10 +46,10 @@ class GPU:
 
 
 # CUDA-addressable VRAM, not nvidia-smi's number -- see NOTES/code-notes.md for the full
-# measurement table. Only a10g is MEASURED (2026-08-21); the rest are spec-sheet.
+# measurement table. a10g (2026-08-21) and l4 (2026-10-08) are MEASURED; the rest are spec-sheet.
 GPUS = {
     "a10g":  GPU("A10G (g5.*)",   22589 / 1024, 600, 125),
-    "l4":    GPU("L4 (g6.*)",     22888 / 1024, 300, 121),
+    "l4":    GPU("L4 (g6.*)",     22565 / 1024, 300, 121),
     "l40s":  GPU("L40S (g6e.*)",  45776 / 1024, 864, 362),
     "t4":    GPU("T4 (g4dn.*)",   16384 / 1024, 320,  65),
     "a100":  GPU("A100 40GB",     40960 / 1024, 1555, 312),

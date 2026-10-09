@@ -23,6 +23,7 @@ PEAK = {"a10g": 600e9, "l4": 300e9}
 P6B = {"bf16": (34.2, 1.72, 3.58), "fp8": (18.9, 1.65, 4.52), "int4": (11.9, 1.65, 4.73)}
 A10G_BLOCKS = ["bf16", "fp8", "fp8-spec", "int4", "int4-spec"]   # bf16-spec never launched
 L4_CONFIGS = ["bf16", "fp8", "fp8m", "int4"]
+PIN_TOKENS = {"bf16": "33,312", "fp8": "74,880", "int4": "101,920"}   # the A10G's own budgets
 
 
 def pct(xs, p):
@@ -91,7 +92,9 @@ def launch_facts(cfg):
     kern = re.findall(r"Selected (\w+) for (\w+)", t)
     gib = re.search(r"Model loading took ([0-9.]+) GiB", t)
     return {"kv": kv.group(1) if kv else "?", "kernel": ", ".join(k for k, _ in kern) or "?",
-            "weights": gib.group(1) if gib else "?", "pinned": "pinned at" in t}
+            "weights": gib.group(1) if gib else "?",
+            # vLLM prints no recommendation when pinned, so judge by the budget itself.
+            "pinned": bool(kv) and kv.group(1) == PIN_TOKENS["fp8" if cfg == "fp8m" else cfg]}
 
 
 def l4():
@@ -143,7 +146,7 @@ def main():
             gbs = BYTES[cfg] / (itl / 1000) / 1e9
             kern = d.get("kernel", "Marlin (sm86 default)") if card == "L4" else (
                 "Marlin (sm86 default)" if cfg == "fp8m" else "--")
-            kv = d.get("kv", {"bf16": "33,312", "fp8": "74,880", "int4": "101,920"}[src])
+            kv = d["kv"] if card == "L4" else PIN_TOKENS[src]
             lines.append(f"{card} | {cfg} | {kern if 'fp8' in cfg else '--'} | {kv} | {f(itl)} ms | "
                          f"{f(1000 / itl)} | {f(gbs, 0)} | {f(100 * gbs * 1e9 / PEAK[card.lower()])}% | "
                          f"{f(d['serial']['ttft50'], 0)} ms")
@@ -173,7 +176,7 @@ def main():
         lines.append(f"{cfg} | {d['kernel'] if 'fp8' in cfg else '--'} | {f(n, 0)} | {f(t, 0)} ms | "
                      f"{f(1000 * t / n if n == n else math.nan)} | {rel}")
     lines += ["", "L4 launch facts: " + "; ".join(
-        f"{c}: weights {L[c]['weights']} GiB, KV {L[c]['kv']}{' (pinned)' if L[c]['pinned'] else ' (PROFILED, pin failed)'}"
+        f"{c}: weights {L[c]['weights']} GiB, KV {L[c]['kv']}{' (pinned)' if L[c]['pinned'] else ' (NOT the pinned budget)'}"
         for c in L)]
     Path(args.out).write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

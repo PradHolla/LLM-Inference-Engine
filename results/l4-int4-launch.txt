@@ -1,0 +1,8 @@
+### l4-int4 READY
+  args: --model RedHatAI/Qwen3-8B-quantized.w4a16 --max-model-len 16384
+  GPU KV cache size: 101,920 tokens
+  Maximum concurrency for 16,384 tokens per request: 6.22x
+  speculative_config=None
+  Using FLASH_ATTN attention backend
+  Model loading took 5.69 GiB
+  vram: 21930 MiB

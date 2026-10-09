@@ -7422,3 +7422,72 @@ than the card.
 step reads the same 8.19 GB whichever kernel multiplies it. Native fp8 shows up only where compute
 matters: prefill (L4-12) and saturated batches (L4-18). Whether that is enough to make the L4 the
 cheaper card per token under load is the one open call (L4-19).
+
+### P10 actuals, 2026-10-08
+
+Run on i-02d22c3889adf219e (g6.2xlarge, us-east-1a, restored from ami-0c3e3d54a9987acc3 with a
+300 MiB/s provisioned initialization: 141 GB ready in ~4 minutes), commit deb281a, unit `l4`.
+Full tables: `results/l4-report.md`. Every L4 load window was verified to send the A10G window's
+exact prompt sequence; all four L4 configs launched at the A10G's pinned KV budget.
+
+*Qwen3-8B, vLLM 0.27.1, fp16 KV, 16,384 ctx, no speculation, phase4-items prompts, 128 output
+tokens, thinking on, T=0. fp8 = CUTLASS W8A8 (L4 native); fp8m = Marlin weight-only (the A10G's
+only fp8 path, forced on the L4 with VLLM_TEST_FORCE_FP8_MARLIN=1).*
+
+| card | weights | ITL p50, one user | % of peak bandwidth | 6 req/s: out tok/s | TTFT p95 | ITL p50 | saturated? |
+|---|---|---|---|---|---|---|---|
+| A10G | bf16 | 34.2 ms | 73.8% | 458 | 17.3 s | 53 ms | yes |
+| L4 | bf16 | 59.9 ms | 84.2% | 325 | 35.1 s | 91 ms | yes |
+| A10G | fp8m | 18.9 ms | 72.4% | 578 | 2.2 s | 64 ms | no |
+| L4 | fp8m | 33.4 ms | 81.7% | 418 | 25.4 s | 128 ms | yes |
+| L4 | fp8 | 37.2 ms | 73.3% | 565 | 1.4 s | 92 ms | no |
+| A10G | int4 | 11.9 ms | 67.5% | 605 | 0.45 s | 15 ms | no |
+| L4 | int4 | 21.0 ms | 76.8% | 565 | 0.93 s | 36 ms | no |
+
+*L4 only, prefill of a 3,221-token prompt (vLLM's own count; the filler was sized for 4,096 at an
+assumed 4 chars/token): bf16 1,022 ms, fp8 705 ms (1.45x), fp8m 1,255 ms (0.81x), int4 1,014 ms
+(1.01x). Power: 72-77 W, at the 72 W limit, in EVERY phase, single-user decode included; SM clock
+p50 1,425-1,755 MHz in single-user decode, 1,170-1,365 under load, 1,020-1,095 in prefill, against
+a 2,040 MHz boost.*
+
+| # | Predicted | Measured | Verdict |
+|---|---|---|---|
+| L4-1 | bf16 68 ms (62-76) | **59.9 ms** | **wrong, faster**: the L4 reaches 84% of peak bandwidth against the A10G's 74% |
+| L4-2 | fp8m 38 ms (34-42) | **33.4 ms** | wrong, faster, same cause (82%) |
+| L4-3 | CUTLASS 1.00-1.10x Marlin, no faster | **1.11x Marlin** | correct in direction, a point past the band: native fp8 is SLOWER for one user |
+| L4-4 | int4 24 ms (21-27) | **21.0 ms** | correct, at the floor |
+| L4-5 | L4/A10G 1.85-2.1x, every format | **1.75 / 1.77 / 1.76x** (bf16 / fp8m / int4) | **wrong**: the bandwidth ratio is 2.0, the speed ratio 1.75, because the efficiency did not transfer |
+| L4-6 | weights 15.3 / 8.8 / 5.7 GiB | **15.27 / 8.8 / 5.69** | correct: lm_head stays bf16, so correction 1 above stands |
+| L4-7 | CUTLASS for fp8, Marlin for fp8m | both, from the engine's own log | correct |
+| L4-8 | all four fit the pinned KV | all four, at exactly the A10G budgets | correct, though its premise was wrong: CUDA addresses **22,565 MiB** on the L4, 24 less than the A10G, not ~300 more. `roofline.py`'s L4 entry is the spec sheet |
+| L4-9 | bf16 prefill 1.0 s at 4,096 tok (0.79 s scaled to 3,221) | **1,022 ms** | wrong, slower: 40% of spec FLOPs. The clock sat at ~1,020 MHz, half of boost, so against the clock it actually ran at, that is ~80% |
+| L4-10 | CUTLASS 1.4-1.9x bf16 | **1.45x** | correct, low end: the power cap eats part of fp8's 2x |
+| L4-11 | Marlin 0.75-1.0x bf16 | **0.81x** | correct |
+| L4-12 | CUTLASS / Marlin prefill 1.6-2.4x | **1.78x** | correct |
+| L4-13 | int4 0.75-1.0x bf16 | **1.01x** | wrong by a hair: w4a16 Marlin prefills at bf16 speed |
+| L4-14 | prefill power p95 >= 70 W | **74-77 W**, and at the cap in every phase | correct, and much broader than predicted |
+| L4-15 | fp8 / fp8m / int4 keep up at 2 req/s, served within 0.05 req/s of A10G | TTFT p95 123-192 ms, every request ok; served 1.57 / 1.59 / 1.61 against 1.65 | kept up: correct. The 0.05 criterion missed for fp8 and fp8m, and the miss is the metric: served = ok / (window + drain), and each request lasts ~2x longer on the L4 |
+| L4-16 | bf16 at 2 req/s keeps up barely, 1.6-1.75 req/s, ITL 70-90 | **1.60, ITL 71.2 ms, p95 271 ms** | correct |
+| L4-17 | L4/A10G tok/s at 6 req/s, bf16 / fp8m / int4: 0.55-0.75 | bf16 **0.71** (both saturated); fp8m **0.72**, an upper bound (A10G not saturated); int4 0.93, not a capacity ratio (neither saturated) | correct for bf16 and fp8m; untestable for int4 on this workload |
+| L4-18 | CUTLASS over Marlin, same card, 6 req/s: +5-25% | **+35% tok/s, TTFT p95 25.4 s -> 1.4 s**, and Marlin saturated while CUTLASS did not, so +35% is a floor | **wrong, undershot**: the native kernel is the difference between collapsing and keeping up |
+| L4-19 | cost per token: L4 above 1.0x for bf16, Marlin, int4; fp8 CUTLASS a coin flip | bf16 **1.14x** (saturated both); fp8m **>= 1.12x**; fp8 CUTLASS: same burst served, better tail, at **0.81x** the hourly price | correct where testable. For fp8 neither card hit its ceiling, so this is "the same job for 19% less", not a capacity-per-dollar figure |
+
+**What the L4 is.** For one user it is the trap: 1.75x slower than the A10G in every format, so
+about 1.42x the cost per token, and native fp8 makes that slightly worse, not better (L4-3),
+because a memory-bound step reads the same bytes whichever kernel multiplies them. Under
+concurrent load with native fp8 it is a different card: it served the same 290-request burst as
+the A10G, with a better time-to-first-token tail (1.4 s against 2.2 s) and a worse per-token pace
+(92 against 64 ms), for 19% less per hour. The same card on the A10G's own Marlin kernel collapsed
+on that burst (25 s p95). Native fp8 is worth +35% throughput and 1.78x prefill on the same
+silicon, which is exactly the compute the A10G cannot use.
+
+**The surprise is power, not bandwidth.** The L4 sits at its 72 W limit in every phase, even
+single-user decode, which on paper is memory work. Its SM clock runs at 50-85% of boost throughout.
+Bandwidth explains the single-user ratio well (and the L4 uses its bandwidth better than the
+A10G does); the power cap is what holds its compute to roughly half the spec sheet, which is why
+prefill landed at 40% of spec FLOPs.
+
+**Not measured, stated as cuts.** Native fp8 also rounds every layer's input to fp8 per token, so
+its answers can differ from Marlin's; this run measured speed only (`tools/p9eval.py` on the L4
+would test it). Capacity ceilings for fp8 and int4 on both cards: the A10G's 6 req/s windows
+did not saturate them, and a higher-rate sweep would cost a new A10G run.

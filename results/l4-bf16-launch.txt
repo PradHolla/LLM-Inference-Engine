@@ -1,0 +1,8 @@
+### l4-bf16 READY
+  args: --model Qwen/Qwen3-8B --max-model-len 16384
+  GPU KV cache size: 33,312 tokens
+  Maximum concurrency for 16,384 tokens per request: 2.03x
+  speculative_config=None
+  Using FLASH_ATTN attention backend
+  Model loading took 15.27 GiB
+  vram: 21880 MiB

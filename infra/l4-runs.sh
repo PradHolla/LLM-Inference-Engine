@@ -22,8 +22,8 @@ run_cfg() {   # cfg, A10G KV tokens, A10G replay blocks, then vllm-launch args
     rm -f "results/$lab-"{bombard.jsonl,prefill.jsonl,smi.csv,marks.txt,launch.txt,prompt-tokens.txt}
     nvidia-smi --query-gpu=timestamp,power.draw,clocks.sm,clocks.mem,utilization.gpu,temperature.gpu \
         --format=csv -lms 500 > "results/$lab-smi.csv" 2>/dev/null &
-    local smi=$!
-    trap 'kill $smi 2>/dev/null' EXIT       # each config is its own process, so EXIT covers die too
+    SMI=$!                                  # global: a local is gone by the time EXIT fires
+    trap 'kill $SMI 2>/dev/null' EXIT       # each config is its own process, so EXIT covers die too
     if ! KV_PIN=$((kvtok * KV_BYTES_PER_TOKEN)) HF_HUB_OFFLINE=1 ./infra/vllm-launch.sh "$lab" "$@" \
             > "/tmp/$lab-launch.log" 2>&1; then
         echo "  pinned launch failed, retrying with KV profiled:"; tail -12 "/tmp/$lab-launch.log"
