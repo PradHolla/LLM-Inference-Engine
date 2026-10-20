@@ -21,13 +21,19 @@ ssh, `infra/sync.sh` never hand-typed ssh, and never quote a number without its 
 
 ## 0. Bring the box up
 
+Since 2026-10-19 there is no standing box, only the image (`./infra/bake-ami.sh list`). Restore it:
+
 ```bash
-aws ec2 describe-instances --instance-ids i-087f9edbde56d4433 \
-    --query 'Reservations[0].Instances[0].State.Name' --output text      # expect: stopped
-./infra/up.sh
+aws ec2 describe-instances --filters Name=tag:Project,Values=llm-inference \
+    Name=instance-state-name,Values=pending,running,stopping,stopped \
+    --query 'Reservations[].Instances[].InstanceId' --output text        # expect: nothing
+FROM_AMI=ami-0dbadb9b08ade947d AZ=us-east-1a INIT_RATE=300 DELETE_ROOT=true ./infra/launch.sh
 ```
 
-**Known failure, not a bug:** `InsufficientInstanceCapacity` (seen in us-east-1c; the box has lived in us-east-1a since 2026-09-28). It cleared on the
+`INIT_RATE` pays ~$0.55 to hydrate the volume from S3 in minutes; without it the first vLLM load
+crawls (incident 58). If a box already exists and is stopped, use `./infra/up.sh` instead.
+
+**Known failure, not a bug:** `InsufficientInstanceCapacity` (seen in us-east-1c; the box lived in us-east-1a from 2026-09-28). It cleared on the
 second try on 2026-09-22. Retry once a minute, up to 15 times, in a loop that BRANCHES on the
 result (incidents 30, 47: `&& break` is not a gate). `up.sh` also exits early with "no instance
 found" if the box is still `pending`; wait for `running` with `aws ec2 wait instance-running`
@@ -113,11 +119,13 @@ When the owner says they are done, collect their feedback verbatim into the repl
 ./infra/sync.sh pull
 ./infra/sync.sh run 'rm -f /opt/llm/.no-autoshutdown && echo hold-removed'
 ./infra/down.sh
-aws ec2 wait instance-stopped --instance-ids i-087f9edbde56d4433   # in the background; it can take minutes
+aws ec2 wait instance-stopped --filters Name=tag:Project,Values=llm-inference \
+    Name=instance-state-name,Values=running,stopping,stopped   # in the background; it can take minutes
 ```
 
-Confirm `stopped`, and confirm `hold-removed` was printed BEFORE `down.sh`. Stop, never
-terminate.
+Confirm `stopped`, and confirm `hold-removed` was printed BEFORE `down.sh`. Then ask the owner
+whether to keep the box stopped (~$16/mo of disk) or re-image it: `bake-ami.sh bake`, wait for
+`available`, terminate, and `bake-ami.sh rm` the previous image. Terminating needs their yes.
 
 `sync.sh pull` brings back `results/app-gw.jsonl` and `results/app-smoke.jsonl`. Do not commit
 them without asking: this session is not a measurement, and they contain the owner's chats'
