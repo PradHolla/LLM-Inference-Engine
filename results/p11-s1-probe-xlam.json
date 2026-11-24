@@ -1,0 +1,89 @@
+{
+ "which": "xlam",
+ "model": "Salesforce/Llama-xLAM-2-8b-fc-r",
+ "results": [
+  {
+   "check": "S1-5 xLAM template: format instruction present without a system message, absent with one",
+   "pass": true,
+   "detail": {
+    "without_system_has_marker": true,
+    "with_system_has_marker": false,
+    "with_system_has_tools": true,
+    "with_system_head": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a CRM assistant. Use the tools to answer.\n{\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"run_sql\",\n        \"description\": \"Run one read-only SQLite query on the CRM database.\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"query\": {\n                    \"type\": \"st",
+    "without_system_head": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant that can use tools. You are developed by Salesforce xLAM team.\nYou have access to a set of tools. When using tools, make calls in a single JSON array: \n\n[{\"name\": \"tool_call_name\", \"arguments\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}, ... (additional parallel tool calls as needed)]\n\nIf no tool is suitable, state that explicitly. If the user's input lacks required parameters, ask for clarification. Do not interpret or respond until tool results are returned. Once they are available, process them or make addit"
+   }
+  },
+  {
+   "check": "S1-6 xLAM with system prompt: parsable tool call (>= 2 of 3)",
+   "pass": true,
+   "detail": {
+    "ok": 3,
+    "calls": [
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM support_cases"
+      },
+      "err": null,
+      "content": ""
+     },
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM support_cases"
+      },
+      "err": null,
+      "content": ""
+     },
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM support_cases"
+      },
+      "err": null,
+      "content": ""
+     }
+    ]
+   }
+  },
+  {
+   "check": "S1-6 xLAM without system prompt: parsable tool call (>= 2 of 3)",
+   "pass": true,
+   "detail": {
+    "ok": 3,
+    "calls": [
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM Support_Cases"
+      },
+      "err": null,
+      "content": ""
+     },
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM Support_Case"
+      },
+      "err": null,
+      "content": ""
+     },
+     {
+      "status": 200,
+      "name": "run_sql",
+      "args": {
+       "query": "SELECT COUNT(*) FROM Support_Cases"
+      },
+      "err": null,
+      "content": ""
+     }
+    ]
+   }
+  }
+ ]
+}

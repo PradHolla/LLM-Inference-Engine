@@ -1,0 +1,70 @@
+{
+ "which": "strict",
+ "model": "Qwen/Qwen3-8B",
+ "results": [
+  {
+   "check": "S1-4 auto, strict on (observation)",
+   "pass": true,
+   "detail": {
+    "stages": [
+     "<no tool_calls>",
+     "<no tool_calls>",
+     "<no tool_calls>"
+    ],
+    "contents": [
+     "The stage \"Negotiation\" is not a valid option. Please choose from the available stages: \"Qualification\" or \"Discovery\".",
+     "The stage \"Negotiation\" is not valid. Please use one of the allowed stages: \"Qualification\" or \"Discovery\".",
+     "The sales stage \"Negotiation\" is not valid. Please use one of the allowed stages: \"Qualification\" or \"Discovery\"."
+    ]
+   }
+  },
+  {
+   "check": "S1-4 auto, strict off (observation)",
+   "pass": true,
+   "detail": {
+    "stages": [
+     "<no tool_calls>",
+     "<no tool_calls>",
+     "<no tool_calls>"
+    ],
+    "contents": [
+     "The stage \"Negotiation\" is not a valid option. Please choose from the available stages: \"Qualification\" or \"Discovery\".",
+     "The stage \"Negotiation\" is not valid. Please use one of the allowed stages: \"Qualification\" or \"Discovery\".",
+     "The sales stage \"Negotiation\" is not valid. Please use one of the allowed stages: \"Qualification\" or \"Discovery\"."
+    ]
+   }
+  },
+  {
+   "check": "S1-4 strict + forced call: stage always inside the enum",
+   "pass": true,
+   "detail": {
+    "stages": [
+     "Discovery",
+     "Discovery",
+     "Discovery"
+    ],
+    "contents": [
+     null,
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "check": "S1-4 forced, strict off (observation)",
+   "pass": true,
+   "detail": {
+    "stages": [
+     "Negotiation",
+     "Negotiation",
+     "Negotiation"
+    ],
+    "contents": [
+     null,
+     null,
+     null
+    ]
+   }
+  }
+ ]
+}

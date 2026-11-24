@@ -7521,3 +7521,33 @@ native tool calls only in the probes S1-1 to S1-6. Arms q-off (T 0.7, top_p 0.8)
 | S1-9 | Five dev tasks per arm, end reasons | 15 of 15 end with a task record; 0 api_error; format errors per call: q-off and q-think under 10%, xlam 5-30% | react_text_v0 is a tag protocol none of the models was trained on; xLAM was trained on JSON calls |
 | S1-10 | Cached share of prompt tokens, tasks 2-5 of an arm | **85% or more** | about 4.07k static system tokens of a ~4.1k first call, and every later call re-sends the previous prompt |
 | S1-11 | q-off latency per model call | 1.5-3.5 s | 100-2,000 uncached prompt tokens x 0.35 ms + 60-150 output tokens / 50 tok/s |
+
+### P11-S1 ACTUALS, 2026-11-24 (box `i-0868a45c528b12551`, g5.2xlarge us-east-1d, deployed 90b9296)
+
+| # | Predicted | Actual | Verdict |
+|---|---|---|---|
+| S1-1 | tool call in `tool_calls`, valid JSON | `run_sql` with valid arguments, content null | HIT |
+| S1-2 | reasoning separate, tool call after | 1,074 reasoning chars in `delta.reasoning`, call after, none inside reasoning | HIT |
+| S1-3 | budget + tools works (medium confidence) | 200, 299 reasoning chars, 93 completion tokens, valid call, 1.8 s | HIT |
+| S1-4 | strict keeps the stage in the enum | first probe INVALID: under `auto` the model declined to call ("Negotiation is not a valid option"), so the enum was never exercised (incident 45's shape). Rerun with a forced call: **strict on: Discovery 3/3; strict off: Negotiation 3/3**, a value outside the enum | HIT on the rerun; strict is what holds the enum |
+| S1-5 | xLAM drops its format instruction with a system message | server-rendered prompts: marker present without, absent with; tools still rendered | HIT |
+| S1-6 | xLAM tool call with a system prompt, 2/3 or better | 3/3 with, 3/3 without | HIT |
+| S1-7 | Qwen3 8.8 GiB, xLAM 8.5 (8.3-8.7) | 8.8 GiB, **8.49 GiB** | HIT |
+| S1-8 | Qwen3 138,528; xLAM 155,840 | 138,528; **155,840** | HIT, exact |
+| S1-9 | 15/15 records, 0 api_error, fmt errors q-off/q-think < 10%, xLAM 5-30% | 15/15 records, 0 api_error; fmt errors q-off **0%**, q-think **0%**, **xLAM 58/100 calls (58%)** | MISS on xLAM, high side |
+| S1-10 | cached share 85% or more | q-off 90.4%, q-think 93.4% | HIT |
+| S1-11 | q-off 1.5-3.5 s per call | p50 1.67 s, max 3.6 s (q-think p50 9.7 s, max 52 s, ~480 completion tokens per call) | HIT |
+
+**The xLAM miss, explained.** Not a capability failure: an interface mismatch. Under react_text_v0
+xLAM answered in prose or fell back to its trained JSON call format, once turning the `<thought>`
+tag into a fake tool call (`[{"name": "thought", ...}]`). 4 of 5 tasks hit max_turns; 19-20 format
+errors in three of them; handle_time wrote SQL but 16 of 20 calls errored. The same model made 6/6
+valid native tool calls in S1-6. So the text protocol measures format-following, not CRM
+ability, for xLAM. Consequence (owner decision pending): the agent moves to native strict tool
+calls before the D2 baseline; react_text_v0 stays as one Qwen run for comparison with the paper.
+
+**Five tasks per arm (n = 5, not an accuracy measurement):** q-off solved handle_time, case_routing
+hit max_turns (20 calls, no answer); q-think solved handle_time and case_routing; both missed
+wrong_stage and scored F1 0.08-0.10 on knowledge_qa; xLAM solved none. On
+private_customer_information q-off answered another customer's question with four order Ids, the
+leak the paper reports for every model under the standard prompt.

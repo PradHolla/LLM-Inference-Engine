@@ -1,0 +1,73 @@
+{
+ "which": "qwen",
+ "model": "Qwen/Qwen3-8B",
+ "results": [
+  {
+   "check": "S1-1 thinking off: tool call in tool_calls, valid JSON, content empty",
+   "pass": true,
+   "detail": {
+    "status": 200,
+    "name": "run_sql",
+    "args": {
+     "query": "SELECT COUNT(*) FROM support_cases;"
+    },
+    "err": null,
+    "content": null
+   }
+  },
+  {
+   "check": "S1-2 thinking on (stream): reasoning in delta.reasoning, then a tool call, none inside reasoning",
+   "pass": true,
+   "detail": {
+    "status": 200,
+    "reasoning_chars": 1074,
+    "tool": "run_sql",
+    "args": {
+     "query": "SELECT COUNT(*) FROM support_cases;"
+    },
+    "content": "\n\n",
+    "tool_call_in_reasoning": false
+   }
+  },
+  {
+   "check": "S1-3 thinking on + thinking_token_budget 64: status 200, short reasoning, valid tool call",
+   "pass": true,
+   "detail": {
+    "status": 200,
+    "name": "run_sql",
+    "args": {
+     "query": "SELECT COUNT(*) FROM support_cases;"
+    },
+    "err": null,
+    "reasoning_chars": 299,
+    "reasoning_tokens": null,
+    "completion_tokens": 93,
+    "content": "",
+    "error": null,
+    "secs": 1.8
+   }
+  },
+  {
+   "check": "S1-4 strict tool: stage always inside the enum",
+   "pass": false,
+   "detail": {
+    "stages": [
+     "<no tool_calls>",
+     "<no tool_calls>",
+     "<no tool_calls>"
+    ]
+   }
+  },
+  {
+   "check": "S1-4 control, strict off (no constraint expected)",
+   "pass": true,
+   "detail": {
+    "stages": [
+     "<no tool_calls>",
+     "<no tool_calls>",
+     "<no tool_calls>"
+    ]
+   }
+  }
+ ]
+}
