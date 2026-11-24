@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, ChevronRight, MessageSquarePlus, Moon, Pencil,
+import { Briefcase, Check, ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Moon, Pencil,
   Search, Sun, Trash2, X } from "lucide-react";
-import type { Chat, Theme } from "../types";
+import type { AppMode, Chat, Theme } from "../types";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -17,6 +17,23 @@ function IconButton({ label, children, onClick }: {
     </Button></TooltipTrigger>
     <TooltipContent>{label}</TooltipContent>
   </Tooltip>;
+}
+
+function ModeSwitch({ mode, onChange, compact }: {
+  mode: AppMode;
+  onChange: (mode: AppMode) => void;
+  compact: boolean;
+}) {
+  const options: { id: AppMode; label: string; icon: ReactNode }[] = [
+    { id: "chat", label: "Chat", icon: <MessageSquare size={15} /> },
+    { id: "crm", label: "CRM agent", icon: <Briefcase size={15} /> },
+  ];
+  return <div className={`mode-switch ${compact ? "compact" : ""}`} role="radiogroup" aria-label="App mode">
+    {options.map((option) => <button key={option.id} type="button" role="radio" aria-checked={mode === option.id}
+      aria-label={option.label} title={option.label} onClick={() => onChange(option.id)}>
+      {option.icon}{!compact && <span>{option.label}</span>}
+    </button>)}
+  </div>;
 }
 
 function ChatList({ chats, currentId, onSelect, collapsed, onRename, onDelete }: {
@@ -59,7 +76,7 @@ function ChatList({ chats, currentId, onSelect, collapsed, onRename, onDelete }:
 
 export function Sidebar({
   chats, currentId, onSelect, onNew, collapsed, onToggleCollapsed, mobileOpen,
-  onMobileOpenChange, theme, onThemeChange, onRename, onDelete,
+  onMobileOpenChange, theme, onThemeChange, onRename, onDelete, appMode, onAppModeChange,
 }: {
   chats: Chat[];
   currentId: number | null;
@@ -73,6 +90,8 @@ export function Sidebar({
   onThemeChange: () => void;
   onRename: (chat: Chat) => void;
   onDelete: (chat: Chat) => void;
+  appMode: AppMode;
+  onAppModeChange: (mode: AppMode) => void;
 }) {
   const contents = (isMobile: boolean) => <div className={`sidebar-inner ${collapsed && !isMobile ? "is-collapsed" : ""}`}>
     <div className="sidebar-brand-row">
@@ -84,6 +103,10 @@ export function Sidebar({
         <X size={16} />
       </IconButton>}
     </div>
+    <ModeSwitch mode={appMode} compact={collapsed && !isMobile} onChange={(next) => {
+      onAppModeChange(next);
+      if (isMobile) onMobileOpenChange(false);
+    }} />
     <Button className="new-chat-button" onClick={onNew} variant="outline">
       <MessageSquarePlus size={16} />{(!collapsed || isMobile) && <span>New chat</span>}
     </Button>

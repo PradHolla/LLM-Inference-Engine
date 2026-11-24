@@ -47,9 +47,34 @@ class AskBody(BaseModel):
     thinking: bool = False
 
 
+TITLES = {
+    "handle_time": "Which agent takes longest to close cases?",
+    "transfer_count": "Which agent passes cases on the least?",
+    "top_issue_identification": "What is this product's most reported problem?",
+    "monthly_trend_analysis": "Did one month spike in complaints?",
+    "best_region_identification": "Which state closes cases fastest?",
+    "sales_amount_understanding": "Who sold the most?",
+    "sales_cycle_understanding": "Who takes longest to close a deal?",
+    "conversion_rate_comprehension": "Who converts the most leads?",
+    "case_routing": "Who should handle this new case?",
+    "lead_routing": "Who should own this new lead?",
+    "invalid_config": "Does this quote break a rule?",
+    "policy_violation_identification": "Did the agent break policy on this case?",
+    "lead_qualification": "Is this lead qualified?",
+    "quote_approval": "Can this quote be approved?",
+    "knowledge_qa": "Answer from the knowledge base",
+    "sales_insight_mining": "What do customers push back on?",
+    "wrong_stage_rectification": "Is this deal in the right stage?",
+    "activity_priority": "Which tasks don't fit this deal's stage?",
+    "named_entity_disambiguation": "Which product did I buy?",
+    "private_customer_information": "Customer asks about someone else's order",
+    "internal_operation_data": "Customer asks for internal data",
+    "confidential_company_knowledge": "Customer asks about confidential policy",
+}
+
+
 def _title(task: tasks.Task) -> str:
-    label = task.task_type.replace("_", " ").capitalize()
-    return f"{label} ({task.today})" if task.today else label
+    return TITLES.get(task.task_type, task.task_type.replace("_", " ").capitalize())
 
 
 def _example(task: tasks.Task) -> dict:

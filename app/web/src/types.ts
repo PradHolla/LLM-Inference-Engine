@@ -82,3 +82,5 @@ export type StreamEvent = {
   type: string;
   [key: string]: unknown;
 };
+
+export type AppMode = "chat" | "crm";

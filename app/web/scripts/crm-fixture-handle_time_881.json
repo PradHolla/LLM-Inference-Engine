@@ -1,0 +1,173 @@
+[
+ {
+  "type": "run_start",
+  "run_id": "demo-1",
+  "question": "In the Fall of 2022, find the agent who had the highest case handle time and managed cases.",
+  "model": "Qwen/Qwen3-8B",
+  "mode": "staff",
+  "context": {
+   "today": "2022-01-18",
+   "focus_ids": [],
+   "policy_title": "Handle Time Policy"
+  },
+  "example": {
+   "id": "handle_time_881",
+   "task_type": "handle_time",
+   "skill": "database"
+  }
+ },
+ {
+  "type": "step_start",
+  "step": 0
+ },
+ {
+  "type": "action",
+  "step": 0,
+  "call_id": "c0",
+  "name": "summarize_records",
+  "args": {
+   "object": "CaseHistory__c",
+   "filters": [
+    {
+     "field": "Field__c",
+     "op": "=",
+     "value": "Owner Assignment"
+    }
+   ],
+   "group_by": "CaseId__c",
+   "metric": "count",
+   "having_op": "=",
+   "having_value": 1,
+   "sort": "desc",
+   "limit": 200
+  }
+ },
+ {
+  "type": "observation",
+  "step": 0,
+  "call_id": "c0",
+  "ok": true,
+  "rows_total": 118,
+  "rows_shown": 2,
+  "truncated": false,
+  "columns": [
+   "CaseId__c",
+   "metric",
+   "n"
+  ],
+  "preview": [
+   {
+    "CaseId__c": "500Wt00000DDDfwIAH",
+    "metric": 1,
+    "n": 1
+   },
+   {
+    "CaseId__c": "500Wt00000DDE1zIAH",
+    "metric": 1,
+    "n": 1
+   }
+  ],
+  "error": null,
+  "elapsed_ms": 12.0
+ },
+ {
+  "type": "step_start",
+  "step": 1
+ },
+ {
+  "type": "action",
+  "step": 1,
+  "call_id": "c1",
+  "name": "summarize_records",
+  "args": {
+   "object": "Case",
+   "filters": [
+    {
+     "field": "CreatedDate",
+     "op": ">=",
+     "value": "2022-09-01"
+    },
+    {
+     "field": "CreatedDate",
+     "op": "<=",
+     "value": "2022-11-30"
+    },
+    {
+     "field": "ClosedDate",
+     "op": "not_null",
+     "value": ""
+    }
+   ],
+   "group_by": "OwnerId",
+   "metric": "avg_days_between",
+   "field": "CreatedDate",
+   "field2": "ClosedDate",
+   "having_op": "none",
+   "having_value": 0,
+   "sort": "desc",
+   "limit": 5
+  }
+ },
+ {
+  "type": "observation",
+  "step": 1,
+  "call_id": "c1",
+  "ok": true,
+  "rows_total": 2,
+  "rows_shown": 2,
+  "truncated": false,
+  "columns": [
+   "OwnerId",
+   "metric",
+   "n"
+  ],
+  "preview": [
+   {
+    "OwnerId": "005Wt000003NJ6gIAG",
+    "metric": 0.0189,
+    "n": 1
+   },
+   {
+    "OwnerId": "005Wt000003NBp4IAG",
+    "metric": 0.0121,
+    "n": 2
+   }
+  ],
+  "error": null,
+  "elapsed_ms": 12.0
+ },
+ {
+  "type": "step_start",
+  "step": 2
+ },
+ {
+  "type": "action",
+  "step": 2,
+  "call_id": "c2",
+  "name": "respond",
+  "args": {
+   "answer": "005Wt000003NJ6gIAG"
+  }
+ },
+ {
+  "type": "answer",
+  "text": "005Wt000003NJ6gIAG",
+  "expected": [
+   "005Wt000003NJ6gIAG"
+  ],
+  "correct": true
+ },
+ {
+  "type": "stats",
+  "steps": 3,
+  "actions": 3,
+  "wall_ms": 4900,
+  "prompt_tokens": 15210,
+  "cached_tokens": 13840,
+  "completion_tokens": 212,
+  "est_cost_usd": 0.00165
+ },
+ {
+  "type": "done"
+ }
+]

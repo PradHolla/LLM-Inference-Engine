@@ -5,11 +5,12 @@ import { ChatMessage } from "./components/ChatMessage";
 import { Composer } from "./components/Composer";
 import { DeleteDialog, RenameDialog, Sidebar } from "./components/Sidebar";
 import { StreamingReply, type PipelineState, type StreamingReplyHandle } from "./components/StreamingReply";
+import { CrmView } from "./components/crm/CrmView";
 import { Button } from "./components/ui/button";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { createChat, deleteChat, getChat, getChats, getConfig, getHealth, renameChat,
   switchHead } from "./lib/api";
-import type { AppConfig, Chat, ChatPayload, Message, Plan, SearchMode, Source, Theme } from "./types";
+import type { AppConfig, AppMode, Chat, ChatPayload, Message, Plan, SearchMode, Source, Theme } from "./types";
 
 type StreamState = { id: string; pipeline: PipelineState };
 
@@ -36,6 +37,11 @@ function storedSearch(value: string, config: AppConfig | null): string {
   return searchModes(config).some((option) => option.id === mode) ? mode : defaultSearch(config);
 }
 
+function initialAppMode(): AppMode {
+  if (new URLSearchParams(location.search).get("mode") === "crm") return "crm";
+  return stored("llm-ui-app-mode", "chat") === "crm" ? "crm" : "chat";
+}
+
 function stringList(value: unknown): string[] | null {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 }
@@ -52,6 +58,8 @@ export function App() {
     const value = document.documentElement.dataset.theme;
     return value === "dark" ? "dark" : "cream";
   });
+  const [appMode, setAppMode] = useState<AppMode>(initialAppMode);
+  const [crmVisited, setCrmVisited] = useState(() => initialAppMode() === "crm");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
@@ -171,14 +179,22 @@ export function App() {
 
   useEffect(() => { scrollToBottom(); }, [messages, stream, scrollToBottom]);
 
+  const changeAppMode = (next: AppMode) => {
+    setAppMode(next);
+    if (next === "crm") setCrmVisited(true);
+    try { localStorage.setItem("llm-ui-app-mode", next); } catch {}
+  };
+
   const chooseChat = (id: number) => {
     if (stream) return;
+    changeAppMode("chat");
     setSelectedId(id);
     setMobileOpen(false);
   };
 
   const handleNewChat = async () => {
     if (stream) return;
+    changeAppMode("chat");
     try {
       const next = await createChat();
       setChats((current) => [next, ...current]);
@@ -440,12 +456,13 @@ export function App() {
 
   return <TooltipProvider>
     <div className="app-shell">
-      <Sidebar chats={chats} currentId={selectedId} onSelect={chooseChat} onNew={() => void handleNewChat()}
+      <Sidebar chats={chats} currentId={appMode === "chat" ? selectedId : null} onSelect={chooseChat}
+        appMode={appMode} onAppModeChange={changeAppMode} onNew={() => void handleNewChat()}
         collapsed={collapsed} onToggleCollapsed={() => setCollapsed((value) => !value)}
         mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} theme={theme}
         onThemeChange={() => setPageTheme(theme === "cream" ? "dark" : "cream")}
         onRename={setRenameTarget} onDelete={setDeleteTarget} />
-      <main className="chat-main">
+      <main className="chat-main" hidden={appMode === "crm"}>
         <header className="topbar">
           <Button className="mobile-menu" variant="ghost" size="icon" aria-label="Open conversations"
             onClick={() => setMobileOpen(true)}><Menu size={18} /></Button>
@@ -508,6 +525,7 @@ export function App() {
             search={search} searchOptions={searchModes(config)} onSearchChange={setSearch} />
         </div>
       </main>
+      {crmVisited && <CrmView hidden={appMode !== "crm"} onOpenMenu={() => setMobileOpen(true)} />}
       <RenameDialog chat={titleRename} onOpenChange={(open) => { if (!open) setRenameTarget(null); }} onSave={handleRename} />
       <DeleteDialog chat={deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }} onDelete={handleDelete} />
     </div>
