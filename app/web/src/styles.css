@@ -419,6 +419,16 @@ button { color: inherit; }
 .crm-faint { color: var(--text-faint); }
 .crm-obs-error { margin: 7px 0 0; color: var(--text); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .crm-obs-empty { margin: 7px 0 0; color: var(--text-faint); font-size: 12px; }
+.crm-doc-title { min-width: 0; overflow: hidden; color: var(--text-soft); text-overflow: ellipsis; white-space: nowrap; }
+.crm-doc { margin: 8px 0 0; max-height: 7.5em; overflow: hidden; color: var(--text); font-family: var(--reading-font);
+  font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent); }
+.crm-doc.open { max-height: none; mask-image: none; }
+.crm-doc-toggle { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.crm-answer-expected { margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--text-soft);
+  font-size: 14px; line-height: 1.5; }
+.crm-answer-expected span { display: block; margin-bottom: 2px; color: var(--text-faint); font-size: 11px;
+  letter-spacing: .06em; text-transform: uppercase; }
 .crm-table-wrap { max-height: 232px; margin-top: 9px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); scrollbar-width: thin; }
 .crm-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
 .crm-table th.num { text-align: right; }

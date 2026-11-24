@@ -326,10 +326,14 @@ def _preview(text: str) -> dict:
     elif ok and text.strip().endswith("[]"):
         rows = []
     rows = [r for r in rows if isinstance(r, dict)]
+    if ok and not rows and text.strip() not in ("", "[]") and "[{" not in text:
+        # a document-style result (get_article, get_case): send the text itself for the UI to show
+        return {"ok": True, "rows_total": None, "rows_shown": None, "truncated": len(text) > 6000, "columns": [],
+                "preview": [], "error": None, "text": text[:6000]}
     cols = list(rows[0]) if rows else []
     return {"ok": ok, "rows_total": total if total is not None else len(rows), "rows_shown": min(len(rows), 8),
             "truncated": total is not None, "columns": cols, "preview": rows[:8],
-            "error": None if ok else text[:500]}
+            "error": None if ok else text[:500], "text": None}
 
 
 def _emit_step(on_event, step: int, new: list[dict]) -> None:
@@ -350,7 +354,7 @@ def _emit_step(on_event, step: int, new: list[dict]) -> None:
             if not calls and (m.get("content") or "").strip():
                 on_event({"type": "action", "step": step, "call_id": f"text_{step}", "name": "respond",
                           "args": {"answer": m["content"].strip()}})
-        elif m["role"] == "tool":
+        elif m["role"] == "tool" and m["content"] != "Answer submitted.":  # respond has no result to show
             on_event({"type": "observation", "step": step, "call_id": m.get("tool_call_id"),
                       "elapsed_ms": m.get("elapsed_ms"), **_preview(m["content"])})
 

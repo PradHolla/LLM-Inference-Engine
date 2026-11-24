@@ -39,6 +39,9 @@ function AnswerCard({ answer }: { answer: AnswerEvent }) {
     transition={{ duration: 0.26, ease: "easeOut" }} aria-label="Answer">
     <div className="crm-answer-head"><Sparkles size={14} aria-hidden="true" /><span>Answer</span><Badge answer={answer} /></div>
     <p className="crm-answer-text"><WithIds text={answer.text} /></p>
+    {answer.correct === null && answer.expected && answer.expected.length > 0 &&
+      <p className="crm-answer-expected"><span>Expected answer</span>
+        {answer.expected.map((item) => formatCell(item)).join(", ")}</p>}
   </motion.section>;
 }
 

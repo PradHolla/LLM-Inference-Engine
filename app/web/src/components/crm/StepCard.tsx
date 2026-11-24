@@ -35,6 +35,7 @@ function Observation({ call, live }: { call: CallView; live: boolean }) {
     return <div className="crm-obs pending"><LoaderCircle className="crm-spin" size={14} aria-hidden="true" />
       <span>Waiting for the result</span></div>;
   }
+  if (obs.ok && obs.text) return <DocumentResult text={obs.text} truncated={obs.truncated} ms={obs.elapsed_ms} />;
   const partial = obs.rows_shown < obs.rows_total;
   return <div className={`crm-obs ${obs.ok ? "ok" : "error"}`}>
     <div className="crm-obs-head">
@@ -48,6 +49,26 @@ function Observation({ call, live }: { call: CallView; live: boolean }) {
     {!obs.ok && <p className="crm-obs-error">{obs.error ?? "The action failed."}</p>}
     {obs.ok && obs.rows_total === 0 && <p className="crm-obs-empty">No matching rows.</p>}
     {obs.ok && <ResultTable columns={obs.columns} rows={obs.preview} />}
+  </div>;
+}
+
+/** An article or a case comes back as text: show its first lines, the rest one click away. */
+function DocumentResult({ text, truncated, ms }: { text: string; truncated: boolean; ms: number | null }) {
+  const [open, setOpen] = useState(false);
+  const lines = text.split("\n");
+  const title = lines[0] ?? "";
+  const long = text.length > 600;
+  return <div className="crm-obs ok">
+    <div className="crm-obs-head">
+      <CircleCheck size={14} aria-hidden="true" />
+      <strong>Result</strong>
+      <span className="crm-doc-title">{title}</span>
+      {truncated && <span className="crm-faint">truncated</span>}
+      <span className="crm-obs-time">{formatMs(ms)}</span>
+    </div>
+    <pre className={`crm-doc ${open || !long ? "open" : ""}`}>{lines.slice(1).join("\n")}</pre>
+    {long && <button type="button" className="crm-doc-toggle" onClick={() => setOpen((v) => !v)}>
+      {open ? "Show less" : "Show full text"}</button>}
   </div>;
 }
 

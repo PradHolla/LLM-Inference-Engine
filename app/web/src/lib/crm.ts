@@ -43,7 +43,7 @@ export type ActionEvent = {
 export type ObservationEvent = {
   type: "observation"; step: number; call_id: string; ok: boolean; rows_total: number; rows_shown: number;
   truncated: boolean; columns: string[]; preview: Record<string, unknown>[]; error: string | null;
-  elapsed_ms: number;
+  elapsed_ms: number; text?: string | null;
 };
 export type AnswerEvent = { type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null };
 export type StatsEvent = {

@@ -12,7 +12,8 @@ from __future__ import annotations
 #   thinking     step, text (model reasoning, only when thinking is on; the UI shows it collapsed)
 #   action       step, call_id, name, args (dict)
 #   observation  step, call_id, ok, rows_total, rows_shown, truncated, columns (list), preview (list of
-#                row dicts, at most 8), error (str or null), elapsed_ms
+#                row dicts, at most 8), error (str or null), elapsed_ms, text (str or null: a document-style
+#                result such as an article or a case, shown as text; rows_total is then null)
 #   answer       text, expected (list or null), correct (bool or null; null when there is no ground truth)
 #   stats        steps, actions, wall_ms, prompt_tokens, cached_tokens, completion_tokens, est_cost_usd
 #   error        message
