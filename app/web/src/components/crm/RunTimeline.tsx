@@ -39,6 +39,10 @@ function AnswerCard({ answer }: { answer: AnswerEvent }) {
     transition={{ duration: 0.26, ease: "easeOut" }} aria-label="Answer">
     <div className="crm-answer-head"><Sparkles size={14} aria-hidden="true" /><span>Answer</span><Badge answer={answer} /></div>
     <p className="crm-answer-text"><WithIds text={answer.text} /></p>
+    {answer.reason && <p className="crm-answer-reason"><span>Why</span><WithIds text={answer.reason} /></p>}
+    {answer.sources && answer.sources.length > 0 &&
+      <p className="crm-answer-sources"><span>Based on</span>
+        {answer.sources.map((s) => <span key={s.id} className="crm-chip" title={s.id}>{s.title || s.id}</span>)}</p>}
     {answer.correct === null && answer.expected && answer.expected.length > 0 &&
       <p className="crm-answer-expected"><span>Expected answer</span>
         {answer.expected.map((item) => formatCell(item)).join(", ")}</p>}

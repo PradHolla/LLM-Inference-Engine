@@ -45,7 +45,10 @@ export type ObservationEvent = {
   truncated: boolean; columns: string[]; preview: Record<string, unknown>[]; error: string | null;
   elapsed_ms: number; text?: string | null;
 };
-export type AnswerEvent = { type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null };
+export type AnswerEvent = {
+  type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null;
+  reason?: string | null; sources?: { id: string; title: string }[];
+};
 export type StatsEvent = {
   type: "stats"; steps: number; actions: number; wall_ms: number; prompt_tokens: number;
   cached_tokens: number; completion_tokens: number; est_cost_usd: number;
@@ -163,6 +166,9 @@ export const ACTION_LABELS: Record<string, string> = {
   summarize_records: "Summarize records", find_by_name: "Find by name", query_records: "Query records",
   get_record: "Get record", search_text: "Search text", search: "Search text", run_sql: "Run SQL",
   respond: "Respond",
+  get_case: "Open the case", search_knowledge: "Search the knowledge base", get_article: "Read an article",
+  list_issues: "List known issues", list_products: "List products", agent_expertise: "Rank agents by experience",
+  agent_workload: "Check agent workload",
 };
 
 export function humanize(name: string): string {
@@ -243,7 +249,8 @@ export function formatArgs(name: string, rawArgs: Record<string, unknown>): ArgI
   if (name === "run_sql") return typeof args.query === "string" ? [{ label: "Query", kind: "code", text: args.query }] : [];
   const items: ArgItem[] = [];
   const summarize = name === "summarize_records";
-  const skip = new Set(summarize ? ["field", "field2", "having_value"] : []);
+  const skip = new Set(summarize ? ["field", "field2", "having_value"]
+    : name === "search_knowledge" ? ["limit"] : name === "agent_expertise" ? ["top"] : []);
   for (const [key, value] of Object.entries(args)) {
     if (skip.has(key) || value === null || value === undefined || value === "") continue;
     if (summarize && key === "metric") { items.push({ label: "Metric", kind: "text", text: metricText(args) }); continue; }

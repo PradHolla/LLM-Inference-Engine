@@ -136,7 +136,7 @@ def _examples() -> tuple[dict, ...]:
 # answer-in-article check): many knowledge_qa answers are absent from this org's articles.
 SERVICE_SHOWCASE = {"case_routing": (1483, 1489, 1497),
                     "policy_violation_identification": (1412, 1459, 1384),  # two violations, one None
-                    "knowledge_qa": (773, 765, 699)}
+                    "knowledge_qa": (717, 762, 767)}  # their article ranks 1st, 1st, 3rd in search
 
 
 @functools.lru_cache(maxsize=1)

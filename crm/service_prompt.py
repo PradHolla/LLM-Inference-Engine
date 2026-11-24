@@ -21,7 +21,8 @@ Follow the case routing policy in the task context exactly, in this order:
 3. Only if several agents tie at the top: call list_products, pick the product the case is about, call
    agent_expertise with kind "product", and among the tied agents keep the one with the most closed cases.
 4. Only if still tied: call agent_workload for the tied agents and pick the one with the fewest open cases.
-5. Call respond with ONLY the winning agent's Id (it starts with 005).""",
+5. Call respond with the winning agent's Id as the answer (it starts with 005) and, as the reason, the
+   deciding fact (for example: most closed cases for the issue, or the tie-break that settled it).""",
     "policy_violation_identification": """\
 # Your job: check whether the agent on a case broke company policy
 1. Call get_case with the case Id from the task context and read the whole conversation: what the customer
@@ -31,13 +32,15 @@ Follow the case routing policy in the task context exactly, in this order:
    get_article.
 3. A violation means the agent's words or actions clearly contradict a specific article. Most cases have NO
    violation: answer None unless you can point to the exact article the agent contradicted.
-4. Call respond with ONLY the violated article's Id (it starts with ka0), or None.""",
+4. Call respond with the violated article's Id as the answer (it starts with ka0), or None, and as the
+   reason what the agent did against which rule (or that nothing contradicted policy).""",
     "knowledge_qa": """\
 # Your job: answer a question from the knowledge base
-1. Call search_knowledge with the key terms of the question; read the most relevant article with get_article.
+1. Call search_knowledge with the key terms of the question. Compare the titles and snippets of ALL results,
+   then open the one or two that best match the question with get_article.
 2. Answer in ONE short sentence, reusing the article's own wording where you can. Do not add anything the
-   article does not say.
-3. Call respond with that sentence only.""",
+   articles do not say. If no article answers the question, say the knowledge base does not cover it.
+3. Call respond with that sentence as the answer and the article's title as the reason.""",
 }
 
 GENERIC_JOB = """\
@@ -50,7 +53,8 @@ RULES = """\
 - Use one tool at a time and wait for its result. Never repeat a call you already made.
 - Ids are exact strings: copy them from tool results, never invent them.
 - Dates are relative to the task's "Today's date" when one is given, never the real current date.
-- Your final step is always the respond tool. Its answer holds only the answer, no explanation."""
+- Your final step is always the respond tool: `answer` holds only the answer (an Id, None, or one short
+  sentence), and `reason` holds one short line saying why, citing what you found."""
 
 # xLAM's chat template drops its own tool-format instruction whenever a system message is present
 # (P11-S1 S1-5); this puts the sentence back for that model only.

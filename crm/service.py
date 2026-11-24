@@ -21,7 +21,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9]{15,18}$")
 KINDS = ["issue", "product"]
 BODY_CAP = 4000  # per email / chat / description; shrinks only if the whole case file exceeds the char cap
 DESC_CAP = 120
-MAX_SEARCH, DEFAULT_SEARCH = 10, 5
+MAX_SEARCH, DEFAULT_SEARCH, MIN_SEARCH = 10, 5, 3
 MAX_TOP, DEFAULT_TOP = 20, 10
 MAX_AGENTS = 50
 
@@ -118,7 +118,8 @@ def get_case(session: TaskSession, case_id) -> Observation:
 
 def search_knowledge(session: TaskSession, query, limit) -> Observation:
     t0 = time.monotonic()
-    n = _bounded(limit, DEFAULT_SEARCH, MAX_SEARCH, "limit")
+    # At least 3: a model asking for 1 took the first hit unseen and answered from the wrong article.
+    n = max(MIN_SEARCH, _bounded(limit, DEFAULT_SEARCH, MAX_SEARCH, "limit"))
     obs = session.search(str(query or ""), ["Knowledge__kav"], limit=min(n * 8, session.row_cap))
     if not obs.ok:
         return obs
@@ -247,7 +248,13 @@ def _s(desc: str, **kw) -> dict:
     return {"type": "string", "description": desc, **kw}
 
 
-_RESPOND = next(t for t in TOOLS if t["function"]["name"] == "respond")
+# The service agent's final answer carries a one-line reason for the human; only `answer` is graded.
+_RESPOND = _tool("respond", "Give the final answer. Call this once, when you are confident.",
+                 {"answer": {"type": "string", "description": "ONLY the answer: an Id, None, or one short "
+                             "sentence for a knowledge question. No explanation here."},
+                  "reason": {"type": "string", "description": "One short line saying why, citing what you "
+                             "found (for example: closed the most cases of this issue)."}},
+                 ["answer", "reason"])
 
 SERVICE_TOOLS: list[dict] = [
     _tool("get_case", "Read one support case in full: its fields (with issue and product names), its emails, live "

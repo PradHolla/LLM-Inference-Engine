@@ -425,6 +425,13 @@ button { color: inherit; }
   mask-image: linear-gradient(to bottom, #000 60%, transparent); }
 .crm-doc.open { max-height: none; mask-image: none; }
 .crm-doc-toggle { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.crm-answer-reason, .crm-answer-sources { margin: 10px 0 0; color: var(--text-soft); font-size: 14px; line-height: 1.5; }
+.crm-answer-reason span, .crm-answer-sources > span:first-child { display: block; margin-bottom: 3px; color: var(--text-faint);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.crm-answer-sources .crm-chip { margin: 0 6px 4px 0; }
+.crm-snippet mark { padding: 0 .15em; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit; }
+.crm-table td.wide { min-width: 280px; white-space: normal; }
 .crm-answer-expected { margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--text-soft);
   font-size: 14px; line-height: 1.5; }
 .crm-answer-expected span { display: block; margin-bottom: 2px; color: var(--text-faint); font-size: 11px;

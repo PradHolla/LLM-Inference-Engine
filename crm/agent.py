@@ -290,9 +290,33 @@ def _seen_before(earlier: list[dict], name: str, args: dict) -> int | None:
     return None
 
 
+def _loads_or_none(s: str):
+    try:
+        return json.loads(s)
+    except ValueError:
+        return None
+
+
+def _sources(trajectory: list[dict]) -> list[dict]:
+    """Knowledge articles the agent actually opened (get_article results), in order, for the answer card."""
+    out, seen = [], set()
+    for m in trajectory:
+        c = m.get("content") or ""
+        if m.get("role") == "tool" and c.startswith("ARTICLE "):
+            aid = c.split("\n", 1)[0].split()[1]
+            title = next((ln[7:].strip() for ln in c.split("\n") if ln.startswith("Title: ")), "")
+            if aid not in seen:
+                seen.add(aid)
+                out.append({"id": aid, "title": title})
+    return out
+
+
 def _text_tool_calls(content: str) -> list[dict]:
     """Tool calls written as JSON text (a list or one object of {name, arguments}); [] if it is not that."""
     s = (content or "").strip()
+    m = re.fullmatch(r"([a-z_]+)\s*\n\s*(\{.*\})", s, re.S)  # Qwen once wrote: respond\n{"answer": "None"}
+    if m:
+        s = json.dumps({"name": m.group(1), "arguments": _loads_or_none(m.group(2))})
     if not s or s[0] not in "[{":
         return []
     try:
@@ -402,7 +426,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             args = None
         texts.append(json.dumps(args) if args is not None else str(fn.get("arguments")))
         if name == "respond" and isinstance(args, dict) and "answer" in args:
-            out.update(answer=str(args["answer"]).strip())
+            out.update(answer=str(args["answer"]).strip(), reason=str(args.get("reason") or "").strip() or None)
             reply = "Answer submitted."
         elif action_names is not None:
             prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None
@@ -472,7 +496,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         tools = TOOLS if protocol == TOOLS_PROTOCOL else None
         messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
-    end_reason = end_detail = answer = None
+    end_reason = end_detail = answer = reason = None
     n_calls = n_format = n_sql_err = n_search = n_trunc = 0
     prompt_toks, cached_toks, completion_toks = [], [], []
     session = await asyncio.to_thread(env.open_task)
@@ -512,6 +536,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                 emit(calls_out, rec)
                 if step_out["answer"] is not None:
                     end_reason, answer, end_detail = "respond", step_out["answer"], step_out["detail"]
+                    reason = step_out.get("reason")
                     break
                 continue
             action, text = parse_action(res.content)
@@ -549,7 +574,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     if on_event:
         wall = (time.perf_counter() - t0) * 1000
         if answer is not None:
-            on_event({"type": "answer", "text": answer,
+            on_event({"type": "answer", "text": answer, "reason": reason, "sources": _sources(trajectory),
                       "expected": None if task.reward_metric in ("none", "privacy_rejection") else list(task.answer),
                       "correct": None if g["reward"] is None or task.reward_metric != "exact_match"
                       else g["reward"] == 1.0})
