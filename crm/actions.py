@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import difflib
 import functools
 import re
@@ -53,6 +54,7 @@ COMPARE_OPS = {"=", "!=", ">", ">=", "<", "<="}
 METRICS = ["count", "count_distinct", "sum", "avg", "min", "max", "avg_days_between", "sum_product"]
 HAVING_OPS = ["none", "=", "!=", ">", ">=", "<", "<="]
 DEFAULT_LIMIT, FIND_LIMIT, SEARCH_LIMIT = 50, 20, 20
+LIST_MAX = 50  # query_records lists at most this many rows; 200-row lists filled a 32k context in 4 calls
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
 MONTH_RE = re.compile(r"^month\((.+)\)$", re.IGNORECASE)
@@ -300,7 +302,16 @@ def query_records(session: TaskSession, org: str, obj, filters, fields, order_by
         e, _ = q.expr(order_by)
         order = f" ORDER BY {e} IS NULL, {_num(e)} {'DESC' if descending else 'ASC'}"
     sql = f"SELECT {sel} FROM {q.from_sql()}{_where_sql(conds)}{order} LIMIT ?"
-    return session.query(sql, params + [_limit(limit)])
+    obs = session.query(sql, params + [min(_limit(limit), LIST_MAX)])
+    if not obs.ok:
+        return obs
+    total = session.conn.execute(f"SELECT COUNT(*) FROM {q.from_sql()}{_where_sql(conds)}", params).fetchone()[0]
+    if total > (obs.rows_shown or 0):  # tell the model how much it is not seeing, and what to use instead
+        lines = [ln for ln in obs.text.split("\n") if not ln.startswith("[showing ")]
+        lines.append(f"[showing {obs.rows_shown} of {total} rows. Narrow the filters, or use summarize_records "
+                     f"for counts, rates, totals and averages instead of listing rows]")
+        obs = dataclasses.replace(obs, text="\n".join(lines), rows_total=total, truncated=True)
+    return obs
 
 
 def summarize_records(session: TaskSession, org: str, obj, filters, group_by, metric, field, field2,
@@ -419,14 +430,15 @@ def _action_tools(org: str, with_sql: bool) -> tuple:
               ["name", "object"]),
         _tool("get_record", "Read every field of one record by Id.",
               {"object": _s("Object (table) name, e.g. Case."), "id": _s("The record Id.")}, ["object", "id"]),
-        _tool("query_records", "List records of one object that match filters, with chosen fields.",
+        _tool("query_records", "List individual records of one object that match filters (at most 50 rows). "
+              "For counts, rates, totals or averages use summarize_records instead.",
               {"object": _s("Object (table) name, e.g. Case."), "filters": _FILTERS,
                "fields": {"type": "array", "items": {"type": "string"}, "description":
                           "Field paths to return (Field or RefField.ParentField); empty list = all fields of the "
                           "object."},
                "order_by": _s("Field path to sort by, or empty string for no order."),
                "descending": {"type": "boolean", "description": "Sort descending when order_by is set."},
-               "limit": {"type": "integer", "description": "Max rows, 1 to 200; 0 means 50."}},
+               "limit": {"type": "integer", "description": "Max rows, 1 to 50; 0 means 50."}},
               ["object", "filters", "fields", "order_by", "descending", "limit"]),
         _tool("summarize_records", "Count, total or average records of one object, optionally grouped by a field. "
               "Rows: {group_by: value, metric: value, n: rows in the group}, sorted by metric.",
@@ -561,7 +573,10 @@ def _selftest() -> int:
                f"LEFT JOIN User u ON u.Id = c.OwnerId WHERE c.Id = '{cid}'")[0]
     check("one-hop paths", o.ok and list(rows(o)[0].values()) == list(want.values()), o.text)
     o = ex("query_records", qr("OrderItem", [F("OrderId.OwnerId", "not_null")], ["Id", "OrderId.OwnerId"], limit=3))
-    check("OrderItem OrderId.OwnerId", o.ok and o.rows_total == 3 and all(r["OrderId.OwnerId"] for r in rows(o)),
+    n_oi = raw('SELECT COUNT(*) n FROM OrderItem oi JOIN "Order" o ON o.Id = oi.OrderId '
+               'WHERE o.OwnerId IS NOT NULL')[0]["n"]
+    check("OrderItem OrderId.OwnerId", o.ok and o.rows_shown == 3 and o.rows_total == n_oi
+          and all(r["OrderId.OwnerId"] for r in rows(o)),
           o.text[:120])
     day = raw('SELECT substr(CreatedDate,1,10) d FROM "Case" ORDER BY CreatedDate LIMIT 1 OFFSET 20')[0]["d"]
     n_eq = raw(f"SELECT COUNT(*) n FROM \"Case\" WHERE date(CreatedDate) = '{day}'")[0]["n"]
@@ -585,8 +600,8 @@ def _selftest() -> int:
     check("sort asc + limit", rows(o) == [{"Status": "Working", "metric": 13, "n": 13}], o.text)
     o = ex("query_records", qr("OrderItem", [F("Quantity", ">", "9")], ["Quantity"]))
     n_q = raw("SELECT COUNT(*) n FROM OrderItem WHERE CAST(Quantity AS REAL) > 9")[0]["n"]
-    check("numeric value compares numerically on TEXT column", o.rows_total == min(n_q, 50) and n_q > 0,
-          f"{n_q} rows")
+    check("numeric value compares numerically on TEXT column", o.rows_total == n_q and n_q > 0
+          and o.rows_shown == min(n_q, 50) and "use summarize_records" in o.text.split("\n")[-1], f"{n_q} rows")
     metric_sql = {
         "count": "COUNT(*)", "count_distinct": "COUNT(DISTINCT OwnerId)", "sum": "SUM(Quantity)",
         "avg": "AVG(UnitPrice)", "min": "MIN(CAST(Quantity AS REAL))", "max": "MAX(CAST(Quantity AS REAL))",

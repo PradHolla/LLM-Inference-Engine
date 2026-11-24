@@ -263,6 +263,30 @@ def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> gr
     return dataclasses.asdict(grade.score(task.task_type, task.reward_metric, answer, list(task.answer), ctx))
 
 
+END_MESSAGES = {
+    "context_overflow": "The agent pulled in more data than it can hold and could not finish this one. "
+                        "Try a narrower question.",
+    "max_turns": "The agent used all 20 of its steps without reaching an answer.",
+    "api_error": "The model server returned an error, so the run stopped.",
+}
+
+
+def _seen_before(earlier: list[dict], name: str, args: dict) -> int | None:
+    """Index of an earlier assistant turn that made the identical call, else None."""
+    key = json.dumps(args, sort_keys=True)
+    for i, m in enumerate(earlier):
+        for tc in m.get("tool_calls") or [] if m.get("role") == "assistant" else []:
+            fn = tc.get("function") or {}
+            try:
+                same = fn.get("name") == name and json.dumps(json.loads(fn.get("arguments") or "{}"),
+                                                             sort_keys=True) == key
+            except ValueError:
+                same = False
+            if same:
+                return i
+    return None
+
+
 def _text_tool_calls(content: str) -> list[dict]:
     """Tool calls written as JSON text (a list or one object of {name, arguments}); [] if it is not that."""
     s = (content or "").strip()
@@ -325,7 +349,7 @@ def _emit_step(on_event, step: int, new: list[dict]) -> None:
                           "args": {"answer": m["content"].strip()}})
         elif m["role"] == "tool":
             on_event({"type": "observation", "step": step, "call_id": m.get("tool_call_id"),
-                      "elapsed_ms": None, **_preview(m["content"])})
+                      "elapsed_ms": m.get("elapsed_ms"), **_preview(m["content"])})
 
 
 async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict],
@@ -341,6 +365,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
     if res.tool_calls:
         asst["tool_calls"] = res.tool_calls
     messages.append(asst)
+    this_turn = len(trajectory)  # repeats are checked against earlier turns only, never this one
     trajectory.append({"role": "assistant", "content": res.content, "reasoning": res.reasoning,
                        "tool_calls": res.tool_calls})
     if not res.tool_calls and _text_tool_calls(res.content):
@@ -362,6 +387,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
         fn = tc.get("function") or {}
         name = fn.get("name")
         names.append(name or "?")
+        obs = None
         try:
             args = json.loads(fn.get("arguments") or "{}")
         except ValueError:
@@ -371,7 +397,12 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             out.update(answer=str(args["answer"]).strip())
             reply = "Answer submitted."
         elif action_names is not None:
-            if name in action_names and name != "respond" and isinstance(args, dict):
+            prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None
+            if prior is not None:  # an identical repeat cannot give a new result; break the loop
+                out["format_errors"] += 1
+                reply = (f"Error: you already ran exactly this {name} call; its result is above. Do not repeat it. "
+                         "Change the filters, use summarize_records for counts, rates and averages, or respond.")
+            elif name in action_names and name != "respond" and isinstance(args, dict):
                 obs = await asyncio.to_thread(actions.execute, session, name, args, org)
                 out["sql_errors"] += not obs.ok
                 out["searches"] += name in ("find_by_name", "search_text")
@@ -401,7 +432,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             reply = f"Error: unknown tool or bad arguments for {name!r}. Tools: run_sql(query), search(query), respond(answer)."
         tool_msg = {"role": "tool", "tool_call_id": tc.get("id") or f"call_{len(messages)}", "content": reply}
         messages.append(tool_msg)
-        trajectory.append(dict(tool_msg))
+        trajectory.append(dict(tool_msg, elapsed_ms=obs.elapsed_ms if obs is not None else None))
     out.update(action="+".join(names), text=" | ".join(texts))
     return out
 
@@ -510,7 +541,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                       "correct": None if g["reward"] is None or task.reward_metric != "exact_match"
                       else g["reward"] == 1.0})
         else:
-            on_event({"type": "error", "message": f"no answer ({end_reason}{': ' + end_detail if end_detail else ''})"})
+            on_event({"type": "error", "message": END_MESSAGES.get(end_reason, end_reason),
+                      "detail": end_detail})
         on_event({"type": "stats", "steps": n_calls, "actions": n_calls, "wall_ms": wall,
                   "prompt_tokens": _sum(prompt_toks), "cached_tokens": _sum(cached_toks),
                   "completion_tokens": _sum(completion_toks), "est_cost_usd": round(wall / 3_600_000 * 1.21, 5)})
