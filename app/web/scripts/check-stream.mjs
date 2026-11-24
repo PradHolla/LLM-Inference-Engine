@@ -137,6 +137,48 @@ try {
   check("a single wide row renders as a field list", crmHtml.includes('class="crm-record"')
     && !crmHtml.includes('class="crm-table"') && text(crmHtml).includes("1 row"), crmHtml);
 
+  // Agent picker, example grouping and the run header's agent chip.
+  const { AgentPicker } = await server.ssrLoadModule("/src/components/crm/AgentPicker.tsx");
+  const { ExampleCards } = await server.ssrLoadModule("/src/components/crm/ExampleCards.tsx");
+  const agents = [
+    { id: "service", label: "Service desk agent", description: "Routes new cases", protocol: "service_v1", jobs: [] },
+    { id: "general", label: "General CRM agent", description: "Open questions", protocol: "actions_v1", jobs: [] },
+  ];
+  const pickerHtml = (value, disabled = false) => renderToStaticMarkup(createElement(AgentPicker,
+    { agents, value, disabled, onChange: () => {} }));
+  let pick = pickerHtml("service");
+  check("the agent picker renders both labels with the chosen one checked", pick.includes("Service desk agent")
+    && pick.includes("General CRM agent") && /aria-checked="true"[^>]*>Service desk agent/.test(pick)
+    && /aria-checked="false"[^>]*>General CRM agent/.test(pick), pick);
+  check("the agent picker shows the description as a tooltip", pick.includes('title="Routes new cases"'), pick);
+  check("the agent picker is disabled while a run is active", !pickerHtml("general").includes("disabled")
+    && (pickerHtml("general", true).match(/disabled=""/g) ?? []).length === 2);
+
+  const job = (id, label, n) => Array.from({ length: n }, (_, i) => ({ id: `${id}_${i}`, title: `${label} ${i}`,
+    question: "q", task_type: id, skill: "workflow", today: null, context_summary: "", mode: "staff",
+    has_expected: false, job: label }));
+  const jobs = ["Route a new case", "Check a case against policy", "Answer from the knowledge base"];
+  const grouped = [...job("case_routing", jobs[0], 3), ...job("policy_violation_identification", jobs[1], 3),
+    ...job("knowledge_qa", jobs[2], 3)];
+  const cards = (list) => renderToStaticMarkup(createElement(TooltipProvider, null,
+    createElement(ExampleCards, { examples: list, disabled: false, onRun: () => {} })));
+  let cardsHtml = cards(grouped);
+  const headings = [...cardsHtml.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]);
+  check("service examples group under the three job headings", headings.join("|") === jobs.join("|"), headings.join("|"));
+  check("each job group holds its three example cards", (cardsHtml.match(/class="crm-example"/g) ?? []).length === 9
+    && cardsHtml.split("<section").slice(1).every((part) => (part.match(/class="crm-example"/g) ?? []).length === 3));
+  cardsHtml = cards(grouped.map(({ job: _job, ...rest }, i) => ({ ...rest, skill: i < 5 ? "database" : "policy" })));
+  check("examples without a job still group by skill",
+    [...cardsHtml.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]).join("|") === "Database|Policy", cardsHtml);
+
+  crmText = text(timeline(events.map((event) => event.type === "run_start" ? { ...event, agent: "service" } : event)));
+  check("the run header shows the agent chip from run_start", crmText.includes("Service desk agent"), crmText);
+  crmText = text(timeline([], { running: true, question: "Q?", mode: "staff", agent: "general" }));
+  check("before run_start the agent chip comes from props", crmText.includes("General CRM agent"), crmText);
+  check("a run with no agent shows no agent chip", !/Service desk agent|General CRM agent/.test(text(timeline(events))));
+  check("the remembered agent defaults to the service desk agent without storage",
+    crm.loadAgent() === "service" && crm.AGENT_LABELS.general === "General CRM agent");
+
   const steps = crm.buildRun([events[0], { type: "step_start", step: 0 },
     { type: "action", step: 0, call_id: "a", name: "get_record", args: {} },
     { type: "action", step: 0, call_id: "b", name: "get_record", args: {} },

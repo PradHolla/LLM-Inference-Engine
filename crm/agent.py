@@ -34,7 +34,8 @@ from crm.tasks import Task, load
 PROTOCOL = "react_text_v0"
 TOOLS_PROTOCOL = "tools_v1"
 ACTION_PROTOCOLS = {"actions_v1": False, "actions_sql_v1": True}  # protocol -> run_sql offered
-PROTOCOLS = (PROTOCOL, TOOLS_PROTOCOL, *ACTION_PROTOCOLS)
+SERVICE_PROTOCOL = "service_v1"
+PROTOCOLS = (PROTOCOL, TOOLS_PROTOCOL, *ACTION_PROTOCOLS, SERVICE_PROTOCOL)
 ACTION_RES = [(name, re.compile(rf"<{name}>(.*?)</{name}>", re.DOTALL)) for name in ("execute", "search", "respond")]
 CTX_TOKENS_RE = re.compile(r"your prompt contains (at least )?(\d+) input tokens")
 CTX_MARGIN, CTX_MIN_OUT = 16, 256
@@ -60,6 +61,8 @@ ARMS = {
     "q-off": Arm("q-off", "Qwen/Qwen3-8B", 0.7, 0.8, 20, 0.0, 2048, False),
     "q-think": Arm("q-think", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 8192, True),
     "xlam": Arm("xlam", "Salesforce/Llama-xLAM-2-8b-fc-r", 0.6, 0.9, None, None, 2048, None),
+    # Near-greedy, the setting function-calling benchmarks use; the no-greedy warning is Qwen's, not Llama's.
+    "xlam-t0": Arm("xlam-t0", "Salesforce/Llama-xLAM-2-8b-fc-r", 0.0, 1.0, None, None, 2048, None),
 }
 
 
@@ -353,7 +356,8 @@ def _emit_step(on_event, step: int, new: list[dict]) -> None:
 
 
 async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict],
-                     action_names: frozenset[str] | None = None, org: str | None = None) -> dict:
+                     action_names: frozenset[str] | None = None, org: str | None = None,
+                     executor=None) -> dict:
     """Execute every tool call in one model reply; append the assistant turn and the tool replies.
 
     action_names (the offered tools) switches from the tools_v1 tools to crm.actions dispatch."""
@@ -403,7 +407,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
                 reply = (f"Error: you already ran exactly this {name} call; its result is above. Do not repeat it. "
                          "Change the filters, use summarize_records for counts, rates and averages, or respond.")
             elif name in action_names and name != "respond" and isinstance(args, dict):
-                obs = await asyncio.to_thread(actions.execute, session, name, args, org)
+                obs = await asyncio.to_thread(executor or actions.execute, session, name, args, org)
                 out["sql_errors"] += not obs.ok
                 out["searches"] += name in ("find_by_name", "search_text")
                 out["truncations"] += obs.truncated
@@ -450,8 +454,13 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     seed = task_seed(run_seed, task.org, task.idx)
     if protocol not in PROTOCOLS:
         raise ValueError(f"unknown protocol {protocol!r}; known: {', '.join(PROTOCOLS)}")
-    action_names = None
-    if protocol in ACTION_PROTOCOLS:
+    action_names, executor = None, actions.execute
+    if protocol == SERVICE_PROTOCOL:
+        from crm import service, service_prompt  # the service desk agent: purpose-built actions, short prompt
+        tools, executor = service.SERVICE_TOOLS, service.execute
+        action_names = frozenset(t["function"]["name"] for t in tools)
+        messages = service_prompt.service_messages(task, arm.model)
+    elif protocol in ACTION_PROTOCOLS:
         tools = actions.action_tools(task.org, ACTION_PROTOCOLS[protocol])
         action_names = frozenset(t["function"]["name"] for t in tools)
         messages = v2_messages(task, _schema(task.org), task.org)
@@ -484,7 +493,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             completion_toks.append(res.completion_tokens)
             if tools:
                 n_before = len(trajectory)
-                step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org)
+                step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org, executor)
                 if on_event:
                     _emit_step(on_event, step, trajectory[n_before:])
                 rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,

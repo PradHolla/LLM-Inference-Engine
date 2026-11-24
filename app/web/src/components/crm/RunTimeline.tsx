@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { BookOpen, Calendar, Check, CircleAlert, Cpu, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
+import { BookOpen, Bot, Calendar, Check, CircleAlert, Cpu, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { buildRun, formatCell, formatCost, formatInt, formatSeconds, humanize, isSalesforceId,
-  type AnswerEvent, type CrmEvent, type CrmMode, type StatsEvent } from "../../lib/crm";
+import { AGENT_LABELS, buildRun, formatCell, formatCost, formatInt, formatSeconds, humanize, isSalesforceId,
+  type AnswerEvent, type CrmAgent, type CrmEvent, type CrmMode, type StatsEvent } from "../../lib/crm";
 import { StepCard } from "./StepCard";
 
 const WORD_RE = /\b[0-9A-Za-z]{15,18}\b/g;
@@ -82,12 +82,13 @@ function Working({ step }: { step: number }) {
 const MODE_LABEL: Record<CrmMode, string> = { staff: "Staff", customer: "Customer" };
 
 /** Render one run live from its events: question header, step cards, answer, stats and errors. */
-export function RunTimeline({ events, running, stopped = false, question, mode }: {
-  events: CrmEvent[]; running: boolean; stopped?: boolean; question?: string; mode?: CrmMode;
+export function RunTimeline({ events, running, stopped = false, question, mode, agent }: {
+  events: CrmEvent[]; running: boolean; stopped?: boolean; question?: string; mode?: CrmMode; agent?: CrmAgent;
 }) {
   const run = buildRun(events);
   const start = run.start;
   const shownMode = start?.mode ?? mode;
+  const shownAgent = start?.agent ?? agent;
   const context = start?.context;
   const finished = run.answer !== null || run.done || run.errors.length > 0;
   return <article className="crm-run">
@@ -95,6 +96,8 @@ export function RunTimeline({ events, running, stopped = false, question, mode }
       <p className="crm-kicker">Question</p>
       <h2>{start?.question ?? question ?? ""}</h2>
       <div className="crm-chip-row">
+        {shownAgent && <span className="crm-chip meta agent"><Bot size={12} aria-hidden="true" />
+          {AGENT_LABELS[shownAgent] ?? humanize(shownAgent)}</span>}
         {context?.today && <span className="crm-chip meta"><Calendar size={12} aria-hidden="true" />Today {context.today}</span>}
         {shownMode && <span className="crm-chip meta"><UserRound size={12} aria-hidden="true" />{MODE_LABEL[shownMode]} mode</span>}
         {context?.policy_title && <span className="crm-chip meta"><BookOpen size={12} aria-hidden="true" />{context.policy_title}</span>}

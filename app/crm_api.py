@@ -35,6 +35,18 @@ MODEL_OPTIONS = [
     {"id": "Salesforce/Llama-xLAM-2-8b-fc-r", "label": "xLAM-2-8B",
      "note": "Salesforce's tool-calling specialist"},
 ]
+SERVICE_JOBS = (("case_routing", "Route a new case"),
+                ("policy_violation_identification", "Check a case against policy"),
+                ("knowledge_qa", "Answer from the knowledge base"))
+SERVICE_PER_JOB = 3
+SERVICE_PROTOCOL = "service_v1"
+AGENTS = [
+    {"id": "service", "label": "Service desk agent", "protocol": SERVICE_PROTOCOL,
+     "description": "Routes new cases, checks cases against policy, answers from the knowledge base",
+     "jobs": [{"task_type": t, "label": label} for t, label in SERVICE_JOBS]},
+    {"id": "general", "label": "General CRM agent", "protocol": "actions_v1",
+     "description": "Open questions across sales and service data", "jobs": []},
+]
 _STATE: dict = {"current": MODEL_OPTIONS[0]["id"], "switching": False}
 _BACKGROUND: set[asyncio.Task] = set()   # strong refs so a switch task is not collected
 
@@ -46,6 +58,7 @@ class ModelBody(BaseModel):
 class AskBody(BaseModel):
     question: str | None = None
     example_id: str | None = None
+    agent: Literal["service", "general"] = "service"
     mode: Literal["staff", "customer"] = "staff"
     thinking: bool = False
 
@@ -76,16 +89,35 @@ TITLES = {
 }
 
 
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0].rstrip(" ,.?") + "..."
+
+
 def _title(task: tasks.Task) -> str:
     return TITLES.get(task.task_type, task.task_type.replace("_", " ").capitalize())
 
 
-def _example(task: tasks.Task) -> dict:
-    return {"id": f"{task.task_type}_{task.idx}", "title": _title(task), "question": task.query,
-            "task_type": task.task_type, "skill": task.skill, "today": task.today,
-            "context_summary": " ".join(task.required.split())[:160],
-            "mode": "customer" if task.external else "staff",
-            "has_expected": task.answer != [None] and task.reward_metric == "exact_match"}
+def _service_title(task: tasks.Task) -> str:
+    """A title that differs per example: the case subject, the case Id tail or the question itself."""
+    if task.task_type == "case_routing":
+        m = re.search(r"Case Subject:\s*(.+)", task.query)
+        return f"Route: {_clip(m.group(1), 60)}" if m else _title(task)
+    if task.task_type == "policy_violation_identification":
+        m = re.search(r"Case Id[^:\n]*:\s*([0-9A-Za-z]+)", task.required)
+        return f"Check case {m.group(1)[-6:]}" if m else _title(task)
+    return _clip(task.query, 60)
+
+
+def _example(task: tasks.Task, job: str | None = None) -> dict:
+    out = {"id": f"{task.task_type}_{task.idx}", "title": _service_title(task) if job else _title(task),
+           "question": task.query, "task_type": task.task_type, "skill": task.skill, "today": task.today,
+           "context_summary": " ".join(task.required.split())[:160],
+           "mode": "customer" if task.external else "staff",
+           "has_expected": task.answer != [None] and task.reward_metric == "exact_match"}
+    if job:
+        out["job"] = job
+    return out
 
 
 @functools.lru_cache(maxsize=1)
@@ -98,6 +130,32 @@ def _examples() -> tuple[dict, ...]:
         picked.append(min((t for t in dev if t.task_type == task_type), key=lambda t: t.idx))
     picked.sort(key=lambda t: (t.skill, t.task_type))
     return tuple(_example(t) for t in picked)
+
+
+# Curated b2b dev tasks known to be solvable with the service actions (crm/service.py oracles and an
+# answer-in-article check): many knowledge_qa answers are absent from this org's articles.
+SERVICE_SHOWCASE = {"case_routing": (1483, 1489, 1497),
+                    "policy_violation_identification": (1412, 1459, 1384),  # two violations, one None
+                    "knowledge_qa": (773, 765, 699)}
+
+
+@functools.lru_cache(maxsize=1)
+def _service_examples() -> tuple[dict, ...]:
+    """SERVICE_SHOWCASE dev tasks of each service job, grouped by job, in the listed order."""
+    by_idx = {t.idx: t for t in tasks.load("b2b") if t.split == "dev"}
+    out = []
+    for task_type, label in SERVICE_JOBS:
+        out.extend(_example(by_idx[i], label) for i in SERVICE_SHOWCASE[task_type])
+    return tuple(out)
+
+
+def _examples_for(agent: str) -> tuple[dict, ...]:
+    return _service_examples() if agent == "service" else _examples()
+
+
+def _protocol(agent: str) -> str:
+    """service_v1 for the service agent; the general agent keeps the CRM_PROTOCOL env override."""
+    return SERVICE_PROTOCOL if agent == "service" else PROTOCOL
 
 
 def _models_payload() -> dict:
@@ -114,9 +172,14 @@ async def _finish_switch(model_id: str) -> None:
         _STATE["switching"] = False
 
 
+@router.get("/agents")
+async def agents():
+    return [{**a, "protocol": _protocol(a["id"])} for a in AGENTS]
+
+
 @router.get("/examples")
-async def examples():
-    return list(_examples())
+async def examples(agent: Literal["service", "general"] = "service"):
+    return list(_examples_for(agent))
 
 
 @router.get("/models")
@@ -142,11 +205,12 @@ async def set_model(body: ModelBody):
     return _models_payload()
 
 
-def _run_start(event: dict, question: str, mode: str, example: dict | None) -> dict:
+def _run_start(event: dict, question: str, mode: str, example: dict | None, agent: str) -> dict:
     """Copy the scripted run_start and point it at this request."""
     event = copy.deepcopy(event)
     event["run_id"] = f"demo-{uuid.uuid4().hex[:8]}"
     event["question"], event["mode"], event["model"] = question, mode, _STATE["current"]
+    event["agent"] = agent
     if example is None:
         event["example"] = None
         event["context"]["today"] = DEMO_TODAY
@@ -216,13 +280,14 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
         yield {"data": json.dumps({"type": "error", "message": f"no model is being served at {VLLM_URL}"})}
         yield {"data": json.dumps({"type": "done"})}
         return
-    arm = agent.ARMS["xlam"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-off"]
+    arm = agent.ARMS["xlam-t0"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-off"]
     arm = dataclasses.replace(arm, model=model)
+    protocol = _protocol(body.agent)
     start = {"type": "run_start", "run_id": f"live-{uuid.uuid4().hex[:8]}", "question": question,
-             "model": model, "mode": body.mode, "context": _context(task),
+             "model": model, "mode": body.mode, "agent": body.agent, "context": _context(task),
              "example": {k: example[k] for k in ("id", "task_type", "skill")} if example else None}
     log = {"saved_at": None, "run_id": start["run_id"], "question": question, "model": model, "arm": arm.name,
-           "protocol": PROTOCOL, "mode": body.mode, "thinking": body.thinking, "example": start["example"],
+           "protocol": protocol, "agent": body.agent, "mode": body.mode, "thinking": body.thinking, "example": start["example"],
            "outcome": "running", "events": [start], "record": None}
     yield {"data": json.dumps(start)}
     queue: asyncio.Queue = asyncio.Queue()
@@ -232,7 +297,7 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
             runner = asyncio.create_task(agent.run_task(
                 task, arm, CRMEnv("b2b"), base_url=VLLM_URL, run_id=start["run_id"],
                 run_seed=uuid.uuid4().int % 10_000, window=32768, calls_out=lambda rec: None, http_client=client,
-                protocol=PROTOCOL, on_event=queue.put_nowait))
+                protocol=protocol, on_event=queue.put_nowait))
             while not (runner.done() and queue.empty()):
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=0.5)
@@ -283,7 +348,7 @@ async def ask(body: AskBody, request: Request):
         raise HTTPException(status_code=422, detail="question or example_id is required")
     example = None
     if body.example_id:
-        example = next((e for e in _examples() if e["id"] == body.example_id), None)
+        example = next((e for e in _examples_for(body.agent) if e["id"] == body.example_id), None)
         if example is None:
             raise HTTPException(status_code=422, detail="unknown example_id")
         question = question or example["question"]
@@ -299,7 +364,7 @@ async def ask(body: AskBody, request: Request):
             if await request.is_disconnected():
                 return
             if event["type"] == "run_start":
-                event = _run_start(event, question, body.mode, example)
+                event = _run_start(event, question, body.mode, example, body.agent)
             yield {"data": json.dumps(event)}
 
     return EventSourceResponse(gen(), ping=None)
@@ -332,7 +397,7 @@ def _selftest() -> int:
         config.GATEWAY_URL = "http://127.0.0.1:1"
         try:
             with TestClient(app) as client:
-                items = client.get("/api/crm/examples").json()
+                items = client.get("/api/crm/examples", params={"agent": "general"}).json()
                 keys = {"id", "title", "question", "task_type", "skill", "today", "context_summary",
                         "mode", "has_expected"}
                 ids = [e["id"] for e in items]
@@ -356,6 +421,47 @@ def _selftest() -> int:
                       all("\n" not in e["context_summary"] and len(e["context_summary"]) <= 160
                           for e in items))
 
+                check("examples: bad agent is 422",
+                      client.get("/api/crm/examples", params={"agent": "boss"}).status_code == 422)
+                agents = client.get("/api/crm/agents").json()
+                check("agents: service first with service_v1, general second with actions_v1",
+                      [a["id"] for a in agents] == ["service", "general"] and
+                      [a["label"] for a in agents] == ["Service desk agent", "General CRM agent"] and
+                      [a["protocol"] for a in agents] == ["service_v1", PROTOCOL] and
+                      all(a["description"] for a in agents) and
+                      [j["label"] for j in agents[0]["jobs"]] == [j for _, j in SERVICE_JOBS] and
+                      agents[1]["jobs"] == [])
+                svc = client.get("/api/crm/examples").json()
+                svc_ids = [e["id"] for e in svc]
+                check("service examples: default agent, 9 items, full shape plus job",
+                      len(svc) == 9 and all(set(e) == keys | {"job"} for e in svc) and
+                      svc == client.get("/api/crm/examples", params={"agent": "service"}).json())
+                check("service examples: unique ids, real b2b dev tasks, the right types, same question",
+                      len(set(svc_ids)) == 9 and all(
+                          real[int(i.rsplit("_", 1)[1])].split == "dev" and
+                          real[int(i.rsplit("_", 1)[1])].task_type == e["task_type"] and
+                          i == f"{e['task_type']}_{real[int(i.rsplit('_', 1)[1])].idx}" and
+                          real[int(i.rsplit("_", 1)[1])].query == e["question"] and e["id"] == i
+                          for i, e in zip(svc_ids, svc)))
+                check("service examples: three per job in job order, job labels",
+                      [e["job"] for e in svc] == [label for _, label in SERVICE_JOBS for _ in range(3)] and
+                      [e["task_type"] for e in svc] == [t for t, _ in SERVICE_JOBS for _ in range(3)])
+                check("service examples: exactly the curated SERVICE_SHOWCASE dev tasks, all in dev",
+                      all([int(e["id"].rsplit("_", 1)[1]) for e in svc if e["task_type"] == tt]
+                          == list(SERVICE_SHOWCASE[tt]) for tt, _ in SERVICE_JOBS)
+                      and all(real[int(e["id"].rsplit("_", 1)[1])].split == "dev" for e in svc))
+                titles = [e["title"] for e in svc]
+                check("service examples: titles are distinct plain English per example",
+                      len(set(titles)) == 9 and all(t.startswith("Route: ") for t in titles[:3]) and
+                      all(re.fullmatch(r"Check case \w{6}", t) for t in titles[3:6]) and
+                      all(len(t) <= 64 for t in titles[6:]) and
+                      "Case Subject: " + titles[0][len("Route: "):] in svc[0]["question"])
+                check("examples are per agent: an id of the other agent's list is 422",
+                      not {"handle_time_881"} & set(svc_ids) and
+                      client.post("/api/crm/ask", json={"example_id": "handle_time_881"}).status_code == 422 and
+                      client.post("/api/crm/ask", json={"example_id": svc_ids[3],
+                                                        "agent": "general"}).status_code == 422)
+
                 m = client.get("/api/crm/models").json()
                 check("models: defaults to Qwen, not switching, two options",
                       m["current"] == "Qwen/Qwen3-8B" and m["switching"] is False and
@@ -376,7 +482,8 @@ def _selftest() -> int:
                 check("model: switch completes with current = xLAM", m["switching"] is False and
                       m["current"] == xlam)
 
-                r = client.post("/api/crm/ask", json={"example_id": "handle_time_881", "mode": "customer"})
+                r = client.post("/api/crm/ask", json={"example_id": "handle_time_881", "mode": "customer",
+                                                                  "agent": "general"})
                 evs = sse(r)
                 start = evs[0]
                 check("ask example: 200, event-stream, all types in EVENT_TYPES, run_start..done",
@@ -394,6 +501,16 @@ def _selftest() -> int:
                       r.status_code == 200 and evs[0]["example"] is None and
                       evs[0]["context"]["today"] == DEMO_TODAY and evs[-1]["type"] == "done" and
                       evs[0]["question"] == "How many open cases do I have?" and evs[0]["mode"] == "staff")
+                r = client.post("/api/crm/ask", json={"example_id": svc_ids[0], "agent": "service"})
+                evs = sse(r)
+                check("ask service example (scripted): valid run, run_start.agent is service",
+                      r.status_code == 200 and all(e["type"] in events.EVENT_TYPES for e in evs) and
+                      evs[0]["type"] == "run_start" and evs[-1]["type"] == "done" and
+                      evs[0]["agent"] == "service" and evs[0]["example"]["id"] == svc_ids[0] and
+                      evs[0]["question"] == svc[0]["question"])
+                check("ask: run_start.agent is general for the general agent, service by default",
+                      evs[0]["agent"] == "service" and
+                      sse(client.post("/api/crm/ask", json={"question": "x", "agent": "general"}))[0]["agent"] == "general")
                 check("ask: scripted events were not mutated for later runs",
                       events.scripted_run("handle_time_881")[0][1]["model"] == "Qwen/Qwen3-8B")
 
@@ -402,6 +519,8 @@ def _selftest() -> int:
                       client.post("/api/crm/ask", json={"question": "  "}).status_code == 422)
                 check("ask unknown example_id: 422",
                       client.post("/api/crm/ask", json={"example_id": "nope_1"}).status_code == 422)
+                check("ask bad agent: 422",
+                      client.post("/api/crm/ask", json={"question": "x", "agent": "boss"}).status_code == 422)
                 check("ask bad mode: 422",
                       client.post("/api/crm/ask", json={"question": "x", "mode": "boss"}).status_code == 422)
                 os.environ["CRM_AGENT_LIVE"] = "1"

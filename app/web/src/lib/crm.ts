@@ -3,12 +3,36 @@
 import { request } from "./api";
 
 export type CrmMode = "staff" | "customer";
+export type CrmAgent = "service" | "general";
+export type AgentInfo = {
+  id: CrmAgent; label: string; description: string; protocol: string;
+  jobs: { task_type: string; label: string }[];
+};
+export const DEFAULT_AGENT: CrmAgent = "service";
+export const AGENT_LABELS: Record<CrmAgent, string> = { service: "Service desk agent", general: "General CRM agent" };
+/** Used when /api/crm/agents cannot be loaded, so the picker still works. */
+export const FALLBACK_AGENTS: AgentInfo[] = (Object.keys(AGENT_LABELS) as CrmAgent[]).map((id) => ({
+  id, label: AGENT_LABELS[id], description: "", protocol: "", jobs: [],
+}));
+const AGENT_KEY = "crm-agent";
+
+/** The remembered agent choice; falls back to the service desk agent when storage is empty or blocked. */
+export function loadAgent(): CrmAgent {
+  try {
+    const value = window.localStorage.getItem(AGENT_KEY);
+    return value === "service" || value === "general" ? value : DEFAULT_AGENT;
+  } catch { return DEFAULT_AGENT; }
+}
+
+export function saveAgent(agent: CrmAgent): void {
+  try { window.localStorage.setItem(AGENT_KEY, agent); } catch { /* storage unavailable */ }
+}
 
 export type RunContext = { today: string | null; focus_ids: string[]; policy_title: string | null };
 export type RunExample = { id: string; task_type: string; skill: string };
 
 export type RunStartEvent = {
-  type: "run_start"; run_id: string; question: string; model: string; mode: CrmMode;
+  type: "run_start"; run_id: string; question: string; model: string; mode: CrmMode; agent?: CrmAgent;
   context: RunContext; example: RunExample | null;
 };
 export type StepStartEvent = { type: "step_start"; step: number };
@@ -37,15 +61,17 @@ export const CRM_EVENT_TYPES = ["run_start", "step_start", "thinking", "action",
 
 export type CrmExample = {
   id: string; title: string; question: string; task_type: string; skill: string; today: string | null;
-  context_summary: string; mode: CrmMode; has_expected: boolean;
+  context_summary: string; mode: CrmMode; has_expected: boolean; job?: string;
 };
 export type CrmModelOption = { id: string; label: string; note: string };
 export type CrmModels = { current: string; switching: boolean; options: CrmModelOption[] };
 export type AskRequest = {
-  question: string | null; example_id: string | null; mode: CrmMode; thinking: boolean;
+  question: string | null; example_id: string | null; mode: CrmMode; thinking: boolean; agent: CrmAgent;
 };
 
-export const getCrmExamples = () => request<CrmExample[]>("/api/crm/examples");
+export const getCrmAgents = () => request<AgentInfo[]>("/api/crm/agents");
+export const getCrmExamples = (agent: CrmAgent) =>
+  request<CrmExample[]>(`/api/crm/examples?agent=${encodeURIComponent(agent)}`);
 export const getCrmModels = () => request<CrmModels>("/api/crm/models");
 export const setCrmModel = (id: string) => request<CrmModels>("/api/crm/model", {
   method: "POST", body: JSON.stringify({ id }),

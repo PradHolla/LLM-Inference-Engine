@@ -347,6 +347,9 @@ button { color: inherit; }
 .crm-segments button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
 .crm-segments button[aria-checked="true"] { color: var(--button-text); background: var(--accent-strong); }
 .crm-segments button:disabled { cursor: default; opacity: .6; }
+.crm-agent-picker { align-self: flex-start; flex-wrap: nowrap; }
+.crm-chip.agent { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); font-weight: 550; }
+.crm-chip.agent svg { color: var(--accent-strong); }
 
 .crm-page { width: min(100%, 940px); min-height: 100%; margin: 0 auto; padding: 28px 38px 22px; }
 .crm-page.empty { display: flex; flex-direction: column; justify-content: center; padding-bottom: 40px; }
@@ -458,6 +461,7 @@ button { color: inherit; }
   .crm-header { padding: 8px 13px; gap: 8px 12px; }
   .crm-title p { display: none; }
   .crm-controls { width: 100%; justify-content: space-between; }
+  .crm-agent-picker { flex-wrap: wrap; }
   .model-picker { justify-items: start; }
   .model-note { text-align: left; }
   .crm-page { padding: 20px 15px 14px; }

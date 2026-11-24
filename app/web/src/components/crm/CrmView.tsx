@@ -1,25 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { Briefcase, ChevronDown, Menu, Send, Square, Trash2 } from "lucide-react";
-import { askCrm, getCrmExamples, type AskRequest, type CrmEvent, type CrmExample, type CrmMode } from "../../lib/crm";
+import { FALLBACK_AGENTS, askCrm, getCrmAgents, getCrmExamples, loadAgent, saveAgent, type AgentInfo, type AskRequest,
+  type CrmAgent, type CrmEvent, type CrmExample, type CrmMode } from "../../lib/crm";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
+import { AgentPicker } from "./AgentPicker";
 import { ExampleCards } from "./ExampleCards";
 import { ModelPicker } from "./ModelPicker";
 import { RunTimeline } from "./RunTimeline";
 
 type RunStatus = "running" | "done" | "stopped" | "failed";
-type RunRecord = { id: string; question: string; mode: CrmMode; events: CrmEvent[]; status: RunStatus };
+type RunRecord = { id: string; question: string; mode: CrmMode; agent: CrmAgent; events: CrmEvent[]; status: RunStatus };
 
 const MODE_HINTS: Record<CrmMode, string> = {
   staff: "Answer as a support agent with access to all records",
   customer: "Answer as a customer asking about their own records",
 };
 
+const WELCOME: Record<CrmAgent, { title: string; sub: string }> = {
+  service: {
+    title: "Your service desk agent",
+    sub: "It routes new cases, checks cases against company policy and answers from the knowledge base, one visible step at a time.",
+  },
+  general: {
+    title: "Ask the agent about your CRM",
+    sub: "Watch it plan, look up records and answer, one step at a time.",
+  },
+};
+
 /** The CRM agent page: header controls, example questions, the run history and the question box. */
 export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: () => void }) {
   const [examples, setExamples] = useState<CrmExample[] | null>(null);
   const [examplesError, setExamplesError] = useState(false);
+  const [agents, setAgents] = useState<AgentInfo[] | null>(null);
+  const [agent, setAgent] = useState<CrmAgent>(loadAgent);
   const [mode, setMode] = useState<CrmMode>("staff");
   const [thinking, setThinking] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -35,10 +50,25 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
 
   useEffect(() => {
     let live = true;
-    getCrmExamples().then((list) => { if (live) setExamples(list); })
-      .catch(() => { if (live) setExamplesError(true); });
+    getCrmAgents().then((list) => { if (live) setAgents(list); })
+      .catch(() => { if (live) setAgents(FALLBACK_AGENTS); });
     return () => { live = false; };
   }, []);
+
+  useEffect(() => {
+    let live = true;
+    setExamples(null);
+    setExamplesError(false);
+    getCrmExamples(agent).then((list) => { if (live) setExamples(list); })
+      .catch(() => { if (live) setExamplesError(true); });
+    return () => { live = false; };
+  }, [agent]);
+
+  const chooseAgent = (next: CrmAgent) => {
+    if (active) return;
+    setAgent(next);
+    saveAgent(next);
+  };
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -63,7 +93,7 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
     const controller = new AbortController();
     abortRef.current = controller;
     pinnedRef.current = true;
-    setRuns((list) => [...list, { id, question: label, mode: body.mode, events: [], status: "running" }]);
+    setRuns((list) => [...list, { id, question: label, mode: body.mode, agent: body.agent, events: [], status: "running" }]);
     let failed = false;
     try {
       for await (const event of askCrm(body, controller.signal)) {
@@ -87,13 +117,13 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
     const text = question.trim();
     if (!text || blocked) return;
     setQuestion("");
-    void startRun({ question: text, example_id: null, mode, thinking }, text);
+    void startRun({ question: text, example_id: null, mode, thinking, agent }, text);
   };
 
   const runExample = (example: CrmExample) => {
     if (blocked) return;
     setMode(example.mode);
-    void startRun({ question: null, example_id: example.id, mode: example.mode, thinking }, example.question);
+    void startRun({ question: null, example_id: example.id, mode: example.mode, thinking, agent }, example.question);
   };
 
   const stop = () => abortRef.current?.abort();
@@ -114,6 +144,7 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
           <div><h1>CRM agent</h1><p>Answers questions from Salesforce service and sales data</p></div>
         </div>
         <div className="crm-controls">
+          {agents && <AgentPicker agents={agents} value={agent} disabled={active} onChange={chooseAgent} />}
           <ModelPicker onBusyChange={handleBusy} />
           <div className="crm-segments" role="radiogroup" aria-label="Mode">
             {(["staff", "customer"] as CrmMode[]).map((value) => <button key={value} type="button" role="radio"
@@ -135,14 +166,15 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
           {empty && <motion.section className="crm-welcome" initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24 }}>
             <p className="welcome-kicker">Tool-using agent</p>
-            <h2>Ask the agent about your CRM</h2>
-            <p className="crm-welcome-sub">Watch it plan, look up records and answer, one step at a time.</p>
+            <h2>{WELCOME[agent].title}</h2>
+            <p className="crm-welcome-sub">{WELCOME[agent].sub}</p>
             {pickers}
             {!pickers && <p className="crm-muted">{examplesError ? "Example questions could not be loaded. You can still type a question below."
               : examples ? "No example questions yet. Type a question below." : "Loading examples"}</p>}
           </motion.section>}
           {runs.map((run) => <RunTimeline key={run.id} events={run.events} running={run.status === "running"}
-            stopped={run.status === "stopped"} question={run.question} mode={run.mode} />)}
+            stopped={run.status === "stopped"} question={run.question} mode={run.mode}
+            agent={run.agent} />)}
           {!empty && pickers && <Collapsible className="crm-more">
             <CollapsibleTrigger className="crm-more-trigger">Try another example
               <ChevronDown size={14} className="reasoning-chevron" /></CollapsibleTrigger>

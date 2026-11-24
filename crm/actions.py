@@ -254,7 +254,7 @@ def _where_sql(conds: list[str]) -> str:
 def _parse_rows(text: str) -> list[dict]:
     """Rows back from search()'s rendered text (drops the OR-fallback note and the truncation footer)."""
     lines = text.split("\n")
-    if lines and lines[0].startswith("(no record matched all words"):
+    if lines and lines[0].startswith("("):  # a leading note from search(): OR fallback or top-up
         lines = lines[1:]
     if lines and lines[-1].startswith("[showing "):
         lines = lines[:-1]

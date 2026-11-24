@@ -166,7 +166,30 @@ class TaskSession:
         if obs.ok and obs.rows_total == 0 and len(quoted) > 1:
             obs = self._run(stmt, (" OR ".join(quoted), *params, limit), internal=True, cap=limit,
                             prefix="(no record matched all words; showing records matching any word)\n")
+        elif obs.ok and len(quoted) > 1 and (obs.rows_total or 0) < limit:
+            obs = self._topped_up(stmt, quoted, params, limit, obs)
         return obs
+
+    def _topped_up(self, stmt: str, quoted: list[str], params: list, limit: int, first: Observation) -> Observation:
+        """All-word matches first, then any-word matches to fill the limit (a lone AND hit can be the wrong one)."""
+        t0 = time.monotonic()
+        rows, seen = [], set()
+        self._deadline, self._timed_out, self._denied, self._internal = t0 + self.timeout_s, False, None, True
+        try:  # same internal access and timeout as _run; on any error keep the all-words result
+            for q in (" ".join(quoted), " OR ".join(quoted)):
+                for r in self.conn.execute(stmt, (q, *params, limit)).fetchall():
+                    if (r[0], r[1], r[2]) not in seen and len(rows) < limit:
+                        seen.add((r[0], r[1], r[2]))
+                        rows.append(r)
+        except sqlite3.Error:
+            return first
+        finally:
+            self._deadline, self._internal = None, False
+        n_all = first.rows_total or 0
+        text, shown, trunc = render_rows(["object", "Id", "field", "snippet"], rows, len(rows), self.char_cap)
+        note = f"(first {n_all} matched all words; the rest match some words)\n" if len(rows) > n_all else ""
+        return Observation(True, note + text, len(rows), shown, trunc, first.elapsed_ms + (time.monotonic() - t0) * 1000,
+                           None)
 
     def close(self) -> None:
         self.conn.close()
