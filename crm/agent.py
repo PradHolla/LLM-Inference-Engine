@@ -26,10 +26,11 @@ import httpx
 
 from crm import grade
 from crm.env import CRMEnv, schema_objects
-from crm.prompts import RULE_STRING, observation_message, v0_messages
+from crm.prompts import RULE_STRING, TOOLS, TOOLS_NUDGE, observation_message, v0_messages, v1_messages
 from crm.tasks import Task, load
 
 PROTOCOL = "react_text_v0"
+TOOLS_PROTOCOL = "tools_v1"
 ACTION_RES = [(name, re.compile(rf"<{name}>(.*?)</{name}>", re.DOTALL)) for name in ("execute", "search", "respond")]
 CTX_TOKENS_RE = re.compile(r"your prompt contains (at least )?(\d+) input tokens")
 CTX_MARGIN, CTX_MIN_OUT = 16, 256
@@ -68,6 +69,7 @@ class CallResult:
     cached_tokens: int | None
     completion_tokens: int | None
     finish_reason: str | None
+    tool_calls: list = dataclasses.field(default_factory=list)
 
 
 class _HTTPStatusError(Exception):
@@ -84,10 +86,13 @@ def task_seed(run_seed: int, org: str, idx: int) -> int:
     return int.from_bytes(hashlib.sha256(f"{run_seed}:{org}:{idx}".encode()).digest()[:4], "big")
 
 
-def request_body(arm: Arm, messages: list[dict], seed: int, max_tokens: int) -> dict:
-    """Chat completions body; optional sampling and thinking fields only when the arm sets them."""
+def request_body(arm: Arm, messages: list[dict], seed: int, max_tokens: int, tools: list | None = None) -> dict:
+    """Chat completions body; with tools it is non-streamed and carries tool_choice auto."""
     body = {"model": arm.model, "messages": messages, "stream": True, "stream_options": {"include_usage": True},
             "temperature": arm.temperature, "top_p": arm.top_p, "max_tokens": max_tokens, "seed": seed}
+    if tools:
+        body.update(stream=False, tools=tools, tool_choice="auto")
+        del body["stream_options"]
     if arm.top_k is not None:
         body["top_k"] = arm.top_k
     if arm.min_p is not None:
@@ -169,15 +174,32 @@ async def _stream_once(client: httpx.AsyncClient, base_url: str, body: dict) -> 
                       finish)
 
 
+async def _complete_once(client: httpx.AsyncClient, base_url: str, body: dict) -> CallResult:
+    """One non-streamed request (the tool protocol); ttft is not observable and stays None."""
+    t0 = time.perf_counter()
+    r = await client.post(f"{base_url}/v1/chat/completions", json=body, timeout=CALL_TIMEOUT_S)
+    if r.status_code != 200:
+        raise _HTTPStatusError(r.status_code, r.text)
+    js = r.json()
+    choice = (js.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    usage = js.get("usage") or {}
+    details = usage.get("prompt_tokens_details") or {}
+    return CallResult(msg.get("content") or "", msg.get("reasoning") or "", None, (time.perf_counter() - t0) * 1000,
+                      usage.get("prompt_tokens"), details.get("cached_tokens"), usage.get("completion_tokens"),
+                      choice.get("finish_reason"), msg.get("tool_calls") or [])
+
+
 async def model_call(client: httpx.AsyncClient, base_url: str, arm: Arm, messages: list[dict], seed: int,
-                     window: int) -> tuple[CallResult | None, int, bool, str | None, str | None]:
+                     window: int, tools: list | None = None) -> tuple[CallResult | None, int, bool, str | None, str | None]:
     """One logical model call with the context-shrink retry and error retries.
 
     Returns (result, max_tokens sent last, reduced, end_reason or None, error message or None)."""
     max_tokens, reduced, errors = arm.max_tokens, False, 0
     while True:
         try:
-            res = await _stream_once(client, base_url, request_body(arm, messages, seed, max_tokens))
+            body = request_body(arm, messages, seed, max_tokens, tools)
+            res = await (_complete_once if tools else _stream_once)(client, base_url, body)
             return res, max_tokens, reduced, None, None
         except _HTTPStatusError as e:
             msg = _error_message(e.text)
@@ -235,8 +257,65 @@ def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> gr
     return dataclasses.asdict(grade.score(task.task_type, task.reward_metric, answer, list(task.answer), ctx))
 
 
+async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict]) -> dict:
+    """Execute every tool call in one model reply; append the assistant turn and the tool replies."""
+    out = {"action": "none", "text": "", "answer": None, "detail": None, "format_errors": 0, "sql_errors": 0,
+           "searches": 0, "truncations": 0, "obs": {}}
+    asst = {"role": "assistant", "content": res.content or None}
+    if res.reasoning:
+        asst["reasoning"] = res.reasoning  # vLLM passes it to the template as reasoning_content
+    if res.tool_calls:
+        asst["tool_calls"] = res.tool_calls
+    messages.append(asst)
+    trajectory.append({"role": "assistant", "content": res.content, "reasoning": res.reasoning,
+                       "tool_calls": res.tool_calls})
+    if not res.tool_calls:
+        if res.content.strip():  # a plain-text reply is taken as the final answer
+            out.update(action="respond", text=res.content.strip(), answer=res.content.strip(), detail="plain_text")
+        else:
+            out.update(format_errors=1)
+            nudge = {"role": "user", "content": TOOLS_NUDGE}
+            messages.append(nudge)
+            trajectory.append(dict(nudge))
+        return out
+    names, texts = [], []
+    for tc in res.tool_calls:
+        fn = tc.get("function") or {}
+        name = fn.get("name")
+        names.append(name or "?")
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            args = None
+        texts.append(json.dumps(args) if args is not None else str(fn.get("arguments")))
+        if name == "respond" and isinstance(args, dict) and "answer" in args:
+            out.update(answer=str(args["answer"]).strip())
+            reply = "Answer submitted."
+        elif name in ("run_sql", "search") and isinstance(args, dict) and isinstance(args.get("query"), str):
+            if name == "run_sql":
+                obs = await asyncio.to_thread(session.sql, args["query"])
+                out["sql_errors"] += not obs.ok
+            else:
+                obs = await asyncio.to_thread(session.search, args["query"], args.get("objects"))
+                out["searches"] += 1
+            out["truncations"] += obs.truncated
+            out["obs"] = {"obs_ok": obs.ok, "obs_rows_total": obs.rows_total, "obs_rows_shown": obs.rows_shown,
+                          "obs_truncated": obs.truncated, "obs_chars": len(obs.text),
+                          "obs_elapsed_ms": obs.elapsed_ms}
+            reply = obs.text
+        else:
+            out["format_errors"] += 1
+            reply = f"Error: unknown tool or bad arguments for {name!r}. Tools: run_sql(query), search(query), respond(answer)."
+        tool_msg = {"role": "tool", "tool_call_id": tc.get("id") or f"call_{len(messages)}", "content": reply}
+        messages.append(tool_msg)
+        trajectory.append(dict(tool_msg))
+    out.update(action="+".join(names), text=" | ".join(texts))
+    return out
+
+
 async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: str, run_seed: int, window: int,
-                   calls_out, http_client: httpx.AsyncClient, max_turns: int = 20) -> dict:
+                   calls_out, http_client: httpx.AsyncClient, max_turns: int = 20,
+                   protocol: str = PROTOCOL) -> dict:
     """Run one task to an end_reason; writes a call record per model call to calls_out, returns the task record.
 
     calls_out is an open text file (flushed and fsync'd per record) or a callable taking the record dict."""
@@ -245,7 +324,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     started_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
     t0 = time.perf_counter()
     seed = task_seed(run_seed, task.org, task.idx)
-    messages = v0_messages(task, _schema(task.org))
+    tools = TOOLS if protocol == TOOLS_PROTOCOL else None
+    messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
     end_reason = end_detail = answer = None
     n_calls = n_format = n_sql_err = n_search = n_trunc = 0
@@ -253,7 +333,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     session = await asyncio.to_thread(env.open_task)
     try:
         for step in range(max_turns):
-            res, mt, reduced, end, err = await model_call(http_client, base_url, arm, messages, seed, window)
+            res, mt, reduced, end, err = await model_call(http_client, base_url, arm, messages, seed, window, tools)
             n_calls += 1
             rec = {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "arm": arm.name,
                    "task_started_at": started_at, "step": step, "max_tokens": mt, "max_tokens_reduced": reduced, "prompt_tokens": None,
@@ -268,6 +348,22 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             prompt_toks.append(res.prompt_tokens)
             cached_toks.append(res.cached_tokens)
             completion_toks.append(res.completion_tokens)
+            if protocol == TOOLS_PROTOCOL:
+                step_out = await _tool_step(res, session, messages, trajectory)
+                rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
+                           completion_tokens=res.completion_tokens, latency_ms=res.latency_ms,
+                           finish_reason=res.finish_reason, action=step_out["action"],
+                           action_text=step_out["text"][:ACTION_TEXT_CAP], content_chars=len(res.content),
+                           reasoning_chars=len(res.reasoning), **step_out["obs"])
+                n_format += step_out["format_errors"]
+                n_sql_err += step_out["sql_errors"]
+                n_search += step_out["searches"]
+                n_trunc += step_out["truncations"]
+                emit(calls_out, rec)
+                if step_out["answer"] is not None:
+                    end_reason, answer, end_detail = "respond", step_out["answer"], step_out["detail"]
+                    break
+                continue
             action, text = parse_action(res.content)
             rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
                        completion_tokens=res.completion_tokens, ttft_ms=res.ttft_ms, latency_ms=res.latency_ms,
@@ -302,7 +398,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     g = _grade(task, end_reason, answer, env.db_path)
     return {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "skill": task.skill,
             "external": task.external, "split": task.split, "arm": arm.name, "served_model": arm.model,
-            "protocol": PROTOCOL, "seed": seed, "answer": answer, "extracted": g["extracted"], "gt": task.answer,
+            "protocol": protocol, "seed": seed, "answer": answer, "extracted": g["extracted"], "gt": task.answer,
             "reward": g["reward"], "grade_method": g["method"], "grade_note": g["note"], "end_reason": end_reason,
             "end_detail": end_detail, "n_calls": n_calls, "n_format_errors": n_format, "n_sql_errors": n_sql_err,
             "n_searches": n_search, "n_truncations": n_trunc, "prompt_tokens_total": _sum(prompt_toks),
@@ -340,7 +436,7 @@ def _open_append(path: str | Path):
 async def run_many(tasks: list[Task], arm: Arm, *, base_url: str, org: str, out_tasks_path: str | Path,
                    out_calls_path: str | Path, run_id: str, run_seed: int = 0, concurrency: int = 8,
                    window: int = 32768, resume: bool = True, max_turns: int = 20, model: str | None = None,
-                   http_client: httpx.AsyncClient | None = None) -> list[dict]:
+                   http_client: httpx.AsyncClient | None = None, protocol: str = PROTOCOL) -> list[dict]:
     """Bounded worker pool over tasks; appends task and call records; returns this run's new task records.
 
     model overrides the served model name; http_client is for tests (default: one shared AsyncClient)."""
@@ -369,7 +465,8 @@ async def run_many(tasks: list[Task], arm: Arm, *, base_url: str, org: str, out_
     async def worker(t: Task) -> None:
         async with sem:
             rec = await run_task(t, arm, env, base_url=base_url, run_id=run_id, run_seed=run_seed, window=window,
-                                 calls_out=calls_fh, http_client=client, max_turns=max_turns)
+                                 calls_out=calls_fh, http_client=client, max_turns=max_turns,
+                                 protocol=protocol)
         emit(tasks_fh, rec)
         out.append(rec)
         ends[rec["end_reason"]] += 1

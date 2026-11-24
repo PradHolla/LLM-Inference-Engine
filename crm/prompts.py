@@ -124,3 +124,57 @@ def v0_messages(task, schema_objects: list[dict], aided: bool = True) -> list[di
 
 def observation_message(text: str) -> dict:
     return {"role": "user", "content": f"{SYSTEM} output: {text}"}
+
+
+# ---- tools_v1: native tool calls, written for a working app rather than the paper's protocol ----
+
+def _tool(name: str, description: str, props: dict, required: list[str]) -> dict:
+    return {"type": "function", "function": {
+        "name": name, "description": description, "strict": True,
+        "parameters": {"type": "object", "properties": props, "required": required, "additionalProperties": False}}}
+
+
+TOOLS = [
+    _tool("run_sql", "Run one read-only SQLite query on the CRM database and get the rows back.",
+          {"query": {"type": "string", "description": "One SQLite SELECT statement."}}, ["query"]),
+    _tool("search", "Keyword search over names and long text fields (knowledge articles, emails, call and chat "
+          "transcripts, case descriptions). Returns matching record Ids with snippets.",
+          {"query": {"type": "string", "description": "Keywords to search for."}}, ["query"]),
+    _tool("respond", "Give the final answer to the user. Call this once, when you are confident.",
+          {"answer": {"type": "string", "description": "ONLY the answer: an Id, a name, a month, a state code, a "
+                      "comma-separated list, or None if nothing matches. No explanation."}}, ["answer"]),
+]
+
+TOOLS_NUDGE = "Use one of the tools: run_sql, search, or respond with the final answer."
+
+_TOOLS_SYSTEM = """\
+You are an expert Salesforce analyst with access to a {system}. You are helping {role}.
+
+# How to work
+- Use the tools to look things up. Do not guess values you can query.
+- run_sql runs one SQLite query. Quote table names in double quotes (for example "Case", "Order").
+- Timestamps are ISO-8601 text; use julianday() or date() for date arithmetic.
+- Relative dates ("past 3 months", "last quarter", "Winter 2023") are relative to the task's "Today's date" below, never the real current date. Use the domain definitions below for quarters and seasons.
+- search finds records by keywords in names and long text (knowledge articles, emails, transcripts).
+- Follow any policy given in the task context exactly; it defines how metrics are computed.
+- When you are confident, call respond with ONLY the answer (an Id, a name, a month, a state code, a comma-separated list, or None). No sentences.
+
+# {system} description
+{system_description}
+"""
+
+
+def v1_system(task, schema_objects: list[dict], aided: bool = True) -> str:
+    """System prompt for tools_v1: same schema and task context as v0, tool instructions instead of tags."""
+    prompt = _TOOLS_SYSTEM.format(system=SYSTEM, role=_ROLE[task.external],
+                                  system_description=schema_text(schema_objects))
+    if task.required:
+        prompt += SYSTEM_METADATA.format(system_metadata=task.required)
+    if aided and task.optional:
+        prompt += "\n" + task.optional
+    return prompt.strip()
+
+
+def v1_messages(task, schema_objects: list[dict], aided: bool = True) -> list[dict]:
+    return [{"role": "system", "content": v1_system(task, schema_objects, aided)},
+            {"role": "user", "content": task.query.strip()}]

@@ -13,19 +13,28 @@ COMMON=(--quantization fp8 --max-model-len 32768 --kv-cache-dtype fp8 --enable-p
         --enable-prompt-tokens-details --enable-auto-tool-choice)
 
 tasks() {
-    local arm="$1" model="$2"
+    local arm="$1" model="$2" protocol="${3:-react_text_v0}" rid="p11-s1-$1"
+    [ "$protocol" = tools_v1 ] && rid="p11-s1b-$1-tools"
     $UV run tools/crmeval.py run --url http://localhost:8000 --arm "$arm" --model "$model" --org b2b \
-        --split dev --types "$TYPES" --limit 1 --concurrency 1 --run-id "p11-s1-$arm" \
+        --split dev --types "$TYPES" --limit 1 --concurrency 1 --run-id "$rid" --protocol "$protocol" \
         || echo "P11_TASKS_FAIL $arm"
 }
 
-case "${1:-}" in
-  qwen)
+launch_qwen() {
     VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh p11-qwen --model "$QWEN" "${COMMON[@]}" \
         --reasoning-parser qwen3 \
         --reasoning-config '{"reasoning_start_str": "<think>", "reasoning_end_str": "</think>"}' \
-        --tool-call-parser hermes \
-        || { echo "P11_LAUNCH_FAIL qwen"; exit 1; }
+        --tool-call-parser hermes
+}
+
+case "${1:-}" in
+  qwen-tools)
+    launch_qwen || { echo "P11_LAUNCH_FAIL qwen"; exit 1; }
+    tasks q-off "$QWEN" tools_v1
+    tasks q-think "$QWEN" tools_v1
+    ;;
+  qwen)
+    launch_qwen || { echo "P11_LAUNCH_FAIL qwen"; exit 1; }
     $UV run tools/p11probe.py qwen --url http://localhost:8000 --out results/p11-s1-probe-qwen.json \
         || echo "P11_PROBE_FAIL qwen"
     tasks q-off "$QWEN"
@@ -44,7 +53,7 @@ case "${1:-}" in
         || echo "P11_PROBE_FAIL xlam"
     tasks xlam "$XLAM"
     ;;
-  *) echo "usage: p11-s1.sh qwen|xlam"; exit 2 ;;
+  *) echo "usage: p11-s1.sh qwen|qwen-tools|xlam"; exit 2 ;;
 esac
 echo "P11_S1_DONE ${1}"
 exit 0

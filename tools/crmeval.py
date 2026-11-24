@@ -104,9 +104,11 @@ def cmd_run(args: argparse.Namespace, client: httpx.Client | None = None) -> int
     if args.model:
         arm = dataclasses.replace(arm, model=args.model)
     run_id = args.run_id or default_run_id(args.arm, args.org, args.split, args.limit, types)
+    if args.protocol != "react_text_v0" and not args.run_id:
+        run_id += f"-{args.protocol}"
     out_dir = Path(args.out_dir)
     tasks_path, calls_path = out_dir / f"{run_id}.tasks.jsonl", out_dir / f"{run_id}.calls.jsonl"
-    print(f"run_id {run_id}; arm {arm.name}; sampling:")
+    print(f"run_id {run_id}; arm {arm.name}; protocol {args.protocol}; sampling:")
     for k, v in dataclasses.asdict(arm).items():
         print(f"  {k} = {v}")
     per_skill = collections.Counter(t.skill for t in picked)
@@ -115,7 +117,7 @@ def cmd_run(args: argparse.Namespace, client: httpx.Client | None = None) -> int
     asyncio.run(run_many(picked, arm, base_url=args.url, org=args.org, out_tasks_path=tasks_path,
                          out_calls_path=calls_path, run_id=run_id, run_seed=args.run_seed,
                          concurrency=args.concurrency, window=args.window, max_turns=args.max_turns,
-                         model=args.model))
+                         model=args.model, protocol=args.protocol))
     return 0
 
 
@@ -473,6 +475,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--model", help="served model name, overriding the arm's preset")
     r.add_argument("--window", type=int, default=32768)
     r.add_argument("--max-turns", type=int, default=20)
+    r.add_argument("--protocol", choices=["react_text_v0", "tools_v1"], default="tools_v1",
+                   help="tools_v1 (native tool calls, the app's agent) or react_text_v0 (the paper's text tags)")
     r.add_argument("--out-dir", default="results")
     p = sub.add_parser("report", help="results tables from task-record JSONL files")
     p.add_argument("files", nargs="+")
