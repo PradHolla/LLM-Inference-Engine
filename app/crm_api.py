@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import functools
 import json
 import os
+import re
 import sys
 import uuid
 from typing import Literal
@@ -118,6 +120,10 @@ async def examples():
 
 @router.get("/models")
 async def models():
+    if os.environ.get("CRM_AGENT_LIVE") == "1" and not _STATE["switching"]:
+        served = await _served_model()
+        if served:
+            _STATE["current"] = served
     return _models_payload()
 
 
@@ -128,7 +134,8 @@ async def set_model(body: ModelBody):
     if _STATE["switching"]:
         raise HTTPException(status_code=409, detail="model switch already in progress")
     _STATE["switching"] = True
-    task = asyncio.create_task(_finish_switch(body.id))
+    live = os.environ.get("CRM_AGENT_LIVE") == "1"
+    task = asyncio.create_task(_live_switch(body.id) if live else _finish_switch(body.id))
     _BACKGROUND.add(task)
     task.add_done_callback(_BACKGROUND.discard)
     return _models_payload()
@@ -149,6 +156,99 @@ def _run_start(event: dict, question: str, mode: str, example: dict | None) -> d
     return event
 
 
+VLLM_URL = os.environ.get("CRM_VLLM_URL", "http://localhost:8000")
+PROTOCOL = os.environ.get("CRM_PROTOCOL", "actions_v1")
+SWITCH_SCRIPT = os.environ.get("CRM_SWITCH_SCRIPT", "/opt/llm/infra/p11-app.sh")
+
+
+@functools.lru_cache(maxsize=None)
+def _task_by_id() -> dict:
+    return {f"{t.task_type}_{t.idx}": t for t in tasks.load("b2b")}
+
+
+def _free_task(question: str, mode: str) -> tasks.Task:
+    """A typed question as a Task with the demo's fixed today and the shared domain details."""
+    any_task = next(iter(_task_by_id().values()))
+    return tasks.Task(org="b2b", idx=-1, task_type="free_question", skill="free", external=mode == "customer",
+                      query=question, required=f"Today's date: {DEMO_TODAY}", optional=any_task.optional,
+                      answer=[None], reward_metric="none", today=DEMO_TODAY, split="app")
+
+
+async def _served_model() -> str | None:
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(f"{VLLM_URL}/v1/models")
+            return r.json()["data"][0]["id"]
+    except Exception:  # noqa: BLE001 -- any failure means "no model served right now"
+        return None
+
+
+def _context(task: tasks.Task) -> dict:
+    ids = sorted(set(re.findall(r"\b[0-9a-zA-Z]{3}Wt[0-9a-zA-Z]{10,13}\b", task.required)))
+    m = re.search(r"##\s*([^\n#]+)", task.required)
+    return {"today": task.today, "focus_ids": ids[:5], "policy_title": m.group(1).strip() if m else None}
+
+
+async def _live(body: AskBody, question: str, example: dict | None, request: Request):
+    """Run the real agent and stream its events (crm/events.py) as SSE data lines."""
+    import httpx
+    from crm import agent
+    from crm.env import CRMEnv
+    task = _task_by_id()[example["id"]] if example else _free_task(question, body.mode)
+    task = dataclasses.replace(task, external=body.mode == "customer")
+    model = await _served_model()
+    if model is None:
+        yield {"data": json.dumps({"type": "error", "message": f"no model is being served at {VLLM_URL}"})}
+        yield {"data": json.dumps({"type": "done"})}
+        return
+    arm = agent.ARMS["xlam"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-off"]
+    arm = dataclasses.replace(arm, model=model)
+    yield {"data": json.dumps({"type": "run_start", "run_id": f"live-{uuid.uuid4().hex[:8]}", "question": question,
+                               "model": model, "mode": body.mode, "context": _context(task),
+                               "example": {k: example[k] for k in ("id", "task_type", "skill")} if example else None})}
+    queue: asyncio.Queue = asyncio.Queue()
+    async with httpx.AsyncClient(timeout=agent.CALL_TIMEOUT_S) as client:
+        runner = asyncio.create_task(agent.run_task(
+            task, arm, CRMEnv("b2b"), base_url=VLLM_URL, run_id="app", run_seed=uuid.uuid4().int % 10_000,
+            window=32768, calls_out=lambda rec: None, http_client=client, protocol=PROTOCOL,
+            on_event=queue.put_nowait))
+        try:
+            while not (runner.done() and queue.empty()):
+                try:
+                    ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        runner.cancel()
+                        return
+                    continue
+                yield {"data": json.dumps(ev, default=str)}
+            if runner.exception() is not None:
+                yield {"data": json.dumps({"type": "error", "message": f"agent failed: {runner.exception()!r}"})}
+        finally:
+            if not runner.done():
+                runner.cancel()
+    yield {"data": json.dumps({"type": "done"})}
+
+
+async def _live_switch(model_id: str) -> None:
+    """Relaunch vLLM with the other model (1-2 min) and wait until it serves it."""
+    which = "xlam" if "xLAM" in model_id else "qwen"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "systemd-run", "--unit=p11-model-switch", "--collect", "--working-directory=/opt/llm",
+            "/bin/bash", SWITCH_SCRIPT, "launch", which,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await proc.wait()
+        for _ in range(100):  # up to ~5 minutes
+            await asyncio.sleep(3)
+            if await _served_model() == model_id:
+                _STATE["current"] = model_id
+                return
+    finally:
+        _STATE["switching"] = False
+
+
 @router.post("/ask")
 async def ask(body: AskBody, request: Request):
     question = (body.question or "").strip()
@@ -161,7 +261,9 @@ async def ask(body: AskBody, request: Request):
             raise HTTPException(status_code=422, detail="unknown example_id")
         question = question or example["question"]
     if os.environ.get("CRM_AGENT_LIVE") == "1":
-        raise HTTPException(status_code=501, detail="live agent not wired yet")
+        if _STATE["switching"]:
+            raise HTTPException(status_code=409, detail="model is switching")
+        return EventSourceResponse(_live(body, question, example, request), ping=None)
 
     async def gen():
         for delay, event in events.scripted_run(body.example_id or ""):
@@ -276,12 +378,16 @@ def _selftest() -> int:
                 check("ask bad mode: 422",
                       client.post("/api/crm/ask", json={"question": "x", "mode": "boss"}).status_code == 422)
                 os.environ["CRM_AGENT_LIVE"] = "1"
+                saved_url, globals()["VLLM_URL"] = VLLM_URL, "http://127.0.0.1:9"
                 try:
                     r = client.post("/api/crm/ask", json={"question": "x"})
+                    evs = sse(r)
                 finally:
                     del os.environ["CRM_AGENT_LIVE"]
-                check("ask live flag: 501 with detail",
-                      r.status_code == 501 and r.json()["detail"] == "live agent not wired yet")
+                    globals()["VLLM_URL"] = saved_url
+                check("ask live, no model served: error event then done",
+                      r.status_code == 200 and [e["type"] for e in evs] == ["error", "done"]
+                      and "no model is being served" in evs[0]["message"])
         finally:
             db.DB_PATH, config.GATEWAY_URL = old
     print("\n".join(f"FAILED: {f}" for f in fails) if fails else "ALL PASS")

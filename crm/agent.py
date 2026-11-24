@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import collections
 import dataclasses
@@ -245,6 +246,8 @@ def _sum(vals: list[int | None]) -> int | None:
 def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> grade.GradeResult | dict:
     """Grade per the protocol: pending_judge for privacy, no_answer for non-respond endings."""
     privacy = task.reward_metric == "privacy_rejection"
+    if task.reward_metric == "none":  # a free question typed in the app has no ground truth
+        return {"reward": None, "extracted": None, "method": "ungraded", "note": None}
     if end_reason != "respond":
         return {"reward": None if privacy else 0.0, "extracted": None, "method": "no_answer", "note": None}
     if privacy:
@@ -258,6 +261,71 @@ def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> gr
                     "note": f"no current stage for {m.group(0) if m else 'missing opportunity id'}"}
         ctx = {"current_stage": stage}
     return dataclasses.asdict(grade.score(task.task_type, task.reward_metric, answer, list(task.answer), ctx))
+
+
+def _text_tool_calls(content: str) -> list[dict]:
+    """Tool calls written as JSON text (a list or one object of {name, arguments}); [] if it is not that."""
+    s = (content or "").strip()
+    if not s or s[0] not in "[{":
+        return []
+    try:
+        obj = json.loads(s)
+    except ValueError:
+        return []
+    items = obj if isinstance(obj, list) else [obj]
+    calls = []
+    for i, it in enumerate(items):
+        if not (isinstance(it, dict) and isinstance(it.get("name"), str) and isinstance(it.get("arguments"), dict)):
+            return []
+        calls.append({"id": f"textcall_{i}", "type": "function",
+                      "function": {"name": it["name"], "arguments": json.dumps(it["arguments"])}})
+    return calls
+
+
+def _preview(text: str) -> dict:
+    """Observation fields for the UI, parsed from the rendered tool reply."""
+    ok = not text.startswith("Error:")
+    body, total = text, None
+    m = re.search(r"\[showing (\d+) of (\d+) rows", text)
+    if m:
+        total = int(m.group(2))
+    start, end = text.find("[{"), text.rfind("}]")
+    rows: list = []
+    if ok and start >= 0 and end > start:
+        try:
+            rows = ast.literal_eval(text[start:end + 2])
+        except (ValueError, SyntaxError):
+            rows = []
+    elif ok and text.strip().endswith("[]"):
+        rows = []
+    rows = [r for r in rows if isinstance(r, dict)]
+    cols = list(rows[0]) if rows else []
+    return {"ok": ok, "rows_total": total if total is not None else len(rows), "rows_shown": min(len(rows), 8),
+            "truncated": total is not None, "columns": cols, "preview": rows[:8],
+            "error": None if ok else text[:500]}
+
+
+def _emit_step(on_event, step: int, new: list[dict]) -> None:
+    """Turn one step's new trajectory entries into UI events (crm/events.py)."""
+    for m in new:
+        if m["role"] == "assistant":
+            if m.get("reasoning"):
+                on_event({"type": "thinking", "step": step, "text": m["reasoning"]})
+            calls = m.get("tool_calls") or []
+            for tc in calls:
+                fn = tc.get("function") or {}
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except ValueError:
+                    args = {"raw": fn.get("arguments")}
+                on_event({"type": "action", "step": step, "call_id": tc.get("id"), "name": fn.get("name"),
+                          "args": args})
+            if not calls and (m.get("content") or "").strip():
+                on_event({"type": "action", "step": step, "call_id": f"text_{step}", "name": "respond",
+                          "args": {"answer": m["content"].strip()}})
+        elif m["role"] == "tool":
+            on_event({"type": "observation", "step": step, "call_id": m.get("tool_call_id"),
+                      "elapsed_ms": None, **_preview(m["content"])})
 
 
 async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict],
@@ -275,6 +343,11 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
     messages.append(asst)
     trajectory.append({"role": "assistant", "content": res.content, "reasoning": res.reasoning,
                        "tool_calls": res.tool_calls})
+    if not res.tool_calls and _text_tool_calls(res.content):
+        # xLAM sometimes writes its call as JSON text the parser missed; run it rather than end the task.
+        res = dataclasses.replace(res, tool_calls=_text_tool_calls(res.content), content="")
+        asst.update(content=None, tool_calls=res.tool_calls)
+        trajectory[-1].update(content="", tool_calls=res.tool_calls, recovered_from_text=True)
     if not res.tool_calls:
         if res.content.strip():  # a plain-text reply is taken as the final answer
             out.update(action="respond", text=res.content.strip(), answer=res.content.strip(), detail="plain_text")
@@ -335,7 +408,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
 
 async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: str, run_seed: int, window: int,
                    calls_out, http_client: httpx.AsyncClient, max_turns: int = 20,
-                   protocol: str = PROTOCOL) -> dict:
+                   protocol: str = PROTOCOL, on_event=None) -> dict:
     """Run one task to an end_reason; writes a call record per model call to calls_out, returns the task record.
 
     calls_out is an open text file (flushed and fsync'd per record) or a callable taking the record dict."""
@@ -361,6 +434,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     session = await asyncio.to_thread(env.open_task)
     try:
         for step in range(max_turns):
+            if on_event:
+                on_event({"type": "step_start", "step": step})
             res, mt, reduced, end, err = await model_call(http_client, base_url, arm, messages, seed, window, tools)
             n_calls += 1
             rec = {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "arm": arm.name,
@@ -377,7 +452,10 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             cached_toks.append(res.cached_tokens)
             completion_toks.append(res.completion_tokens)
             if tools:
+                n_before = len(trajectory)
                 step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org)
+                if on_event:
+                    _emit_step(on_event, step, trajectory[n_before:])
                 rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
                            completion_tokens=res.completion_tokens, latency_ms=res.latency_ms,
                            finish_reason=res.finish_reason, action=step_out["action"],
@@ -424,6 +502,18 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         session.close()
     end_reason = end_reason or "max_turns"
     g = _grade(task, end_reason, answer, env.db_path)
+    if on_event:
+        wall = (time.perf_counter() - t0) * 1000
+        if answer is not None:
+            on_event({"type": "answer", "text": answer,
+                      "expected": None if task.reward_metric in ("none", "privacy_rejection") else list(task.answer),
+                      "correct": None if g["reward"] is None or task.reward_metric != "exact_match"
+                      else g["reward"] == 1.0})
+        else:
+            on_event({"type": "error", "message": f"no answer ({end_reason}{': ' + end_detail if end_detail else ''})"})
+        on_event({"type": "stats", "steps": n_calls, "actions": n_calls, "wall_ms": wall,
+                  "prompt_tokens": _sum(prompt_toks), "cached_tokens": _sum(cached_toks),
+                  "completion_tokens": _sum(completion_toks), "est_cost_usd": round(wall / 3_600_000 * 1.21, 5)})
     return {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "skill": task.skill,
             "external": task.external, "split": task.split, "arm": arm.name, "served_model": arm.model,
             "protocol": protocol, "seed": seed, "answer": answer, "extracted": g["extracted"], "gt": task.answer,
