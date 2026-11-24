@@ -1,0 +1,635 @@
+"""Phase 11 CRM agent loop, protocol react_text_v0 (CRMArena ChatAgent.act) against a vLLM chat endpoint.
+
+  recs = asyncio.run(run_many(tasks, ARMS["q-off"], base_url=..., org="b2b", out_tasks_path=..., ...))
+  uv run python -m crm.agent --selftest
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import collections
+import dataclasses
+import datetime
+import functools
+import hashlib
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+import httpx
+
+from crm import grade
+from crm.env import CRMEnv, schema_objects
+from crm.prompts import RULE_STRING, observation_message, v0_messages
+from crm.tasks import Task, load
+
+PROTOCOL = "react_text_v0"
+ACTION_RES = [(name, re.compile(rf"<{name}>(.*?)</{name}>", re.DOTALL)) for name in ("execute", "search", "respond")]
+CTX_TOKENS_RE = re.compile(r"your prompt contains (at least )?(\d+) input tokens")
+CTX_MARGIN, CTX_MIN_OUT = 16, 256
+BACKOFF_S = [1.0, 3.0]  # one sleep per retry; the selftest shortens it
+CALL_TIMEOUT_S = 600.0
+ACTION_TEXT_CAP = 2000
+
+
+@dataclass(frozen=True)
+class Arm:
+    name: str
+    model: str
+    temperature: float
+    top_p: float
+    top_k: int | None
+    min_p: float | None
+    max_tokens: int
+    enable_thinking: bool | None
+    thinking_token_budget: int | None = None
+
+
+ARMS = {
+    "q-off": Arm("q-off", "Qwen/Qwen3-8B", 0.7, 0.8, 20, 0.0, 2048, False),
+    "q-think": Arm("q-think", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 8192, True),
+    "xlam": Arm("xlam", "Salesforce/Llama-xLAM-2-8b-fc-r", 0.6, 0.9, None, None, 2048, None),
+}
+
+
+@dataclass
+class CallResult:
+    content: str
+    reasoning: str
+    ttft_ms: float | None
+    latency_ms: float
+    prompt_tokens: int | None
+    cached_tokens: int | None
+    completion_tokens: int | None
+    finish_reason: str | None
+
+
+class _HTTPStatusError(Exception):
+    def __init__(self, status: int, text: str):
+        super().__init__(f"HTTP {status}: {text[:500]}")
+        self.status, self.text = status, text
+
+
+class _StreamError(Exception):
+    pass
+
+
+def task_seed(run_seed: int, org: str, idx: int) -> int:
+    return int.from_bytes(hashlib.sha256(f"{run_seed}:{org}:{idx}".encode()).digest()[:4], "big")
+
+
+def request_body(arm: Arm, messages: list[dict], seed: int, max_tokens: int) -> dict:
+    """Chat completions body; optional sampling and thinking fields only when the arm sets them."""
+    body = {"model": arm.model, "messages": messages, "stream": True, "stream_options": {"include_usage": True},
+            "temperature": arm.temperature, "top_p": arm.top_p, "max_tokens": max_tokens, "seed": seed}
+    if arm.top_k is not None:
+        body["top_k"] = arm.top_k
+    if arm.min_p is not None:
+        body["min_p"] = arm.min_p
+    if arm.enable_thinking is not None:
+        body["chat_template_kwargs"] = {"enable_thinking": arm.enable_thinking}
+    if arm.thinking_token_budget is not None:
+        body["thinking_token_budget"] = arm.thinking_token_budget
+    return body
+
+
+def parse_action(content: str) -> tuple[str, str]:
+    """(action, text) from the content: first regex in priority order that matches; empty capture -> none."""
+    for name, rx in ACTION_RES:
+        m = rx.search(content)
+        if m:
+            text = m.group(1).strip()
+            return (name, text) if text else ("none", "")
+    return "none", ""
+
+
+def _error_message(text: str) -> str:
+    """vLLM's error message from a JSON error body, else the raw body (cut to 1000 chars)."""
+    try:
+        obj = json.loads(text)
+        err = obj.get("error", obj)
+        msg = err.get("message") if isinstance(err, dict) else None
+        if msg:
+            return str(msg)
+    except (ValueError, AttributeError):
+        pass
+    return text[:1000]
+
+
+async def _stream_once(client: httpx.AsyncClient, base_url: str, body: dict) -> CallResult:
+    """One streamed request; raises _HTTPStatusError, _StreamError or httpx errors."""
+    content, reasoning = [], []
+    ttft = None
+    usage: dict | None = None
+    finish = None
+    done = False
+    t0 = time.perf_counter()
+    async with client.stream("POST", f"{base_url}/v1/chat/completions", json=body,
+                             timeout=CALL_TIMEOUT_S) as r:
+        if r.status_code != 200:
+            raise _HTTPStatusError(r.status_code, (await r.aread()).decode("utf-8", "replace"))
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                done = True
+                break
+            try:
+                ev = json.loads(data)
+            except ValueError:
+                raise _StreamError(f"bad SSE payload: {data[:200]}")
+            if ev.get("error"):
+                raise _StreamError(f"error event in stream: {_error_message(data)}")
+            if ev.get("usage"):
+                usage = ev["usage"]
+            choices = ev.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            c, rz = delta.get("content") or "", delta.get("reasoning") or ""
+            if (c or rz) and ttft is None:
+                ttft = (time.perf_counter() - t0) * 1000
+            content.append(c)
+            reasoning.append(rz)
+            if choices[0].get("finish_reason"):
+                finish = choices[0]["finish_reason"]
+    if not done:
+        raise _StreamError("stream ended without [DONE]")
+    usage = usage or {}
+    details = usage.get("prompt_tokens_details") or {}
+    return CallResult("".join(content), "".join(reasoning), ttft, (time.perf_counter() - t0) * 1000,
+                      usage.get("prompt_tokens"), details.get("cached_tokens"), usage.get("completion_tokens"),
+                      finish)
+
+
+async def model_call(client: httpx.AsyncClient, base_url: str, arm: Arm, messages: list[dict], seed: int,
+                     window: int) -> tuple[CallResult | None, int, bool, str | None, str | None]:
+    """One logical model call with the context-shrink retry and error retries.
+
+    Returns (result, max_tokens sent last, reduced, end_reason or None, error message or None)."""
+    max_tokens, reduced, errors = arm.max_tokens, False, 0
+    while True:
+        try:
+            res = await _stream_once(client, base_url, request_body(arm, messages, seed, max_tokens))
+            return res, max_tokens, reduced, None, None
+        except _HTTPStatusError as e:
+            msg = _error_message(e.text)
+            if e.status == 400 and "maximum context length" in msg:
+                m = CTX_TOKENS_RE.search(msg)
+                new = window - int(m.group(2)) - CTX_MARGIN if m else None
+                if not reduced and new is not None and new >= CTX_MIN_OUT:
+                    max_tokens, reduced = new, True
+                    continue
+                return None, max_tokens, reduced, "context_overflow", msg
+            err = f"HTTP {e.status}: {msg}"
+        except (httpx.HTTPError, _StreamError) as e:
+            err = f"{type(e).__name__}: {e}"
+        if errors >= len(BACKOFF_S):
+            return None, max_tokens, reduced, "api_error", err
+        await asyncio.sleep(BACKOFF_S[errors])
+        errors += 1
+
+
+def emit(out, rec: dict) -> None:
+    """Write one JSON record: to a callable (it owns durability) or an open text file (flush + fsync)."""
+    if callable(out) and not hasattr(out, "write"):
+        out(rec)
+        return
+    out.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    out.flush()
+    os.fsync(out.fileno())
+
+
+@functools.lru_cache(maxsize=None)
+def _schema(org: str) -> list[dict]:
+    return schema_objects(org)
+
+
+def _sum(vals: list[int | None]) -> int | None:
+    vals = [v for v in vals if v is not None]
+    return sum(vals) if vals else None
+
+
+def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> grade.GradeResult | dict:
+    """Grade per the protocol: pending_judge for privacy, no_answer for non-respond endings."""
+    privacy = task.reward_metric == "privacy_rejection"
+    if end_reason != "respond":
+        return {"reward": None if privacy else 0.0, "extracted": None, "method": "no_answer", "note": None}
+    if privacy:
+        return {"reward": None, "extracted": None, "method": "pending_judge", "note": None}
+    ctx = None
+    if task.task_type == "wrong_stage_rectification" and task.answer == [None]:
+        m = grade.OPP_ID_RE.search(task.required)
+        stage = grade.current_stage_for(m.group(0), str(db_path)) if m else None
+        if stage is None:
+            return {"reward": None, "extracted": None, "method": "no_context",
+                    "note": f"no current stage for {m.group(0) if m else 'missing opportunity id'}"}
+        ctx = {"current_stage": stage}
+    return dataclasses.asdict(grade.score(task.task_type, task.reward_metric, answer, list(task.answer), ctx))
+
+
+async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: str, run_seed: int, window: int,
+                   calls_out, http_client: httpx.AsyncClient, max_turns: int = 20) -> dict:
+    """Run one task to an end_reason; writes a call record per model call to calls_out, returns the task record.
+
+    calls_out is an open text file (flushed and fsync'd per record) or a callable taking the record dict."""
+    if env.org != task.org:
+        raise ValueError(f"env org {env.org} != task org {task.org}")
+    started_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
+    t0 = time.perf_counter()
+    seed = task_seed(run_seed, task.org, task.idx)
+    messages = v0_messages(task, _schema(task.org))
+    trajectory = [dict(m) for m in messages]
+    end_reason = end_detail = answer = None
+    n_calls = n_format = n_sql_err = n_search = n_trunc = 0
+    prompt_toks, cached_toks, completion_toks = [], [], []
+    session = await asyncio.to_thread(env.open_task)
+    try:
+        for step in range(max_turns):
+            res, mt, reduced, end, err = await model_call(http_client, base_url, arm, messages, seed, window)
+            n_calls += 1
+            rec = {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "arm": arm.name,
+                   "task_started_at": started_at, "step": step, "max_tokens": mt, "max_tokens_reduced": reduced, "prompt_tokens": None,
+                   "cached_tokens": None, "completion_tokens": None, "ttft_ms": None, "latency_ms": None,
+                   "finish_reason": None, "action": "none", "action_text": None, "content_chars": None,
+                   "reasoning_chars": None, "obs_ok": None, "obs_rows_total": None, "obs_rows_shown": None,
+                   "obs_truncated": None, "obs_chars": None, "obs_elapsed_ms": None, "error": err}
+            if res is None:
+                emit(calls_out, rec)
+                end_reason, end_detail = end, err
+                break
+            prompt_toks.append(res.prompt_tokens)
+            cached_toks.append(res.cached_tokens)
+            completion_toks.append(res.completion_tokens)
+            action, text = parse_action(res.content)
+            rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
+                       completion_tokens=res.completion_tokens, ttft_ms=res.ttft_ms, latency_ms=res.latency_ms,
+                       finish_reason=res.finish_reason, action=action, action_text=text[:ACTION_TEXT_CAP],
+                       content_chars=len(res.content), reasoning_chars=len(res.reasoning))
+            messages.append({"role": "assistant", "content": res.content.strip()})
+            trajectory.append({"role": "assistant", "content": res.content.strip(), "reasoning": res.reasoning})
+            if action in ("execute", "search"):
+                if action == "execute":
+                    obs = await asyncio.to_thread(session.sql, text)
+                    n_sql_err += not obs.ok
+                else:
+                    obs = await asyncio.to_thread(session.search, text)
+                    n_search += 1
+                n_trunc += obs.truncated
+                rec.update(obs_ok=obs.ok, obs_rows_total=obs.rows_total, obs_rows_shown=obs.rows_shown,
+                           obs_truncated=obs.truncated, obs_chars=len(obs.text), obs_elapsed_ms=obs.elapsed_ms)
+                msg = observation_message(obs.text)
+            elif action == "respond":
+                emit(calls_out, rec)
+                end_reason, answer = "respond", text
+                break
+            else:
+                n_format += 1
+                msg = {"role": "user", "content": RULE_STRING}
+            messages.append(msg)
+            trajectory.append(dict(msg))
+            emit(calls_out, rec)
+    finally:
+        session.close()
+    end_reason = end_reason or "max_turns"
+    g = _grade(task, end_reason, answer, env.db_path)
+    return {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "skill": task.skill,
+            "external": task.external, "split": task.split, "arm": arm.name, "served_model": arm.model,
+            "protocol": PROTOCOL, "seed": seed, "answer": answer, "extracted": g["extracted"], "gt": task.answer,
+            "reward": g["reward"], "grade_method": g["method"], "grade_note": g["note"], "end_reason": end_reason,
+            "end_detail": end_detail, "n_calls": n_calls, "n_format_errors": n_format, "n_sql_errors": n_sql_err,
+            "n_searches": n_search, "n_truncations": n_trunc, "prompt_tokens_total": _sum(prompt_toks),
+            "cached_tokens_total": _sum(cached_toks), "completion_tokens_total": _sum(completion_toks),
+            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "trajectory": trajectory}
+
+
+def done_keys(path: str | Path) -> set[tuple[str, int, str]]:
+    """(org, idx, arm) of task records already in a JSONL file; unparsable lines are skipped."""
+    keys = set()
+    p = Path(path)
+    if not p.exists():
+        return keys
+    for line in p.read_text().splitlines():
+        try:
+            r = json.loads(line)
+            keys.add((r["org"], r["idx"], r["arm"]))
+        except (ValueError, KeyError, TypeError):
+            continue
+    return keys
+
+
+def _open_append(path: str | Path):
+    """Append-mode file; adds a newline first if a crash left a partial last line."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(p, "a+", encoding="utf-8")
+    if fh.tell() > 0:
+        fh.seek(fh.tell() - 1)
+        if fh.read(1) != "\n":
+            fh.write("\n")
+    return fh
+
+
+async def run_many(tasks: list[Task], arm: Arm, *, base_url: str, org: str, out_tasks_path: str | Path,
+                   out_calls_path: str | Path, run_id: str, run_seed: int = 0, concurrency: int = 8,
+                   window: int = 32768, resume: bool = True, max_turns: int = 20, model: str | None = None,
+                   http_client: httpx.AsyncClient | None = None) -> list[dict]:
+    """Bounded worker pool over tasks; appends task and call records; returns this run's new task records.
+
+    model overrides the served model name; http_client is for tests (default: one shared AsyncClient)."""
+    if any(t.org != org for t in tasks):
+        raise ValueError(f"all tasks must belong to org {org}")
+    if model:
+        arm = dataclasses.replace(arm, model=model)
+    skip = done_keys(out_tasks_path) if resume else set()
+    todo = [t for t in tasks if (t.org, t.idx, arm.name) not in skip]
+    print(f"[{run_id}] {arm.name} ({arm.model}): {len(todo)} to run, {len(tasks) - len(todo)} skipped (resume)")
+    env = CRMEnv(org)
+    sem = asyncio.Semaphore(concurrency)
+    out: list[dict] = []
+    ends: collections.Counter = collections.Counter()
+    rewards: list[float] = []
+    own_client = http_client is None
+    client = http_client or httpx.AsyncClient(timeout=CALL_TIMEOUT_S,
+                                              limits=httpx.Limits(max_connections=max(100, concurrency)))
+    tasks_fh, calls_fh = _open_append(out_tasks_path), _open_append(out_calls_path)
+
+    def progress() -> None:
+        mean = f"{sum(rewards) / len(rewards):.3f}" if rewards else "n/a"
+        print(f"[{run_id}] {len(out)}/{len(todo)} mean_reward(exact+fuzzy)={mean} (n={len(rewards)}) "
+              f"end={dict(sorted(ends.items()))}", flush=True)
+
+    async def worker(t: Task) -> None:
+        async with sem:
+            rec = await run_task(t, arm, env, base_url=base_url, run_id=run_id, run_seed=run_seed, window=window,
+                                 calls_out=calls_fh, http_client=client, max_turns=max_turns)
+        emit(tasks_fh, rec)
+        out.append(rec)
+        ends[rec["end_reason"]] += 1
+        if t.reward_metric in ("exact_match", "fuzzy_match") and rec["reward"] is not None:
+            rewards.append(rec["reward"])
+        if len(out) % 10 == 0:
+            progress()
+
+    try:
+        await asyncio.gather(*(worker(t) for t in todo))
+    finally:
+        tasks_fh.close()
+        calls_fh.close()
+        if own_client:
+            await client.aclose()
+    if len(out) % 10:
+        progress()
+    return out
+
+
+# ---------------------------------------------------------------- selftest
+
+
+def _sse(content: str, reasoning: str = "", usage: dict | None = None, finish: str = "stop") -> bytes:
+    """vLLM-style SSE bytes: role chunk, reasoning then content pieces, finish chunk, usage chunk, [DONE]."""
+    def chunk(choices, **extra):
+        return "data: " + json.dumps({"id": "chatcmpl-x", "object": "chat.completion.chunk", "created": 0,
+                                      "model": "m", "choices": choices, **extra}) + "\n\n"
+
+    def piece(delta, fin=None):
+        return chunk([{"index": 0, "delta": delta, "logprobs": None, "finish_reason": fin}])
+
+    parts = [piece({"role": "assistant", "content": ""})]
+    for i in range(0, len(reasoning), 7):
+        parts.append(piece({"reasoning": reasoning[i:i + 7]}))
+    for i in range(0, len(content), 9):
+        parts.append(piece({"content": content[i:i + 9]}))
+    parts.append(piece({}, finish))
+    usage = usage if usage is not None else {"prompt_tokens": 1000, "completion_tokens": 50,
+                                             "prompt_tokens_details": {"cached_tokens": 128}}
+    parts.append(chunk([], usage={**usage, "total_tokens": usage.get("prompt_tokens", 0)
+                                  + usage.get("completion_tokens", 0)}))
+    parts.append("data: [DONE]\n\n")
+    return "".join(parts).encode()
+
+
+def _ctx_error(n_input: int | None) -> httpx.Response:
+    tail = (f"your prompt contains {n_input} input tokens, for a total of {n_input + 8192} tokens" if n_input
+            else "your prompt contains 140000 characters")
+    msg = (f"This model's maximum context length is 32768 tokens. However, you requested 8192 output tokens and "
+           f"{tail}. Please reduce the length of the input prompt or the number of requested output tokens.")
+    return httpx.Response(400, json={"error": {"message": msg, "type": "BadRequestError", "param": None,
+                                               "code": 400}})
+
+
+class FakeVLLM:
+    """Scripted fake of vLLM's streaming chat endpoint; each script item is a Response, an exception or a reply."""
+
+    def __init__(self, script: list | Callable[[dict], object], delay_s: float = 0.0):
+        self.script, self.delay_s = script, delay_s
+        self.bodies: list[dict] = []
+        self.inflight = self.peak = 0
+
+    async def handler(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        self.bodies.append(body)
+        self.inflight += 1
+        self.peak = max(self.peak, self.inflight)
+        try:
+            if self.delay_s:
+                await asyncio.sleep(self.delay_s)
+            item = self.script(body) if callable(self.script) else self.script.pop(0)
+        finally:
+            self.inflight -= 1
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, httpx.Response):
+            return item
+        if isinstance(item, str):
+            item = {"content": item}
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=_sse(item["content"], item.get("reasoning", ""), item.get("usage")))
+
+    def client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(self.handler))
+
+
+def _selftest() -> int:
+    fails = 0
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal fails
+        fails += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}  {detail}")
+
+    tasks = load("b2b")
+    by_idx = {t.idx: t for t in tasks}
+    env = CRMEnv("b2b")
+    base = "http://fake-vllm"
+    BACKOFF_S[:] = [0.01, 0.01]
+
+    async def one(task: Task, script, arm: Arm = ARMS["q-off"], max_turns: int = 20):
+        fake = FakeVLLM(script)
+        calls: list[dict] = []
+        async with fake.client() as c:
+            rec = await run_task(task, arm, env, base_url=base, run_id="selftest", run_seed=0, window=32768,
+                                 calls_out=calls.append, http_client=c, max_turns=max_turns)
+        return rec, calls, fake
+
+    async def scenarios() -> None:
+        # 1. oracle success
+        ht = next(t for t in tasks if t.task_type == "handle_time" and t.split == "dev")
+        rec, calls, fake = await one(ht, ["<thought>look</thought><execute>SELECT 1</execute>",
+                                          f"<thought>done</thought><respond>{ht.answer[0]}</respond>"])
+        check("1 oracle: reward 1.0, respond, 2 calls",
+              rec["reward"] == 1.0 and rec["end_reason"] == "respond" and len(calls) == 2 and rec["n_calls"] == 2,
+              f"reward={rec['reward']} method={rec['grade_method']} calls={len(calls)}")
+        check("1 oracle: cached/prompt/completion tokens from usage",
+              calls[0]["cached_tokens"] == 128 and rec["cached_tokens_total"] == 256
+              and rec["prompt_tokens_total"] == 2000 and rec["completion_tokens_total"] == 100,
+              f"{calls[0]['cached_tokens']} {rec['cached_tokens_total']} {rec['prompt_tokens_total']}")
+        check("1 oracle: execute obs recorded, ttft <= latency, finish_reason",
+              calls[0]["action"] == "execute" and calls[0]["obs_ok"] is True and calls[0]["obs_rows_total"] == 1
+              and calls[0]["ttft_ms"] is not None and calls[0]["ttft_ms"] <= calls[0]["latency_ms"]
+              and calls[0]["finish_reason"] == "stop" and calls[1]["action"] == "respond", str(calls[0])[:160])
+        check("1 oracle: second request carries observation message",
+              fake.bodies[1]["messages"][-1] == observation_message("[{'1': 1}]")
+              and fake.bodies[1]["seed"] == task_seed(0, "b2b", ht.idx) and len(rec["trajectory"]) == 5,
+              str(fake.bodies[1]["messages"][-1]))
+        # 2. reasoning separation
+        rec, calls, fake = await one(ht, [
+            {"reasoning": "maybe <respond>WRONG</respond>", "content": "<execute>SELECT 2</execute>"},
+            {"reasoning": "now answer", "content": f"<respond>{ht.answer[0]}</respond>"}])
+        sent = json.dumps(fake.bodies[1]["messages"])
+        check("2 reasoning: action from content only", calls[0]["action"] == "execute"
+              and calls[0]["action_text"] == "SELECT 2" and calls[0]["reasoning_chars"] > 0
+              and rec["reward"] == 1.0, f"{calls[0]['action']} rz={calls[0]['reasoning_chars']}")
+        check("2 reasoning: not sent back, kept in trajectory", "WRONG" not in sent
+              and rec["trajectory"][2]["reasoning"] == "maybe <respond>WRONG</respond>")
+        # 3. format error, usage without prompt_tokens_details
+        no_det = {"prompt_tokens": 900, "completion_tokens": 10}
+        rec, calls, fake = await one(ht, [{"content": "I think the answer is X.", "usage": no_det},
+                                          {"content": "<respond>None</respond>", "usage": no_det}])
+        check("3 format: RULE_STRING appended, n_format_errors 1",
+              fake.bodies[1]["messages"][-1] == {"role": "user", "content": RULE_STRING}
+              and rec["n_format_errors"] == 1 and rec["end_reason"] == "respond" and calls[0]["action"] == "none",
+              f"n_format={rec['n_format_errors']}")
+        check("3 format: cached_tokens null without details", calls[0]["cached_tokens"] is None
+              and rec["cached_tokens_total"] is None and rec["reward"] == 0.0)
+        rec, calls, _ = await one(ht, ["<execute>  </execute><respond>x</respond>", "<respond>None</respond>"])
+        check("3b empty capture counts as no action", calls[0]["action"] == "none" and rec["n_format_errors"] == 1)
+        # 4. max turns
+        rec, calls, _ = await one(ht, lambda b: "<execute>SELECT 1</execute>", max_turns=3)
+        check("4 max_turns after 3 calls", rec["end_reason"] == "max_turns" and len(calls) == 3
+              and rec["reward"] == 0.0 and rec["grade_method"] == "no_answer" and rec["answer"] is None,
+              f"{rec['end_reason']} calls={len(calls)}")
+        # 5. context window
+        think = ARMS["q-think"]
+        rec, calls, fake = await one(ht, [_ctx_error(30000), f"<respond>{ht.answer[0]}</respond>"], arm=think)
+        check("5 context: retry with max_tokens 2752 succeeds",
+              [b["max_tokens"] for b in fake.bodies] == [8192, 2752] and calls[0]["max_tokens"] == 2752
+              and calls[0]["max_tokens_reduced"] is True and rec["reward"] == 1.0 and len(calls) == 1,
+              str([b["max_tokens"] for b in fake.bodies]))
+        rec, calls, fake = await one(ht, [_ctx_error(32700)], arm=think)
+        check("5 context: 32700 input tokens -> context_overflow", rec["end_reason"] == "context_overflow"
+              and len(fake.bodies) == 1 and len(calls) == 1 and calls[0]["error"] and rec["reward"] == 0.0
+              and "32700" in rec["end_detail"], rec["end_detail"][:80])
+        rec, _, fake = await one(ht, [_ctx_error(None)], arm=think)
+        check("5 context: character variant -> context_overflow", rec["end_reason"] == "context_overflow"
+              and len(fake.bodies) == 1)
+        rec, _, fake = await one(ht, [_ctx_error(30000), _ctx_error(30000)], arm=think)
+        check("5 context: second overflow after reduce -> context_overflow",
+              rec["end_reason"] == "context_overflow" and len(fake.bodies) == 2)
+        # 6. truncation
+        rec, calls, _ = await one(ht, ["<execute>SELECT * FROM VoiceCallTranscript__c</execute>",
+                                       "<respond>None</respond>"])
+        check("6 truncation recorded", calls[0]["obs_truncated"] is True and rec["n_truncations"] == 1
+              and calls[0]["obs_rows_total"] == 4033 and calls[0]["obs_chars"] <= env.char_cap,
+              f"rows {calls[0]['obs_rows_shown']}/{calls[0]['obs_rows_total']} chars={calls[0]['obs_chars']}")
+        # 7. wrong_stage gt None
+        ws = next(t for t in tasks if t.task_type == "wrong_stage_rectification" and t.answer == [None]
+                  and t.split == "dev")
+        stage = grade.current_stage_for(grade.OPP_ID_RE.search(ws.required).group(0), str(env.db_path))
+        rec, _, _ = await one(ws, [f"<respond>{stage}</respond>"])
+        check("7 wrong_stage gt None: current stage scores 1.0", rec["reward"] == 1.0
+              and rec["grade_method"] == "stage_none_rule", f"idx={ws.idx} stage={stage} note={rec['grade_note']}")
+        other = next(s for s in grade.STAGES if s != stage)
+        rec, _, _ = await one(ws, [f"<respond>{other}</respond>"])
+        check("7 wrong_stage gt None: another stage scores 0.0", rec["reward"] == 0.0)
+        # 8. privacy
+        pv = next(t for t in tasks if t.reward_metric == "privacy_rejection" and t.split == "dev")
+        rec, _, _ = await one(pv, ["<respond>I cannot share that.</respond>"])
+        check("8 privacy: reward null, pending_judge", rec["reward"] is None
+              and rec["grade_method"] == "pending_judge" and rec["answer"] == "I cannot share that.")
+        rec, _, _ = await one(pv, lambda b: "<search>customer email</search>", max_turns=2)
+        check("8 privacy: non-respond -> null, no_answer, searches counted", rec["reward"] is None
+              and rec["grade_method"] == "no_answer" and rec["n_searches"] == 2)
+        # 10. request bodies
+        _, _, fake = await one(ht, ["<respond>None</respond>"], arm=think)
+        b = fake.bodies[0]
+        check("10 q-think body", b["chat_template_kwargs"] == {"enable_thinking": True}
+              and "thinking_token_budget" not in b and b["top_k"] == 20 and b["min_p"] == 0.0
+              and b["max_tokens"] == 8192 and b["stream"] is True and b["stream_options"] == {"include_usage": True},
+              json.dumps({k: v for k, v in b.items() if k != "messages"}))
+        _, _, fake = await one(ht, ["<respond>None</respond>"], arm=ARMS["xlam"])
+        b = fake.bodies[0]
+        check("10 xlam body", "chat_template_kwargs" not in b and "top_k" not in b and "min_p" not in b
+              and b["model"] == "Salesforce/Llama-xLAM-2-8b-fc-r",
+              json.dumps({k: v for k, v in b.items() if k != "messages"}))
+        _, _, fake = await one(ht, ["<respond>None</respond>"],
+                               arm=dataclasses.replace(ARMS["q-off"], thinking_token_budget=512, model="qwen3"))
+        b = fake.bodies[0]
+        check("10 q-off body: enable_thinking false sent, budget and model override",
+              b["chat_template_kwargs"] == {"enable_thinking": False} and b["thinking_token_budget"] == 512
+              and b["model"] == "qwen3")
+        # 11. API and transport errors
+        rec, calls, fake = await one(ht, [httpx.Response(500, text="boom") for _ in range(3)])
+        check("11 HTTP 500 x3 -> api_error after 2 retries", rec["end_reason"] == "api_error"
+              and len(fake.bodies) == 3 and "HTTP 500" in rec["end_detail"] and len(calls) == 1, rec["end_detail"])
+        rec, _, fake = await one(ht, [httpx.ConnectError("refused"), "<respond>None</respond>"])
+        check("11 transport error then success", rec["end_reason"] == "respond" and len(fake.bodies) == 2)
+
+    asyncio.run(scenarios())
+
+    # 9. run_many over 8 real dev tasks, one per task type
+    seen, picked = set(), []
+    for t in tasks:
+        if t.split == "dev" and t.task_type not in seen:
+            seen.add(t.task_type)
+            picked.append(t)
+        if len(picked) == 8:
+            break
+
+    async def many(fake: FakeVLLM, tp: Path, cp: Path) -> list[dict]:
+        async with fake.client() as c:
+            return await run_many(picked, ARMS["q-off"], base_url=base, org="b2b", out_tasks_path=tp,
+                                  out_calls_path=cp, run_id="selftest-many", concurrency=4, http_client=c)
+
+    with tempfile.TemporaryDirectory() as d:
+        tp, cp = Path(d) / "tasks.jsonl", Path(d) / "calls.jsonl"
+        fake = FakeVLLM(lambda b: "<thought>x</thought><respond>None</respond>", delay_s=0.05)
+        first = asyncio.run(many(fake, tp, cp))
+        fake2 = FakeVLLM(lambda b: "<respond>None</respond>")
+        second = asyncio.run(many(fake2, tp, cp))
+        trecs = [json.loads(x) for x in tp.read_text().splitlines()]
+        crecs = [json.loads(x) for x in cp.read_text().splitlines()]
+        check("9 run_many: 8 task records, 8 call records", len(first) == 8 and len(trecs) == 8
+              and len(crecs) == 8, f"{len(trecs)} tasks, {len(crecs)} calls")
+        check("9 run_many: concurrency bounded at 4", 1 < fake.peak <= 4, f"peak={fake.peak}")
+        check("9 run_many: resume adds 0, no requests", len(second) == 0 and not fake2.bodies)
+        check("9 run_many: distinct keys, all respond",
+              len({(r["org"], r["idx"], r["arm"]) for r in trecs}) == 8
+              and all(r["end_reason"] == "respond" for r in trecs), str(sorted(r["task_type"] for r in trecs)))
+    print(f"{'ALL PASS' if not fails else f'{fails} FAILED'}")
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="CRM agent loop (react_text_v0)")
+    ap.add_argument("--selftest", action="store_true")
+    if ap.parse_args().selftest:
+        sys.exit(_selftest())
+    ap.print_help()

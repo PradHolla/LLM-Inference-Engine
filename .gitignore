@@ -47,6 +47,7 @@ data/
 results/gateway-traces-A.jsonl
 results/labbench-traces.jsonl
 NOTES/phase7-budget-design.md
+NOTES/phase11-crm-agent-design.md
 
 # macOS
 .DS_Store

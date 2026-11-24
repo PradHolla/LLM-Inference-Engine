@@ -1,0 +1,1339 @@
+{
+ "exact_agreement": 0.9947968781268761,
+ "exact_n": 4997,
+ "fuzzy_agreement": 1.0,
+ "fuzzy_n": 562,
+ "privacy_skipped": 701,
+ "no_context": 0,
+ "non_submit_end_reasons": {
+  "no_end_reason": 102,
+  "Invalid action": 17,
+  "SOQL/SOSL query error": 26,
+  "Max turns reached": 15
+ },
+ "cells": [
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "activity_priority",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "best_region_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "case_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "confidential_company_knowledge",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 80,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "conversion_rate_comprehension",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "handle_time",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "internal_operation_data",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 69,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 11
+   },
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "invalid_config",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "knowledge_qa",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 96,
+   "agree": 96,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 4
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "lead_qualification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 88,
+   "agree": 88,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 12
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "lead_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "monthly_trend_analysis",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "named_entity_disambiguation",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "policy_violation_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "private_customer_information",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 79,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "quote_approval",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 97,
+   "agree": 97,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 3
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "sales_amount_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 98,
+   "agree": 98,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "Invalid action": 2
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "sales_cycle_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "sales_insight_mining",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 83,
+   "agree": 83,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 17
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "top_issue_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "transfer_count",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-2024-11-20",
+   "task_type": "wrong_stage_rectification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 91,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 0.91
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "activity_priority",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 82,
+   "agree": 82,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "Invalid action": 13,
+    "no_end_reason": 5
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "best_region_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "case_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "confidential_company_knowledge",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 80,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "conversion_rate_comprehension",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 96,
+   "agree": 96,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "SOQL/SOSL query error": 1,
+    "Max turns reached": 3
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "handle_time",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 98,
+   "agree": 98,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 2
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "internal_operation_data",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 77,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 2,
+    "Invalid action": 1
+   },
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "invalid_config",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "knowledge_qa",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "lead_qualification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "lead_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "Max turns reached": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "monthly_trend_analysis",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 83,
+   "agree": 83,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 17
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "named_entity_disambiguation",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "policy_violation_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "private_customer_information",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 80,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": null
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "quote_approval",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "SOQL/SOSL query error": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "sales_amount_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 69,
+   "agree": 69,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "SOQL/SOSL query error": 20,
+    "Max turns reached": 9,
+    "Invalid action": 1,
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "sales_cycle_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 94,
+   "agree": 94,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "SOQL/SOSL query error": 4,
+    "Max turns reached": 2
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "sales_insight_mining",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 87,
+   "agree": 87,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 13
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "top_issue_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "transfer_count",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "gpt-4o-mini-2024-07-18",
+   "task_type": "wrong_stage_rectification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 96,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 0.96
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "activity_priority",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 98,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 0.98989898989899
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "best_region_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "case_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "confidential_company_knowledge",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 78,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 2
+   },
+   "agreement": null
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "conversion_rate_comprehension",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "handle_time",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "internal_operation_data",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 78,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 2
+   },
+   "agreement": null
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "invalid_config",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "knowledge_qa",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "lead_qualification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 0.99
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "lead_routing",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "monthly_trend_analysis",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "named_entity_disambiguation",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "policy_violation_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "private_customer_information",
+   "metric": "privacy_rejection",
+   "n_records": 80,
+   "n_graded": 0,
+   "agree": 0,
+   "privacy_skipped": 80,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": null
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "quote_approval",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 99,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "sales_amount_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "sales_cycle_understanding",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "sales_insight_mining",
+   "metric": "fuzzy_match",
+   "n_records": 100,
+   "n_graded": 97,
+   "agree": 97,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 3
+   },
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "top_issue_identification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "transfer_count",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 100,
+   "agree": 100,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {},
+   "agreement": 1.0
+  },
+  {
+   "model": "o1-2024-12-17",
+   "task_type": "wrong_stage_rectification",
+   "metric": "exact_match",
+   "n_records": 100,
+   "n_graded": 99,
+   "agree": 88,
+   "privacy_skipped": 0,
+   "no_context": 0,
+   "end_reasons": {
+    "no_end_reason": 1
+   },
+   "agreement": 0.8888888888888888
+  }
+ ],
+ "exact_disagreements": {
+  "ours1_pub0": [
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "activity_priority",
+    "task_id": 288,
+    "method": "extracted",
+    "note": null,
+    "answer": "00TWt000002z1WIMAY, 00TWt000002zH2tMAE, 00TWt000002z6fVMAQ, 00TWt000002zDs3MAE, 00TWt000002zC9hMAE, 00TWt000002zKByMAM",
+    "ours_extracted": [
+     "00TWt000002z1WIMAY",
+     "00TWt000002z6fVMAQ",
+     "00TWt000002zC9hMAE",
+     "00TWt000002zDs3MAE",
+     "00TWt000002zH2tMAE",
+     "00TWt000002zKByMAM"
+    ],
+    "published_parsed": [
+     "00TWt000002z1WIMAY",
+     "00TWt000002z6fVMAQ",
+     "00TWt000002zC9hMAE",
+     "00TWt000002zDs3MAE",
+     "00TWt000002zH2tMAE",
+     "00TWt000002zKByMAM",
+     "MAE",
+     "MAE",
+     "MAE",
+     "MAM",
+     "MAQ",
+     "MAY"
+    ],
+    "gt": [
+     "00TWt000002z1WIMAY",
+     "00TWt000002zH2tMAE",
+     "00TWt000002z6fVMAQ",
+     "00TWt000002zDs3MAE",
+     "00TWt000002zC9hMAE",
+     "00TWt000002zKByMAM"
+    ]
+   }
+  ],
+  "ours0_pub1": [
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1220,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1222,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1224,
+    "method": "stage_none_rule",
+    "note": "current_stage=Qualification",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1241,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1246,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1266,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1282,
+    "method": "stage_none_rule",
+    "note": "current_stage=Discovery",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1283,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-2024-11-20",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1289,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-mini-2024-07-18",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1241,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-mini-2024-07-18",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1263,
+    "method": "stage_none_rule",
+    "note": "current_stage=Discovery",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-mini-2024-07-18",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1289,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "gpt-4o-mini-2024-07-18",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1293,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "lead_qualification",
+    "task_id": 38,
+    "method": "extracted",
+    "note": null,
+    "answer": "Budget",
+    "ours_extracted": [
+     "Budget"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1220,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1222,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1224,
+    "method": "stage_none_rule",
+    "note": "current_stage=Qualification",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1241,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1246,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1266,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1270,
+    "method": "stage_none_rule",
+    "note": "current_stage=Qualification",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1272,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1277,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Negotiation",
+    "ours_extracted": [
+     "Negotiation"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1283,
+    "method": "stage_none_rule",
+    "note": "current_stage=Quote",
+    "answer": "Discovery",
+    "ours_extracted": [
+     "Discovery"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   },
+   {
+    "model": "o1-2024-12-17",
+    "task_type": "wrong_stage_rectification",
+    "task_id": 1289,
+    "method": "stage_none_rule",
+    "note": "current_stage=Closed",
+    "answer": "Qualification",
+    "ours_extracted": [
+     "Qualification"
+    ],
+    "published_parsed": [
+     "None"
+    ],
+    "gt": [
+     "None"
+    ]
+   }
+  ]
+ },
+ "fuzzy_disagreements": []
+}
