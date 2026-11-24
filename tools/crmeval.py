@@ -97,6 +97,9 @@ def cmd_run(args: argparse.Namespace, client: httpx.Client | None = None) -> int
         print(f"error: unknown task types {unknown}", file=sys.stderr)
         return 2
     picked = select_tasks(crm_tasks.load(args.org), args.split, types, args.limit)
+    if args.idx:  # an explicit task list, e.g. the app's curated showcase
+        want = {int(x) for x in args.idx.split(",") if x.strip()}
+        picked = [t for t in picked if t.idx in want]
     if not picked:
         print(f"error: no tasks for org={args.org} split={args.split} types={types}", file=sys.stderr)
         return 2
@@ -468,6 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--org", required=True, choices=["b2b", "b2c"])
     r.add_argument("--split", default="dev", choices=SPLITS)
     r.add_argument("--types", help="comma-separated task types")
+    r.add_argument("--idx", help="comma-separated task idx to keep (applied after split/types/limit)")
     r.add_argument("--limit", type=int, help="first N tasks per task type, by idx")
     r.add_argument("--concurrency", type=int, default=8)
     r.add_argument("--run-id")
