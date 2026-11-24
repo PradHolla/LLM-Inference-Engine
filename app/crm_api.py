@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import datetime
 import functools
 import json
 import os
@@ -156,6 +157,19 @@ def _run_start(event: dict, question: str, mode: str, example: dict | None) -> d
     return event
 
 
+RUN_LOG = os.environ.get("CRM_RUN_LOG", "app/crm_runs.jsonl")  # every app run, for review; gitignored
+
+
+def _save_run(entry: dict) -> None:
+    """Append one finished (or failed or stopped) run to the run log; never raises into the stream."""
+    try:
+        os.makedirs(os.path.dirname(RUN_LOG) or ".", exist_ok=True)
+        with open(RUN_LOG, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except OSError:
+        pass
+
+
 VLLM_URL = os.environ.get("CRM_VLLM_URL", "http://localhost:8000")
 PROTOCOL = os.environ.get("CRM_PROTOCOL", "actions_v1")
 SWITCH_SCRIPT = os.environ.get("CRM_SWITCH_SCRIPT", "/opt/llm/infra/p11-app.sh")
@@ -204,30 +218,43 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
         return
     arm = agent.ARMS["xlam"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-off"]
     arm = dataclasses.replace(arm, model=model)
-    yield {"data": json.dumps({"type": "run_start", "run_id": f"live-{uuid.uuid4().hex[:8]}", "question": question,
-                               "model": model, "mode": body.mode, "context": _context(task),
-                               "example": {k: example[k] for k in ("id", "task_type", "skill")} if example else None})}
+    start = {"type": "run_start", "run_id": f"live-{uuid.uuid4().hex[:8]}", "question": question,
+             "model": model, "mode": body.mode, "context": _context(task),
+             "example": {k: example[k] for k in ("id", "task_type", "skill")} if example else None}
+    log = {"saved_at": None, "run_id": start["run_id"], "question": question, "model": model, "arm": arm.name,
+           "protocol": PROTOCOL, "mode": body.mode, "thinking": body.thinking, "example": start["example"],
+           "outcome": "running", "events": [start], "record": None}
+    yield {"data": json.dumps(start)}
     queue: asyncio.Queue = asyncio.Queue()
-    async with httpx.AsyncClient(timeout=agent.CALL_TIMEOUT_S) as client:
-        runner = asyncio.create_task(agent.run_task(
-            task, arm, CRMEnv("b2b"), base_url=VLLM_URL, run_id="app", run_seed=uuid.uuid4().int % 10_000,
-            window=32768, calls_out=lambda rec: None, http_client=client, protocol=PROTOCOL,
-            on_event=queue.put_nowait))
-        try:
+    runner = None
+    try:
+        async with httpx.AsyncClient(timeout=agent.CALL_TIMEOUT_S) as client:
+            runner = asyncio.create_task(agent.run_task(
+                task, arm, CRMEnv("b2b"), base_url=VLLM_URL, run_id=start["run_id"],
+                run_seed=uuid.uuid4().int % 10_000, window=32768, calls_out=lambda rec: None, http_client=client,
+                protocol=PROTOCOL, on_event=queue.put_nowait))
             while not (runner.done() and queue.empty()):
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
                     if await request.is_disconnected():
-                        runner.cancel()
+                        log["outcome"] = "stopped by the user"
                         return
                     continue
+                log["events"].append(ev)
                 yield {"data": json.dumps(ev, default=str)}
             if runner.exception() is not None:
-                yield {"data": json.dumps({"type": "error", "message": f"agent failed: {runner.exception()!r}"})}
-        finally:
-            if not runner.done():
-                runner.cancel()
+                err = {"type": "error", "message": f"agent failed: {runner.exception()!r}"}
+                log.update(outcome="agent failed")
+                log["events"].append(err)
+                yield {"data": json.dumps(err)}
+            else:
+                log.update(outcome="finished", record=runner.result())
+    finally:
+        if runner is not None and not runner.done():
+            runner.cancel()
+        log["saved_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _save_run(log)
     yield {"data": json.dumps({"type": "done"})}
 
 

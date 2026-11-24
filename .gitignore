@@ -30,6 +30,7 @@ node_modules/
 app/chats.db
 app/chats.db-wal
 app/chats.db-shm
+app/crm_runs.jsonl
 
 # Secrets / local overrides
 .env
