@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import httpx  # noqa: E402
 
 from crm import tasks as crm_tasks  # noqa: E402
-from crm.agent import ARMS, run_many  # noqa: E402
+from crm.agent import ARMS, PROTOCOLS, run_many  # noqa: E402
 from crm.grade import reward_metric_for  # noqa: E402
 
 SKILLS = ("workflow", "policy", "text", "database")
@@ -475,8 +475,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--model", help="served model name, overriding the arm's preset")
     r.add_argument("--window", type=int, default=32768)
     r.add_argument("--max-turns", type=int, default=20)
-    r.add_argument("--protocol", choices=["react_text_v0", "tools_v1"], default="tools_v1",
-                   help="tools_v1 (native tool calls, the app's agent) or react_text_v0 (the paper's text tags)")
+    r.add_argument("--protocol", choices=list(PROTOCOLS), default="tools_v1",
+                   help="tools_v1 (native tool calls, the app's agent), react_text_v0 (the paper's text tags), "
+                   "actions_v1 (standard CRM actions, no SQL) or actions_sql_v1 (actions plus run_sql)")
     r.add_argument("--out-dir", default="results")
     p = sub.add_parser("report", help="results tables from task-record JSONL files")
     p.add_argument("files", nargs="+")

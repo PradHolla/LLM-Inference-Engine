@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from . import agent, config, db
+from . import agent, config, crm_api, db
 
 
 LOGGER = logging.getLogger(__name__)
@@ -121,6 +121,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(crm_api.router)
 app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 

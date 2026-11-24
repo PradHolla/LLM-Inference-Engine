@@ -178,3 +178,48 @@ def v1_system(task, schema_objects: list[dict], aided: bool = True) -> str:
 def v1_messages(task, schema_objects: list[dict], aided: bool = True) -> list[dict]:
     return [{"role": "system", "content": v1_system(task, schema_objects, aided)},
             {"role": "user", "content": task.query.strip()}]
+
+
+# ---- actions_v1 / actions_sql_v1: standard CRM actions instead of raw SQL (tools from crm.actions) ----
+
+ACTIONS_NUDGE = "Use one of the tools, or call respond with the final answer."
+
+_ACTIONS_SYSTEM = """\
+You are an expert Salesforce analyst with access to a {system}. You are helping {role}.
+
+# How to work
+- Use the actions to look things up. Do not guess values you can look up.
+- find_by_name turns a name (account, contact, product, user, opportunity...) into a record Id.
+- get_record reads every field of one record by its Id.
+- query_records lists records of one object that match filters, with the fields you choose.
+- summarize_records counts, totals or averages records, grouped by a field (or by month(Field)); use it for "how many", "most", "highest average", "total" questions. avg_days_between gives the average days from one date field to another.
+- search_text finds records by keywords in long text (knowledge articles, emails, call and chat transcripts, case descriptions).
+- Fields can follow one reference to the parent record: RefField.ParentField, for example AccountId.ShippingState on Case. The references are listed below.
+- A date-only filter value (YYYY-MM-DD) compares by day, so CreatedDate <= 2024-01-31 includes the whole of January 31.
+- Relative dates ("past 3 months", "last quarter", "Winter 2023") are relative to the task's "Today's date" below, never the real current date. Use the domain definitions below for quarters and seasons.
+- Follow any policy given in the task context exactly; it defines how metrics are computed.
+- When you are confident, call respond with ONLY the answer (an Id, a name, a month, a state code, a comma-separated list, or None). No sentences.
+
+# {system} description
+{system_description}
+## References (field -> object it points to; read the parent's fields with RefField.ParentField)
+{references}
+"""
+
+
+def v2_system(task, schema_objects: list[dict], org: str, aided: bool = True) -> str:
+    """System prompt for the action protocols: action instructions, schema, references, then task context."""
+    from crm.actions import references_text  # local: crm.actions imports this module
+    prompt = _ACTIONS_SYSTEM.format(system=SYSTEM, role=_ROLE[task.external],
+                                    system_description=schema_text(schema_objects),
+                                    references=references_text(org))
+    if task.required:
+        prompt += SYSTEM_METADATA.format(system_metadata=task.required)
+    if aided and task.optional:
+        prompt += "\n" + task.optional
+    return prompt.strip()
+
+
+def v2_messages(task, schema_objects: list[dict], org: str, aided: bool = True) -> list[dict]:
+    return [{"role": "system", "content": v2_system(task, schema_objects, org, aided)},
+            {"role": "user", "content": task.query.strip()}]

@@ -144,6 +144,10 @@ class TaskSession:
             return Observation(False, "Error: empty query", None, None, False, 0.0, "empty query")
         return self._run(query)
 
+    def query(self, sql: str, params: list) -> Observation:
+        """Run one read-only statement with bound parameters; same guards, caps and rendering as sql()."""
+        return self._run(sql, tuple(params))
+
     def search(self, query: str, objects: list[str] | None = None, limit: int = 20) -> Observation:
         """Full-text search over indexed text fields, best bm25 first; falls back to OR if AND finds nothing."""
         words = re.findall(r"\w+", query)

@@ -24,13 +24,16 @@ from typing import Callable
 
 import httpx
 
-from crm import grade
+from crm import actions, grade
 from crm.env import CRMEnv, schema_objects
-from crm.prompts import RULE_STRING, TOOLS, TOOLS_NUDGE, observation_message, v0_messages, v1_messages
+from crm.prompts import (ACTIONS_NUDGE, RULE_STRING, TOOLS, TOOLS_NUDGE, observation_message, v0_messages,
+                         v1_messages, v2_messages)
 from crm.tasks import Task, load
 
 PROTOCOL = "react_text_v0"
 TOOLS_PROTOCOL = "tools_v1"
+ACTION_PROTOCOLS = {"actions_v1": False, "actions_sql_v1": True}  # protocol -> run_sql offered
+PROTOCOLS = (PROTOCOL, TOOLS_PROTOCOL, *ACTION_PROTOCOLS)
 ACTION_RES = [(name, re.compile(rf"<{name}>(.*?)</{name}>", re.DOTALL)) for name in ("execute", "search", "respond")]
 CTX_TOKENS_RE = re.compile(r"your prompt contains (at least )?(\d+) input tokens")
 CTX_MARGIN, CTX_MIN_OUT = 16, 256
@@ -257,8 +260,11 @@ def _grade(task: Task, end_reason: str, answer: str | None, db_path: Path) -> gr
     return dataclasses.asdict(grade.score(task.task_type, task.reward_metric, answer, list(task.answer), ctx))
 
 
-async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict]) -> dict:
-    """Execute every tool call in one model reply; append the assistant turn and the tool replies."""
+async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict],
+                     action_names: frozenset[str] | None = None, org: str | None = None) -> dict:
+    """Execute every tool call in one model reply; append the assistant turn and the tool replies.
+
+    action_names (the offered tools) switches from the tools_v1 tools to crm.actions dispatch."""
     out = {"action": "none", "text": "", "answer": None, "detail": None, "format_errors": 0, "sql_errors": 0,
            "searches": 0, "truncations": 0, "obs": {}}
     asst = {"role": "assistant", "content": res.content or None}
@@ -274,7 +280,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             out.update(action="respond", text=res.content.strip(), answer=res.content.strip(), detail="plain_text")
         else:
             out.update(format_errors=1)
-            nudge = {"role": "user", "content": TOOLS_NUDGE}
+            nudge = {"role": "user", "content": ACTIONS_NUDGE if action_names else TOOLS_NUDGE}
             messages.append(nudge)
             trajectory.append(dict(nudge))
         return out
@@ -291,6 +297,20 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
         if name == "respond" and isinstance(args, dict) and "answer" in args:
             out.update(answer=str(args["answer"]).strip())
             reply = "Answer submitted."
+        elif action_names is not None:
+            if name in action_names and name != "respond" and isinstance(args, dict):
+                obs = await asyncio.to_thread(actions.execute, session, name, args, org)
+                out["sql_errors"] += not obs.ok
+                out["searches"] += name in ("find_by_name", "search_text")
+                out["truncations"] += obs.truncated
+                out["obs"] = {"obs_ok": obs.ok, "obs_rows_total": obs.rows_total, "obs_rows_shown": obs.rows_shown,
+                              "obs_truncated": obs.truncated, "obs_chars": len(obs.text),
+                              "obs_elapsed_ms": obs.elapsed_ms}
+                reply = obs.text
+            else:
+                out["format_errors"] += 1
+                reply = (f"Error: unknown tool or bad arguments for {name!r}. "
+                         f"Tools: {', '.join(sorted(action_names))}.")
         elif name in ("run_sql", "search") and isinstance(args, dict) and isinstance(args.get("query"), str):
             if name == "run_sql":
                 obs = await asyncio.to_thread(session.sql, args["query"])
@@ -324,8 +344,16 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     started_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
     t0 = time.perf_counter()
     seed = task_seed(run_seed, task.org, task.idx)
-    tools = TOOLS if protocol == TOOLS_PROTOCOL else None
-    messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
+    if protocol not in PROTOCOLS:
+        raise ValueError(f"unknown protocol {protocol!r}; known: {', '.join(PROTOCOLS)}")
+    action_names = None
+    if protocol in ACTION_PROTOCOLS:
+        tools = actions.action_tools(task.org, ACTION_PROTOCOLS[protocol])
+        action_names = frozenset(t["function"]["name"] for t in tools)
+        messages = v2_messages(task, _schema(task.org), task.org)
+    else:
+        tools = TOOLS if protocol == TOOLS_PROTOCOL else None
+        messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
     end_reason = end_detail = answer = None
     n_calls = n_format = n_sql_err = n_search = n_trunc = 0
@@ -348,8 +376,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             prompt_toks.append(res.prompt_tokens)
             cached_toks.append(res.cached_tokens)
             completion_toks.append(res.completion_tokens)
-            if protocol == TOOLS_PROTOCOL:
-                step_out = await _tool_step(res, session, messages, trajectory)
+            if tools:
+                step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org)
                 rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
                            completion_tokens=res.completion_tokens, latency_ms=res.latency_ms,
                            finish_reason=res.finish_reason, action=step_out["action"],
@@ -547,6 +575,13 @@ class FakeVLLM:
             return item
         if isinstance(item, str):
             item = {"content": item}
+        if body.get("stream") is False:  # the tool protocols: one JSON chat.completion
+            msg = {"role": "assistant", "content": item.get("content") or None,
+                   "reasoning": item.get("reasoning") or None, "tool_calls": item.get("tool_calls") or []}
+            usage = item.get("usage") or {"prompt_tokens": 1000, "completion_tokens": 50}
+            return httpx.Response(200, json={"id": "chatcmpl-x", "object": "chat.completion", "choices": [
+                {"index": 0, "message": msg, "finish_reason": "tool_calls" if msg["tool_calls"] else "stop"}],
+                "usage": usage})
         return httpx.Response(200, headers={"content-type": "text/event-stream"},
                               content=_sse(item["content"], item.get("reasoning", ""), item.get("usage")))
 
@@ -568,12 +603,12 @@ def _selftest() -> int:
     base = "http://fake-vllm"
     BACKOFF_S[:] = [0.01, 0.01]
 
-    async def one(task: Task, script, arm: Arm = ARMS["q-off"], max_turns: int = 20):
+    async def one(task: Task, script, arm: Arm = ARMS["q-off"], max_turns: int = 20, protocol: str = PROTOCOL):
         fake = FakeVLLM(script)
         calls: list[dict] = []
         async with fake.client() as c:
             rec = await run_task(task, arm, env, base_url=base, run_id="selftest", run_seed=0, window=32768,
-                                 calls_out=calls.append, http_client=c, max_turns=max_turns)
+                                 calls_out=calls.append, http_client=c, max_turns=max_turns, protocol=protocol)
         return rec, calls, fake
 
     async def scenarios() -> None:
@@ -688,6 +723,56 @@ def _selftest() -> int:
               and len(fake.bodies) == 3 and "HTTP 500" in rec["end_detail"] and len(calls) == 1, rec["end_detail"])
         rec, _, fake = await one(ht, [httpx.ConnectError("refused"), "<respond>None</respond>"])
         check("11 transport error then success", rec["end_reason"] == "respond" and len(fake.bodies) == 2)
+        # 12. tool protocols (non-streamed): tools_v1 unchanged, actions_v1 and actions_sql_v1 dispatch actions
+
+        def tc(*calls_):
+            return {"content": "", "tool_calls": [{"id": f"call_{i}", "type": "function", "function": {
+                "name": n, "arguments": json.dumps(a)}} for i, (n, a) in enumerate(calls_)]}
+
+        rec, calls, fake = await one(ht, [tc(("run_sql", {"query": 'SELECT COUNT(*) FROM "Case"'})),
+                                          tc(("respond", {"answer": ht.answer[0]}))], protocol=TOOLS_PROTOCOL)
+        tool_reply = fake.bodies[1]["messages"][-1]
+        check("12 tools_v1: run_sql reply, respond, reward 1.0", rec["reward"] == 1.0
+              and tool_reply == {"role": "tool", "tool_call_id": "call_0", "content": "[{'COUNT(*)': 153}]"}
+              and [t["function"]["name"] for t in fake.bodies[0]["tools"]] == ["run_sql", "search", "respond"]
+              and fake.bodies[0]["stream"] is False, str(tool_reply))
+        summ = {"object": "Case", "filters": [{"field": "Status", "op": "=", "value": "Closed"}], "group_by": "",
+                "metric": "count", "field": "", "field2": "", "having_op": "none", "having_value": 0,
+                "sort": "desc", "limit": 0}
+        bad = {"object": "Cases", "filters": [], "fields": [], "order_by": "", "descending": False, "limit": 0}
+        rec, calls, fake = await one(ht, [tc(("summarize_records", summ), ("query_records", bad)),
+                                          tc(("run_sql", {"query": "SELECT 1"})),
+                                          tc(("respond", {"answer": ht.answer[0]}))], protocol="actions_v1")
+        b0, msgs = fake.bodies[0], fake.bodies[2]["messages"]
+        names = [t["function"]["name"] for t in b0["tools"]]
+        check("12 actions_v1: 6 action tools, v2 system prompt with references",
+              names == ["find_by_name", "get_record", "query_records", "summarize_records", "search_text",
+                        "respond"] and "## References" in b0["messages"][0]["content"]
+              and "OrderItemId__c -> OrderItem" in b0["messages"][0]["content"]
+              and b0["messages"][0]["content"].rstrip().endswith(ht.optional.strip()), str(names))
+        tools_msgs = [m for m in msgs if m["role"] == "tool"]
+        check("12 actions_v1: summarize reply, bad object error, run_sql not offered",
+              tools_msgs[0]["content"] == "[{'metric': 75, 'n': 75}]"
+              and tools_msgs[1]["content"].startswith("Error: unknown object 'Cases'")
+              and tools_msgs[2]["content"].startswith("Error: unknown tool or bad arguments for 'run_sql'"),
+              str([m["content"][:50] for m in tools_msgs]))
+        check("12 actions_v1: counters, action names and args recorded, reward 1.0",
+              rec["n_sql_errors"] == 1 and rec["n_format_errors"] == 1 and rec["reward"] == 1.0
+              and rec["protocol"] == "actions_v1" and calls[0]["action"] == "summarize_records+query_records"
+              and json.loads(calls[0]["action_text"].split(" | ")[0]) == summ and calls[0]["obs_ok"] is False,
+              f"sql_err={rec['n_sql_errors']} fmt={rec['n_format_errors']} action={calls[0]['action']}")
+        rec, calls, fake = await one(ht, [tc(("run_sql", {"query": 'SELECT COUNT(*) FROM "Case"'})),
+                                          tc(("find_by_name", {"name": "Quantum", "object": "any"})),
+                                          {"content": ht.answer[0]}], protocol="actions_sql_v1")
+        tools_msgs = [m for m in fake.bodies[2]["messages"] if m["role"] == "tool"]
+        check("12 actions_sql_v1: 7 tools, run_sql works, find_by_name counted as search, plain-text answer",
+              len(fake.bodies[0]["tools"]) == 7 and tools_msgs[0]["content"] == "[{'COUNT(*)': 153}]"
+              and rec["n_searches"] == 1 and rec["n_sql_errors"] == 0 and rec["end_detail"] == "plain_text"
+              and rec["reward"] == 1.0, str([m["content"][:40] for m in tools_msgs]))
+        rec, _, fake = await one(ht, [tc(("respond", {})), tc(("respond", {"answer": "None"}))],
+                                 protocol="actions_v1")
+        check("12 actions_v1: respond without answer is a format error, not a crash",
+              rec["n_format_errors"] == 1 and rec["end_reason"] == "respond", str(rec["n_format_errors"]))
 
     asyncio.run(scenarios())
 
