@@ -15,6 +15,7 @@ COMMON=(--quantization fp8 --max-model-len 32768 --kv-cache-dtype fp8 --enable-p
 tasks() {
     local arm="$1" model="$2" protocol="${3:-react_text_v0}" rid="p11-s1-$1"
     [ "$protocol" = tools_v1 ] && rid="p11-s1b-$1-tools"
+    case "$protocol" in actions_v1|actions_sql_v1) rid="p11-s1c-$1-$protocol" ;; esac
     $UV run tools/crmeval.py run --url http://localhost:8000 --arm "$arm" --model "$model" --org b2b \
         --split dev --types "$TYPES" --limit 1 --concurrency 1 --run-id "$rid" --protocol "$protocol" \
         || echo "P11_TASKS_FAIL $arm"
@@ -28,6 +29,17 @@ launch_qwen() {
 }
 
 case "${1:-}" in
+  qwen-actions)
+    # Qwen must already be served (no relaunch): both action protocols, thinking off and on.
+    for p in actions_v1 actions_sql_v1; do tasks q-off "$QWEN" "$p"; tasks q-think "$QWEN" "$p"; done
+    ;;
+  xlam-actions)
+    snaps=$(ls /opt/llm/hf-cache/hub/models--Salesforce--Llama-xLAM-2-8b-fc-r/snapshots/*/model-0000?-of-00004.safetensors 2>/dev/null | wc -l)
+    [ "$snaps" -eq 4 ] || { echo "P11_LAUNCH_FAIL xlam: $snaps of 4 shards"; exit 1; }
+    VLLM_USE_V2_MODEL_RUNNER=0 KV_PIN=10213733807 ./infra/vllm-launch.sh p11-xlam --model "$XLAM" "${COMMON[@]}" \
+        --tool-call-parser xlam || { echo "P11_LAUNCH_FAIL xlam"; exit 1; }
+    for p in actions_v1 actions_sql_v1; do tasks xlam "$XLAM" "$p"; done
+    ;;
   qwen-tools)
     launch_qwen || { echo "P11_LAUNCH_FAIL qwen"; exit 1; }
     tasks q-off "$QWEN" tools_v1
