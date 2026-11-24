@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command each way, correct flags baked in. Written because hand-typed rsync and ssh
 # invocations failed three times this week for reasons unrelated to the work.
-#   ./sync.sh push          code up (labbench, gateway, tools, infra, app, engine)
+#   ./sync.sh push          code up (labbench, gateway, tools, infra, app, engine, crm)
 #   ./sync.sh pull          results down
 #   ./sync.sh run '<cmd>'   run a command on the box, from /opt/llm
 set -uo pipefail
@@ -16,7 +16,7 @@ RS=(rsync -az -e "ssh -i $PEM -o StrictHostKeyChecking=no" --exclude '__pycache_
 
 case "${1:-}" in
   push)
-    for d in labbench gateway tools infra app engine; do
+    for d in labbench gateway tools infra app engine crm; do
         "${RS[@]}" "$d/" "ubuntu@$IP:/opt/llm/$d/" || exit 1
     done
     # Evaluation inputs live in gitignored data/; send the label files, never the dataset caches.
@@ -25,6 +25,14 @@ case "${1:-}" in
         --exclude='*' data/plansets/ \
         "ubuntu@$IP:/opt/llm/data/plansets/" || exit 1
     "${RS[@]}" data/gsm8k-test.jsonl "ubuntu@$IP:/opt/llm/data/" || exit 1
+    # CRM harness data: the derived DBs and task/schema files only; org.env, canonical/, org-export/,
+    # published/ and ref/ stay on the laptop.
+    ssh -i "$PEM" -o StrictHostKeyChecking=no "ubuntu@$IP" "mkdir -p /opt/llm/data/crmarena/derived" || exit 1
+    "${RS[@]}" data/crmarena/derived/b2b.db data/crmarena/derived/b2c.db \
+        "ubuntu@$IP:/opt/llm/data/crmarena/derived/" || exit 1
+    "${RS[@]}" data/crmarena/tasks_b2b.json data/crmarena/tasks_b2c.json \
+        data/crmarena/b2b_schema.json data/crmarena/b2c_schema.json \
+        "ubuntu@$IP:/opt/llm/data/crmarena/" || exit 1
     # Record which commit the box is running, so a result can be traced to a source state.
     ssh -i "$PEM" -o StrictHostKeyChecking=no "ubuntu@$IP" \
         "mkdir -p /opt/llm/results && echo '$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)' > /opt/llm/results/DEPLOYED_SHA"
