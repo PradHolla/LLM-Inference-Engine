@@ -122,17 +122,29 @@ def probe_qwen(c: httpx.Client, url: str, model: str, results: list) -> None:
            "content": (msg.get("content") or "")[:200], "error": js.get("error") or js.get("raw"),
            "secs": round(time.perf_counter() - t0, 2)})
 
-    for strict in (True, False):
-        stages = []
-        for seed in (1, 2, 3):
-            st, js = post(c, url, base | {"messages": ASK_STAGE, "tools": [set_stage(strict)], "seed": seed,
-                                          "chat_template_kwargs": {"enable_thinking": False}})
-            msg = (js.get("choices") or [{}])[0].get("message", {})
-            _, args, err = tool_call_of(msg)
-            stages.append((args or {}).get("stage") if args else f"<{err}>")
-        label = "S1-4 strict tool: stage always inside the enum" if strict else "S1-4 control, strict off (no constraint expected)"
-        ok = all(x in STAGES for x in stages) if strict else True
-        check(results, label, ok, {"stages": stages})
+    probe_strict(c, url, base, results)
+
+
+def probe_strict(c: httpx.Client, url: str, base: dict, results: list) -> None:
+    """S1-4: under auto the model may decline to call; a forced call makes it fill the enum field."""
+    forced = {"type": "function", "function": {"name": "set_stage"}}
+    for choice_label, choice in (("auto", "auto"), ("forced", forced)):
+        for strict in (True, False):
+            stages, contents = [], []
+            for seed in (1, 2, 3):
+                st, js = post(c, url, base | {"messages": ASK_STAGE, "tools": [set_stage(strict)], "seed": seed,
+                                              "tool_choice": choice, "chat_template_kwargs": {"enable_thinking": False}})
+                msg = (js.get("choices") or [{}])[0].get("message", {})
+                _, args, err = tool_call_of(msg)
+                stages.append((args or {}).get("stage") if args else f"<{err}>")
+                contents.append((msg.get("content") or "")[:160] or (js.get("error") or {}).get("message"))
+            called = [x for x in stages if not x.startswith("<")]
+            if strict and choice_label == "forced":
+                label, ok = "S1-4 strict + forced call: stage always inside the enum", len(called) == 3 and all(
+                    x in STAGES for x in called)
+            else:
+                label, ok = f"S1-4 {choice_label}, strict {'on' if strict else 'off'} (observation)", True
+            check(results, label, ok, {"stages": stages, "contents": contents})
 
 
 def render(c: httpx.Client, url: str, model: str, messages: list, tools: list) -> str:
@@ -174,7 +186,7 @@ def probe_xlam(c: httpx.Client, url: str, model: str, results: list) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("which", choices=["qwen", "xlam"])
+    ap.add_argument("which", choices=["qwen", "xlam", "strict"])
     ap.add_argument("--url", default="http://localhost:8000")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -183,7 +195,11 @@ def main() -> int:
         served = [m["id"] for m in c.get(f"{a.url}/v1/models").json()["data"]]
         print("served:", served, flush=True)
         model = served[0]
-        (probe_qwen if a.which == "qwen" else probe_xlam)(c, a.url, model, results)
+        if a.which == "strict":
+            probe_strict(c, a.url, {"model": model, "max_tokens": 1024, "temperature": 0.7, "top_p": 0.8,
+                                    "top_k": 20, "seed": 1}, results)
+        else:
+            (probe_qwen if a.which == "qwen" else probe_xlam)(c, a.url, model, results)
     with open(a.out, "w") as f:
         json.dump({"which": a.which, "model": model, "results": results}, f, indent=1)
     n_fail = sum(not r["pass"] for r in results)
