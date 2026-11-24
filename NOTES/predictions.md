@@ -7491,3 +7491,33 @@ prefill landed at 40% of spec FLOPs.
 its answers can differ from Marlin's; this run measured speed only (`tools/p9eval.py` on the L4
 would test it). Capacity ceilings for fp8 and int4 on both cards: the A10G's 6 req/s windows
 did not saturate them, and a higher-rate sweep would cost a new A10G run.
+
+## P11-S1  CRM agent harness, first GPU session: tool calls, xLAM, five tasks per arm. Written 2026-11-24 before the box is up
+
+**Question.** Does the Phase 11 harness work end to end on the real engine, and do the three
+facts it depends on hold: Qwen3 tool calls compose with the thinking budget, strict tools
+constrain the JSON, and xLAM's chat template drops its tool-format instruction when a system
+prompt is present. Design: `NOTES/phase11-crm-agent-design.md` (gitignored). Harness: `crm/`,
+`tools/crmeval.py`, commits 2526782 and 5d36adb. Not a measurement of accuracy: n = 5 per arm.
+
+**Configuration.** A10G restored from `ami-0dbadb9b08ade947d`. vLLM 0.27.1, `--quantization fp8`,
+`--kv-cache-dtype fp8`, `--max-model-len 32768`, prefix caching on, KV pinned at 10,213,733,807
+bytes (the app's pin), `VLLM_USE_V2_MODEL_RUNNER=0`. Qwen3-8B adds `--reasoning-parser qwen3
+--enable-auto-tool-choice --tool-call-parser hermes`; xLAM-2-8b-fc-r adds `--enable-auto-tool-choice
+--tool-call-parser xlam`. Agent protocol react_text_v0 (text tags, no tools) for the five tasks;
+native tool calls only in the probes S1-1 to S1-6. Arms q-off (T 0.7, top_p 0.8), q-think
+(T 0.6, top_p 0.95, max_tokens 8,192), xlam (T 0.6, top_p 0.9).
+
+| # | Quantity | Predicted | Derivation |
+|---|---|---|---|
+| S1-1 | Qwen3, thinking off, one tool, `tool_choice` auto | tool call arrives in `tool_calls`, valid JSON, content empty or whitespace | hermes parser; issue 31871 closed 2026-05-21 |
+| S1-2 | Qwen3, thinking on, same request | reasoning in `delta.reasoning`, then the tool call in `tool_calls`, none inside reasoning | `DelegatingParser` splits reasoning first; `<tool_call>` is an implicit reasoning end (parser/qwen3.py) |
+| S1-3 | Qwen3, thinking on + `thinking_token_budget` 64 + tools | **works**: reasoning stops near 64 tokens, then a valid tool call. Confidence medium: no upstream test combines them | budget is a per-request logits processor on the V1 runner; the tool grammar starts only after reasoning ends (`enable_in_reasoning` False). Failure shapes to look for: a 400 rejecting the combination, the budget ignored, or the forced `</think>` followed by prose instead of a call |
+| S1-4 | Strict tool whose schema allows only an enum the prompt contradicts | arguments always inside the enum (3/3 tries) | structural tag applies under auto when any tool has `"strict": true` (`_any_tool_strict`) |
+| S1-5 | xLAM rendered prompt, with vs without a system message | the string "make calls in a single JSON array" present without, absent with | read from its `tokenizer_config.json` template |
+| S1-6 | xLAM, system prompt present, one simple tool, auto | still emits a parsable JSON-array call (2/3 or better) | fine-tuned on the format; the instruction is redundant for a simple call |
+| S1-7 | "Model loading took" | Qwen3 **8.8 GiB**; xLAM **8.5 GiB** (range 8.3-8.7) | Qwen3 from P10's corrected bytes (9.44 GB); xLAM body 6.98e9 fp8 + untied embed and lm_head 2 x 0.525e9 bf16 = 9.08 GB = 8.46 GiB |
+| S1-8 | KV cache tokens at the pin | Qwen3 **138,528** (logged before); xLAM **155,840** (range 155,800-155,850) | 10,213,733,807 / 73,728 B per token; xLAM 2 x 32 x 8 x 128 x 1 B = 65,536 B per token, 155,849 rounded down to whole blocks |
+| S1-9 | Five dev tasks per arm, end reasons | 15 of 15 end with a task record; 0 api_error; format errors per call: q-off and q-think under 10%, xlam 5-30% | react_text_v0 is a tag protocol none of the models was trained on; xLAM was trained on JSON calls |
+| S1-10 | Cached share of prompt tokens, tasks 2-5 of an arm | **85% or more** | about 4.07k static system tokens of a ~4.1k first call, and every later call re-sends the previous prompt |
+| S1-11 | q-off latency per model call | 1.5-3.5 s | 100-2,000 uncached prompt tokens x 0.35 ms + 60-150 output tokens / 50 tok/s |
