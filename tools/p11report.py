@@ -62,11 +62,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", choices=["dev", "test"], default="dev")
     ap.add_argument("--labels", default=str(ROOT / "crm" / "kq_labels_b2b.json"))
+    ap.add_argument("--prefix", help="run id prefix (default p11-eval-<split>), e.g. p11-cmp-dev")
     a = ap.parse_args()
     labels = {r["idx"]: r for r in json.loads(Path(a.labels).read_text())["labels"]}
-    files = sorted(glob.glob(str(ROOT / "results" / f"p11-eval-{a.split}-*-s*.tasks.jsonl")))
+    prefix = a.prefix or f"p11-eval-{a.split}"
+    files = sorted(glob.glob(str(ROOT / "results" / f"{prefix}-*-s*.tasks.jsonl")))
     if not files:
-        print(f"no results/p11-eval-{a.split}-*-s*.tasks.jsonl")
+        print(f"no results/{prefix}-*-s*.tasks.jsonl")
         return 1
     by = collections.defaultdict(list)
     grades: dict = {}
