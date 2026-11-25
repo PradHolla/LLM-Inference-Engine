@@ -206,6 +206,32 @@ def get_issue_policy(session: TaskSession, issue_id) -> Observation:
     return _obs(policy.describe(p), 1 + len(p.fixes), 1 + len(p.fixes), False, t0)
 
 
+def check_offers(session: TaskSession, case_id, offered) -> Observation:
+    """The policy verdict for the fixes the agent on a case offered: decided by code from the reviewed records."""
+    t0 = time.monotonic()
+    cid = _id(case_id, "case_id")
+    if not isinstance(offered, list):
+        raise ActionError("offered must be a list of fix names (an empty list if the agent offered no fix)")
+    names = policy.catalog(session.org) + [policy.OTHER]
+    bad = [o for o in offered if o not in names]
+    if bad:
+        raise ActionError(f"unknown fix names {bad}; use only: {names}")
+    row = _rows(session, 'SELECT IssueId__c AS iid FROM "Case" WHERE Id = ?', [cid])
+    if not row:
+        raise ActionError(f"no Case with Id {cid!r}")
+    p = _policies(session.org).get(row[0]["iid"])
+    if p is None:
+        raise ActionError(f"no policy record for this case's issue {row[0]['iid']!r}")
+    _, gap = policy.purchase_gap(session.conn, cid)
+    answer, lines = policy.decide(p, gap, offered)
+    when = "purchase date unknown" if gap is None else f"purchased {gap} days before the case was opened"
+    verdict = (f'VERDICT: violation of guide {p.article_id} "{p.title}"' if answer
+               else "VERDICT: no violation")
+    text = "\n".join([f"CHECK for case {cid} (issue: {p.issue}; {when})", *lines, verdict,
+                      f"Answer to give: {answer or 'None'}"])
+    return _obs(text, len(lines), len(lines), False, t0)
+
+
 def list_products(session: TaskSession) -> Observation:
     return session.query("SELECT Id, Name, substr(Description, 1, ?) AS Description FROM Product2 ORDER BY Name",
                          [DESC_CAP])
@@ -320,6 +346,8 @@ def execute(session: TaskSession, name: str, args: dict, org: str) -> Observatio
             return list_issues(session)
         if name == "get_issue_policy":
             return get_issue_policy(session, a.get("issue_id"))
+        if name == "check_offers":
+            return check_offers(session, a.get("case_id"), a.get("offered"))
         if name == "list_products":
             return list_products(session)
         if name == "agent_expertise":
@@ -387,6 +415,32 @@ SERVICE_TOOLS: list[dict] = [
 ]
 
 
+def _check_offers_tool(org: str) -> dict:
+    names = policy.catalog(org) + [policy.OTHER]
+    return _tool("check_offers", "Check the fixes the agent on a case offered against company policy. The verdict "
+                 "and the answer to give are decided from the policy records: approved for the case's issue, and "
+                 "offered within each fix's day limit after purchase.",
+                 {"case_id": _s("The Case Id (starts with 500)."),
+                  "offered": {"type": "array", "items": {"type": "string", "enum": names},
+                              "description": "Every company fix the AGENT offered, promised or arranged, by its "
+                                             "name from this list (names may be paraphrased in the conversation). "
+                                             f"Use '{policy.OTHER}' for anything else. Empty if no fix was offered."}},
+                 ["case_id", "offered"])
+
+
+# The policy job gets only what it needs: reading the case and the code-decided check.
+JOB_TOOLS = {"policy_violation_identification": ("get_case", "check_offers", "respond")}
+
+
+def service_tools(org: str, task_type: str) -> list[dict]:
+    """The tools for one job: the policy job's three, or the general service list for the other jobs."""
+    keep = JOB_TOOLS.get(task_type)
+    if keep is None:
+        return SERVICE_TOOLS
+    pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org)]}
+    return [pool[n] for n in keep]
+
+
 # ---------------------------------------------------------------- selftest
 
 def _selftest() -> int:
@@ -436,6 +490,42 @@ def _selftest() -> int:
     o = ex("list_products", {})
     check("list_products: 51 rows, description cut to 120", o.ok and o.rows_total == 51
           and all(len(r["Description"] or "") <= 120 for r in rows(o)) and len(o.text) <= s.char_cap, f"{len(o.text)} chars")
+
+    # --- check_offers: the code-decided policy verdict
+    def offers(case_id, offered):
+        return ex("check_offers", {"case_id": case_id, "offered": offered})
+    o = offers("500Wt00000DDyznIAD", ["Scalability Enhancement Package"])  # 1381: 367 days, limit 365
+    check("check_offers: approved fix past its day limit -> violation, guide Id",
+          o.ok and "limit 365 -> violation" in o.text and o.text.endswith("Answer to give: ka0Wt000000EoD3IAK"),
+          o.text[-160:])
+    o = offers("500Wt00000DDzmCIAT", ["Scalability Enhancement Package"])  # 1459: wrong fix for training access
+    check("check_offers: fix not approved for the issue -> violation",
+          o.ok and "NOT approved for Training Module Access" in o.text
+          and o.text.endswith("Answer to give: ka0Wt000000Eo4zIAC"), o.text[-160:])
+    o = offers("500Wt00000DDzcTIAT", ["Comprehensive Training Access"])  # 1426: the paraphrase case
+    check("check_offers: 1426 with the paraphrased fix named -> violation",
+          o.ok and o.text.endswith("Answer to give: ka0Wt000000Eo0AIAS"), o.text[-120:])
+    o = offers("500Wt00000DDzmCIAT", ["Priority Support Upgrade", "Comprehensive Training Access"])
+    check("check_offers: approved fixes within limits -> no violation, None",
+          o.ok and "VERDICT: no violation" in o.text and o.text.endswith("Answer to give: None"), o.text[-120:])
+    o = offers("500Wt00000DDzmCIAT", [])
+    check("check_offers: nothing offered -> None", o.ok and o.text.endswith("Answer to give: None"), o.text[-80:])
+    o = offers("500Wt00000DDzmCIAT", [policy.OTHER])
+    check("check_offers: only troubleshooting -> None", o.ok and o.text.endswith("Answer to give: None"))
+    o = offers("500Wt00000DDzmCIAT", ["Free Pizza"])
+    check("check_offers: unknown fix name -> error listing the valid names",
+          not o.ok and "Priority Support Upgrade" in o.text, o.text[:120])
+    o = offers("500Wt00000DDzmCIAT", "Priority Support Upgrade")
+    check("check_offers: offered not a list -> error", not o.ok and "must be a list" in o.text, o.text[:100])
+    pol_tools = service_tools("b2b", "policy_violation_identification")
+    check("policy job gets exactly get_case, check_offers, respond",
+          [t["function"]["name"] for t in pol_tools] == ["get_case", "check_offers", "respond"])
+    enum = pol_tools[1]["function"]["parameters"]["properties"]["offered"]["items"]["enum"]
+    check("check_offers enum: the 8 catalog fixes + other, strict schema",
+          len(enum) == 9 and policy.OTHER in enum and pol_tools[1]["function"].get("strict") is True, str(enum))
+    check("routing and knowledge keep the general list, without check_offers",
+          service_tools("b2b", "case_routing") is SERVICE_TOOLS
+          and "check_offers" not in {t["function"]["name"] for t in SERVICE_TOOLS})
 
     # --- get_issue_policy (case 1381: scalability, 367 whole days after purchase, limit 365)
     o = ex("get_case", {"case_id": "500Wt00000DDyznIAD"})
@@ -660,7 +750,7 @@ def _selftest() -> int:
     pol = sorted((t for t in tasks if t.split == "dev" and t.task_type == "policy_violation_identification"
                   and t.answer != [None]), key=lambda t: t.idx)[0]
 
-    def policy(act, say, sess, t):
+    def policy_oracle(act, say, sess, t):
         cid = re.search(r"Case Id to be considered is:\s*(\w+)", t.required).group(1)
         case = act("get_case", {"case_id": cid}).text
         issue = re.search(r"Issue: \w+ \(([^)]+)\)", case).group(1)
@@ -674,7 +764,7 @@ def _selftest() -> int:
         say(f"judgment: only the article whose title is about installation covers this issue: {about}")
         return about[0] if about else None
 
-    got = run("policy_violation", pol, policy)
+    got = run("policy_violation", pol, policy_oracle)
     check(f"oracle policy idx {pol.idx}: {got} == gt {pol.answer[0]}", got == pol.answer[0])
 
     kqs = sorted((t for t in tasks if t.split == "dev" and t.task_type == "knowledge_qa"), key=lambda t: t.idx)

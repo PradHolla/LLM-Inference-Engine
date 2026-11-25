@@ -7658,3 +7658,17 @@ passage 20/20; with Qwen at KV pin 10213733807 the GPU had 972 MiB free (nvidia-
 - Policy 2/3 in this run: 1459 wrote "not listed in the approved fixes ... No violation." and answered None.
   The same task passed in p11-pol3-q-off. Reason-first removed answer-after-reason contradictions but not a
   conclusion inverted inside the reason, under sampled decoding (temperature 0.7). Flip rate not yet measured.
+
+## P11-POL2: the model reads, code decides (check_offers), 2026-11-25
+
+Change: the policy job gets only get_case, check_offers and respond. The model lists the fixes the agent
+offered (strict enum of the 8 catalog names plus "other"); policy.decide applies the reviewed records.
+Offline: decide() with a string matcher standing in for the model reproduces 99/100 b2b labels (the miss is
+the paraphrase 1426, which the tool gets right when the fix is named; selftest).
+Both arms: q-off, b2b dev, 20 policy tasks x 5 seeds, concurrency 4, GPU reranker.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| POL-7 | baseline (reason-first, current) correct runs | 85-97 / 100 | p11-pol3 was 20/20 once, p11-svc4 flipped 1459; the inversion is a per-run sampling slip on the few violation cases |
+| POL-8 | check_offers version correct runs | 97-100 / 100 | the verdict is no longer sampled; what remains is naming the offered fixes, which every earlier reason did correctly |
+| POL-9 | check_offers wall time p50 | 4-7 s | 3 model calls instead of 4-6, no knowledge searches |

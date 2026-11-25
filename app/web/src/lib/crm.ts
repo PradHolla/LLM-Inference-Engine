@@ -169,6 +169,7 @@ export const ACTION_LABELS: Record<string, string> = {
   get_case: "Open the case", search_knowledge: "Search the knowledge base", get_article: "Read an article",
   list_issues: "List known issues", list_products: "List products", agent_expertise: "Rank agents by experience",
   agent_workload: "Check agent workload", get_issue_policy: "Check the policy for this issue",
+  check_offers: "Check the offered fixes against policy",
 };
 
 export function humanize(name: string): string {

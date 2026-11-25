@@ -11,7 +11,7 @@ const ICONS: Record<string, LucideIcon> = {
   summarize_records: Sigma, find_by_name: UserSearch, query_records: Table2, get_record: FileText,
   search_text: TextSearch, search: TextSearch, run_sql: Database, respond: Send,
   get_case: FolderOpen, search_knowledge: TextSearch, get_article: BookOpen, list_issues: List,
-  list_products: Package, agent_expertise: Trophy, agent_workload: Gauge, get_issue_policy: ShieldCheck,
+  list_products: Package, agent_expertise: Trophy, agent_workload: Gauge, get_issue_policy: ShieldCheck, check_offers: ShieldCheck,
 };
 
 function ArgRow({ item }: { item: ArgItem }) {

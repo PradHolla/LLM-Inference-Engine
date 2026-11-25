@@ -523,7 +523,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     action_names, executor = None, actions.execute
     if protocol == SERVICE_PROTOCOL:
         from crm import service, service_prompt  # the service desk agent: purpose-built actions, short prompt
-        tools, executor = service.SERVICE_TOOLS, service.execute
+        tools, executor = service.service_tools(task.org, task.task_type), service.execute
         action_names = frozenset(t["function"]["name"] for t in tools)
         messages = service_prompt.service_messages(task, arm.model)
     elif protocol in ACTION_PROTOCOLS:

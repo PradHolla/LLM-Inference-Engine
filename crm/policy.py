@@ -80,6 +80,50 @@ def describe(p: IssuePolicy) -> str:
     return "\n".join(lines)
 
 
+OTHER = "other (not a named company fix)"
+
+
+def fix_key(name: str) -> str:
+    """One spelling per fix: case, spacing and a plural 's' do not matter."""
+    return re.sub(r"\s+", " ", name).strip().lower().rstrip("s")
+
+
+def catalog(org: str) -> list[str]:
+    """Every named fix in the org's records, one spelling each, sorted."""
+    names: dict[str, str] = {}
+    for p in load(org).values():
+        for f in p.fixes:
+            names.setdefault(fix_key(f.name), f.name.rstrip("s") if f.name.endswith("Workshops") else f.name)
+    return sorted(names.values())
+
+
+def decide(p: IssuePolicy, gap: int | None, offered: list[str]) -> tuple[str | None, list[str]]:
+    """The verdict for the fixes an agent offered: (answer, one line per fix). Answer None means no violation."""
+    allowed = {fix_key(f.name): f for f in p.fixes}
+    lines, broken = [], False
+    for name in dict.fromkeys(offered):
+        if name == OTHER:
+            lines.append("- something that is not a named company fix: outside this policy, allowed")
+            continue
+        f = allowed.get(fix_key(name))
+        if f is None:
+            lines.append(f"- {name}: NOT approved for {p.issue} -> violation")
+            broken = True
+        elif f.max_days is None:
+            lines.append(f"- {name}: approved, no time limit -> allowed")
+        elif gap is None:
+            lines.append(f"- {name}: approved; purchase date unknown, so the {f.max_days}-day limit cannot be "
+                         "checked -> allowed")
+        elif gap > f.max_days:
+            lines.append(f"- {name}: approved, but offered {gap} days after purchase, limit {f.max_days} -> violation")
+            broken = True
+        else:
+            lines.append(f"- {name}: approved; {gap} days after purchase, limit {f.max_days} -> allowed")
+    if not lines:
+        lines.append("- no company fix was offered: nothing for this policy to check")
+    return (p.article_id if broken else None), lines
+
+
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s.replace("’", "'").replace("‘", "'")).strip()
 
@@ -179,7 +223,7 @@ def check(org: str) -> int:
     from crm.env import CRMEnv
     from crm.tasks import load as load_tasks
     pol = load(org)
-    names = sorted({f.name for p in pol.values() for f in p.fixes})
+    names = catalog(org)
     conn = sqlite3.connect(f"file:{CRMEnv(org).db_path}?mode=ro", uri=True)
     n = right = 0
     for t in load_tasks(org):
@@ -193,20 +237,11 @@ def check(org: str) -> int:
             "SELECT TextBody FROM EmailMessage WHERE ParentId = ? UNION ALL "
             "SELECT Body FROM LiveChatTranscript WHERE CaseId = ?", [cid, cid])).lower()
         p = pol[iid]
-        allowed = {f.name.lower().rstrip("s"): f for f in p.fixes}
-        why = []
-        for name in names:
-            if not _mentions(name, body):
-                continue
-            f = allowed.get(name.lower().rstrip("s"))
-            if f is None:
-                why.append(f"{name} not approved for {p.issue}")
-            elif f.max_days is not None and gap is not None and gap > f.max_days:
-                why.append(f"{name} at {gap} days, limit {f.max_days}")
-        pred = p.article_id if why else None
+        offered = [name for name in names if _mentions(name, body)]  # a string matcher stands in for the model
+        pred, lines = decide(p, gap, offered)
         right += pred == t.answer[0]
         if pred != t.answer[0]:
-            print(f"MISS idx {t.idx} ({p.issue}, {gap} days): expected {t.answer[0]}, rule says {pred}; {why}")
+            print(f"MISS idx {t.idx} ({p.issue}, {gap} days): expected {t.answer[0]}, rule says {pred}; {lines}")
     print(f"records + rule match the answer key on {right} of {n} {org} policy tasks")
     return 0 if right == n else 1
 

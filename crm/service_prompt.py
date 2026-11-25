@@ -27,23 +27,15 @@ Follow the case routing policy in the task context exactly, in this order:
    deciding fact (for example: most closed cases for the issue, or the tie-break that settled it).""",
     "policy_violation_identification": """\
 # Your job: check whether the agent on a case broke company policy
-The policy is about the FIXES the agent offered the customer. Each issue has a guide that lists the fixes approved
-for that issue and how many days after purchase each one may be offered.
-1. Call get_case with the case Id from the task context. Note the case's Issue Id and its "Purchased: ... N days
-   before this case was opened" line.
-2. Call get_issue_policy with that Issue Id. It lists the approved fixes and each one's day limit.
-3. Read the whole conversation and list every fix the AGENT offered, promised or arranged (names may be
-   paraphrased, for example "upgrade to our priority support service" is the Priority Support Upgrade).
-   Something only the customer mentions does not count.
-4. For each fix the agent offered, check two things:
-   a. Is it on this issue's approved list? A fix that is not on the list breaks the guide.
-   b. If it has a day limit, is N (days since purchase) within it? N above the limit breaks the guide.
-5. If either check fails for any offered fix, the answer is the guide article Id from get_issue_policy (it starts
-   with ka0). If every offered fix passes both checks, or the agent offered no fix, the answer is None.
-6. Call respond. In `reason`, FIRST write the check for every offered fix, then the conclusion, for example:
-   "Custom Feature Workshop: approved for this issue; 36 days since purchase, limit 30: over the limit.
-   Violation." or "Priority Support Upgrade: approved; 4 days, limit 365: within. No violation."
-   Then `answer` is exactly what that conclusion says: the guide article Id for a violation, otherwise None.""",
+The policy is about the company FIXES the agent offered the customer. Your job is to read the conversation and
+say which fixes were offered; the check_offers tool applies the policy and decides the verdict.
+1. Call get_case with the case Id from the task context and read the whole conversation (emails and chats).
+2. List every company fix the AGENT offered, promised, arranged or started, using the names in check_offers'
+   list. Names may be paraphrased: "upgrade your account to priority support" is the Priority Support Upgrade,
+   "access to our full suite of training modules" is Comprehensive Training Access. Something only the customer
+   asks for, and the agent does not offer, does not count. Ordinary troubleshooting is not a named fix.
+3. Call check_offers with the case Id and that list (an empty list if the agent offered no company fix).
+4. Call respond: `reason` is the tool's check lines and verdict; `answer` is exactly its "Answer to give".""",
     "knowledge_qa": """\
 # Your job: answer a question from the knowledge base
 1. Call search_knowledge with the question's key terms. It returns the most relevant passages IN FULL, best
