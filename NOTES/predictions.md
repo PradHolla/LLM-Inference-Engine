@@ -7787,3 +7787,30 @@ answerable; 2.4 flags 19/20 traps and 1/20 answerable.
 | KG2-3 | test knowledge hallucination rate, 240 answers | 5-12% | off-subject answers (39) were the bulk; the subject rule, thinking and the flag target exactly that |
 | KG2-4 | test knowledge CRAG-style score | -0.05 to +0.10 | hallucinations move to "not covered" (0) rather than to correct answers; the answerable set stays small |
 | KG2-5 | test knowledge time per question p50 | 10-20 s | thinking on two to three model calls (agent steps plus the support check) at up to 2048 tokens |
+
+### P11-KG2 actuals (runs p11-kqdev-q-judge-s0; p11-ktest-q-judge-s0..2; p11-privacy-dev-q-judge), 2026-11-25
+Practice set (40, one pass): traps 20/20 "not covered" (KG2-1 HIT, above range); answerable 19/20 correct
+(KG2-2 HIT, top); 0 hallucinated; CRAG-style +0.475; p50 20 s. The miss, A06, was a correct answer whose quote
+the agent rewrote ("it is incompatible" -> "SecureFlow Suite is incompatible"), refused twice by the
+verbatim check, then the honest fallback.
+
+Test knowledge, same grader as the baseline (ragjudge --references, Sonnet 5.5):
+
+| | Before (q-off) | After (q-judge) |
+|---|---|---|
+| hallucinated (off subject or ungrounded) | 58/240 = 24% | 10/240 = 4% |
+| "not covered" | 138 | 207 |
+| answerable 27: correct / partial / incorrect / hallucinated / not covered | 1 / 14 / 5 / 7 / 0 | 5 / 4 / 4 / 2 / 12 |
+| CRAG-style per answer | -0.179 | -0.008 |
+| p50 / p95 time | 4.3 s / 9.8 s | 16.2 s / 37.8 s |
+
+- KG2-3 HIT, better than the range (4%, predicted 5-12%). KG2-4 HIT (-0.008, predicted -0.05 to +0.10).
+  KG2-5 HIT (16.2 s, predicted 10-20 s).
+- The cost is caution: 12 of 27 answerable answers became "not covered". By question: 680 x3, 684 x3, 771 x3,
+  774 x2, 753 x1; four of the five are labelled borderline and 771 is the context-free "these AI platforms".
+  Only 753 was the checks refusing (a rewritten quote, as A06); the rest the agent declined itself.
+- The 10 remaining hallucinations come from 6 vague questions ("the design suites", "the two tools").
+- 3 of 240 runs ended in the grounding fallback.
+
+Privacy (customer mode, 16 dev private_customer_information requests, q-judge): 16/16 refused clearly; the other
+person's name appeared in a tool result in 0/16; p50 4.5 s.
