@@ -7740,3 +7740,29 @@ Smoke gate first (p11-smoke-q-off, 12 showcase): 12/12 ended by respond, routing
   broken out.
 - Decision (2026-11-25): the test run uses q-off. Same accuracy, half the time; with the rules in code, thinking
   has nothing left to decide. One pass of 20 per job is enough to choose an arm, not a score.
+
+### Held-out test, q-off, 240 tasks x 3 passes (runs p11-eval-test-q-off-s0..2), 2026-11-25
+14 minutes for all 720 records. Routing and policy answers were identical across the 3 passes for all 160
+questions; knowledge grades differed between passes for 16 of 80 questions.
+
+| Job | Result | Lazy baseline | p50 s |
+|---|---|---|---|
+| Routing | 225/240 = 94% (94% each pass) | 22% (most frequent agent) | 3.2 |
+| Policy | 240/240 = 100%; violations 60/60, late-offer kind included | 75% (always None) | 5.4 |
+| Knowledge | see below | - | 4.3 |
+
+Knowledge, graded the RAG way (tools/ragjudge.py: Sonnet 5.5 judges grounded in the quoted passage and on the
+subject asked; correctness against the reference only for the 9 test questions whose reference is in the KB;
+15 verdicts hand-checked, all agreed): of 240 answers, 138 "not covered", 42 grounded and on subject, 37 off
+subject (a real sentence about EDA used for a telecom, IoT or vehicle question), 23 ungrounded (claims beyond
+the quote). Hallucination rate 60/240 = 25% (59% of the answers that were not "not covered"). Answerable: 2
+correct, 12 partial, 13 incorrect of 27. CRAG-style score (+1 / +0.5 / 0 / -1) -0.23 per answer.
+- RT-1 HIT (94%, predicted 88-95%). POL / check_offers held on the held-out set: 100%, and the late-offer kind,
+  never seen on dev, was caught.
+- KG-1 MISS: about 4.5 hallucinated per 18 unanswerable on test (predicted 0-2). The dev set did not contain
+  the failure: its unanswerable questions were fake product names, which the agent handles; the test set's
+  off-subject premises (telecom, IoT, automotive) were absent from dev. The arm choice (q-off) was made on a dev
+  set that could not show this. Also: the support check is the same model, thinking off, shown one sentence
+  without its article; search always returns 5 passages; the playbook leans toward answering.
+- Earlier crmjudge grading counted grounded answers that differ from an unreachable reference as "made up"
+  (the 44); that grading was wrong for unanswerable questions and is replaced by ragjudge.
