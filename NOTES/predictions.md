@@ -7551,3 +7551,25 @@ hit max_turns (20 calls, no answer); q-think solved handle_time and case_routing
 wrong_stage and scored F1 0.08-0.10 on knowledge_qa; xLAM solved none. On
 private_customer_information q-off answered another customer's question with four order Ids, the
 leak the paper reports for every model under the standard prompt.
+
+## P11-EVAL  Service desk agent: practice (60 dev x 3 thinking settings x 3 passes) and scoring (240 test). Written 2026-11-25 before the run
+
+**Configuration.** Qwen3-8B fp8 on the A10G (vLLM 0.27.1, fp8 KV, 32k window, prefix caching, hermes tool
+parser, V1 runner), protocol `service_v1`: purpose-built service actions, short job playbooks, answer +
+reason, hybrid passage retrieval with cross-encoder reranking and a calibrated "not relevant" cutoff.
+Settings: `q-off` (thinking off), `q-b128` (thinking budget 128 on every step), `q-b128-first` (budget
+128 on the first step only). Jobs: case_routing, policy_violation_identification, knowledge_qa (20 dev
+and 80 test each). Knowledge answers graded by Claude Haiku 5.5 (answerable questions) and by rule
+(questions naming a product absent from the data: correct only if the agent says it is not covered).
+
+| # | Quantity | Predicted | Derivation |
+|---|---|---|---|
+| E-1 | Routing accuracy, dev, q-off | 60-80% | 3/3 on the showcase after the tie-break fix; the lazy baseline (most frequent agent) is 25% |
+| E-2 | Policy accuracy, dev, q-off | 75-90% | dev is 85% "None"; the agent answered None on all 3 showcase cases, so it sits near the lazy baseline |
+| E-3 | Policy violations found (recall), dev, all settings | 0-2 of 3 | the model rarely names a violation; 1 of 3 at best in every smoke run |
+| E-4 | Knowledge, answerable, correct + half of partial, q-off | 40-60% | right passage now in the top 3 more often; answers are paraphrases graded by meaning |
+| E-5 | Knowledge, not in the data, correct "not covered" | 60-85% | the calibrated cutoff plus the subject rule; 1 of 3 before reranking |
+| E-6 | q-b128 minus q-off, mean over jobs | +0 to +8 points | Phase 7: 128 tokens gave +8 on maths; agent steps need less reasoning, so the gain may shrink or vanish |
+| E-7 | Time per question, p50 | q-off 5-9 s, q-b128-first 7-12 s, q-b128 12-25 s | ~2.6 s per 128 thinking tokens at ~50 tok/s, times 1 step or ~4 steps |
+| E-8 | Answer flips between passes, per setting | 10-20% of tasks | sampled decoding on multi-step tasks; Phase 4 floors were 1.8-7.8% on single-step items |
+| E-9 | Haiku judge cost for all knowledge records | under $0.50 | ~300 records x ~1.5k input and ~300 output tokens at $0.10 / $0.50 per million |

@@ -55,6 +55,14 @@ class Arm:
     max_tokens: int
     enable_thinking: bool | None
     thinking_token_budget: int | None = None
+    think_first_only: bool = False  # think on step 0 (planning) only; later steps run thinking off
+
+
+def step_arm(arm: Arm, step: int) -> Arm:
+    """The arm a given step runs with: think_first_only switches to q-off sampling after the first step."""
+    if not arm.think_first_only or step == 0:
+        return arm
+    return dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None, temperature=0.7, top_p=0.8)
 
 
 ARMS = {
@@ -63,6 +71,9 @@ ARMS = {
     "xlam": Arm("xlam", "Salesforce/Llama-xLAM-2-8b-fc-r", 0.6, 0.9, None, None, 2048, None),
     # Near-greedy, the setting function-calling benchmarks use; the no-greedy warning is Qwen's, not Llama's.
     "xlam-t0": Arm("xlam-t0", "Salesforce/Llama-xLAM-2-8b-fc-r", 0.0, 1.0, None, None, 2048, None),
+    # Phase 7's sweet spot: a 128-token budget beat off and every budget from 256 to 1024 on maths.
+    "q-b128": Arm("q-b128", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 2048, True, 128),
+    "q-b128-first": Arm("q-b128-first", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 2048, True, 128, think_first_only=True),
 }
 
 
@@ -311,17 +322,28 @@ def _loads_or_none(s: str):
         return None
 
 
-def _sources(trajectory: list[dict]) -> list[dict]:
-    """Knowledge articles the agent actually opened (get_article results), in order, for the answer card."""
+def _sources(trajectory: list[dict], cited: str = "") -> list[dict]:
+    """Articles behind the answer: those opened with get_article, plus search hits whose title the answer cites."""
     out, seen = [], set()
+
+    def add(aid: str, title: str) -> None:
+        if aid and aid not in seen:
+            seen.add(aid)
+            out.append({"id": aid, "title": title})
+
+    cited = cited.lower()
     for m in trajectory:
         c = m.get("content") or ""
-        if m.get("role") == "tool" and c.startswith("ARTICLE "):
-            aid = c.split("\n", 1)[0].split()[1]
-            title = next((ln[7:].strip() for ln in c.split("\n") if ln.startswith("Title: ")), "")
-            if aid not in seen:
-                seen.add(aid)
-                out.append({"id": aid, "title": title})
+        if m.get("role") != "tool":
+            continue
+        if c.startswith("ARTICLE "):
+            add(c.split("\n", 1)[0].split()[1],
+                next((ln[7:].strip() for ln in c.split("\n") if ln.startswith("Title: ")), ""))
+        elif cited and "'passage'" in c:  # search_knowledge rows: Id, Title, passage, score
+            for row in _preview(c)["preview"]:
+                title = str(row.get("Title") or "")
+                if title and title.lower() in cited:
+                    add(str(row.get("Id") or ""), title)
     return out
 
 
@@ -520,7 +542,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         for step in range(max_turns):
             if on_event:
                 on_event({"type": "step_start", "step": step})
-            res, mt, reduced, end, err = await model_call(http_client, base_url, arm, messages, seed, window, tools)
+            res, mt, reduced, end, err = await model_call(http_client, base_url, step_arm(arm, step), messages, seed,
+                                                          window, tools)
             n_calls += 1
             rec = {"run_id": run_id, "org": task.org, "idx": task.idx, "task_type": task.task_type, "arm": arm.name,
                    "task_started_at": started_at, "step": step, "max_tokens": mt, "max_tokens_reduced": reduced, "prompt_tokens": None,
@@ -590,7 +613,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     if on_event:
         wall = (time.perf_counter() - t0) * 1000
         if answer is not None:
-            on_event({"type": "answer", "text": answer, "reason": reason, "sources": _sources(trajectory),
+            on_event({"type": "answer", "text": answer, "reason": reason, "sources": _sources(trajectory, f"{reason or ''} {answer or ''}"),
                       "expected": None if task.reward_metric in ("none", "privacy_rejection") else list(task.answer),
                       "correct": None if g["reward"] is None or task.reward_metric != "exact_match"
                       else g["reward"] == 1.0})

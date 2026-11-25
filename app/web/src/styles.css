@@ -434,6 +434,8 @@ button { color: inherit; }
 .crm-snippet mark { padding: 0 .15em; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: inherit; }
 .crm-table td.wide { min-width: 280px; white-space: normal; }
+.crm-table td.passage { min-width: 420px; max-width: 640px; font-family: var(--reading-font); font-size: 13px; line-height: 1.5; }
+.crm-table td.passage span { white-space: pre-wrap; }
 .crm-answer-expected { margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--text-soft);
   font-size: 14px; line-height: 1.5; }
 .crm-answer-expected span { display: block; margin-bottom: 2px; color: var(--text-faint); font-size: 11px;

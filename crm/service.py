@@ -118,27 +118,53 @@ def get_case(session: TaskSession, case_id) -> Observation:
 
 
 def search_knowledge(session: TaskSession, query, limit) -> Observation:
-    """Hybrid article search (BM25 + passage embeddings, RRF); plain BM25 if embeddings are unavailable."""
+    """Passage search: hybrid candidates, cross-encoder rerank; full passages with scores, or plainly 'nothing relevant'."""
     t0 = time.monotonic()
     # At least 3: a model asking for 1 took the first hit unseen and answered from the wrong article.
     n = max(MIN_SEARCH, _bounded(limit, DEFAULT_SEARCH, MAX_SEARCH, "limit"))
-    obs, best = retrieval.bm25_articles(session, str(query or ""), min(n * 8, session.row_cap))
-    if not obs.ok:
-        return obs
-    hits = retrieval.hybrid_rank(session.org, str(query or ""), best, n)
-    if hits is not None:
-        keep, note = [{"Id": h.Id, "field": h.field, "snippet": h.snippet} for h in hits], ""
-    else:
-        keep = list(best.values())[:n]
-        note = "(no article matched all words; showing articles matching any word)\n" \
-            if obs.text.startswith("(no record matched all words") else ""
-    titles = {r["Id"]: r["Title"] for r in _rows(
-        session, f"SELECT Id, Title FROM Knowledge__kav WHERE Id IN ({', '.join('?' * len(keep))})",
-        [r["Id"] for r in keep])} if keep else {}
-    names = ["Id", "Title", "field", "snippet"]
-    text, shown, trunc = render_rows(names, [(r["Id"], titles.get(r["Id"]), r["field"], r["snippet"]) for r in keep],
-                                     len(keep), session.char_cap - len(note))
-    return _obs(note + text, len(keep), shown, trunc, t0)
+    q = str(query or "")
+    if not retrieval.tokenize(q):
+        raise ActionError("search query has no searchable words")
+    res = retrieval.search(session.org, q, n)
+    if res is None:
+        raise ActionError("the knowledge base index is unavailable")
+    passages = res.passages if res.relevant else retrieval._pick(res.ranked, n)
+    if not passages:
+        return _obs(retrieval.not_covered_text(res), 0, 0, False, t0)
+    notes = []
+    missing = _missing_names(session, q)
+    if missing:  # a fact, not a score: the reranker cannot tell an absent product from a similar topic
+        notes.append("NOTE: no article and no product in the knowledge base mentions "
+                     + ", ".join(f'"{m}"' for m in missing) + ". Do not answer with another product's information.")
+    if not res.relevant:  # below the cutoff: still shown (policy searches use short keywords), but flagged
+        notes.append(f"LOW RELEVANCE: no passage clearly matches (best score {res.best_score:.2f}, below "
+                     f"{retrieval.MIN_RELEVANCE:.2f}); the knowledge base may not cover this.")
+    if res.mode != "reranked":
+        notes.append("(unranked: the relevance model is unavailable; passages may not answer the question)")
+    note = "".join(f"{n_}\n" for n_ in notes)
+    names = ["Id", "Title", "passage", "score"]
+    text, shown, trunc = render_rows(
+        names, [(p.Id, p.Title, p.text, None if p.score is None else round(p.score, 2)) for p in passages],
+        len(passages), session.char_cap - len(note))
+    return _obs(note + text, len(passages), shown, trunc, t0)
+
+
+# Product-like names: a word with an inner capital (ChipEffic) or a hyphenated capitalised word (AI-VeriSim),
+# with the capitalised words that follow it. Plain words and all-caps acronyms are not checked.
+_NAME_RE = re.compile(r"\b((?:[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Z][A-Za-z0-9]*-[A-Za-z0-9-]+)(?:\s+[A-Z][A-Za-z0-9-]*)*)")
+
+
+def _missing_names(session: TaskSession, query: str) -> list[str]:
+    """Product-like names in the query that appear in no knowledge article and no Product2 name."""
+    out = []
+    for name in dict.fromkeys(m.group(1) for m in _NAME_RE.finditer(query)):
+        key = f"%{name.split()[0]}%"
+        hits = session.conn.execute(
+            "SELECT (SELECT COUNT(*) FROM Knowledge__kav WHERE Title LIKE ?1 OR Summary LIKE ?1 OR FAQ_Answer__c LIKE ?1)"
+            " + (SELECT COUNT(*) FROM Product2 WHERE Name LIKE ?1)", (key,)).fetchone()[0]
+        if not hits:
+            out.append(name)
+    return out
 
 
 def get_article(session: TaskSession, article_id) -> Observation:
@@ -303,10 +329,11 @@ SERVICE_TOOLS: list[dict] = [
     _tool("get_case", "Read one support case in full: its fields (with issue and product names), its emails, live "
           "chat transcripts and change history, each oldest first. Long bodies are cut with a note.",
           {"case_id": _s("The Case Id (starts with 500).")}, ["case_id"]),
-    _tool("search_knowledge", "Search knowledge articles by keywords and meaning (articles only). Returns Id, Title and a snippet of "
-          "the best matching passage, one row per article, best first.",
-          {"query": _s("Keywords to search for."),
-           "limit": {"type": "integer", "description": f"Max articles, 1 to {MAX_SEARCH}; 0 means {DEFAULT_SEARCH}."}},
+    _tool("search_knowledge", "Search the knowledge base. Returns the most relevant passages IN FULL, best first, each "
+          "with its article Id, Title and a relevance score (higher is more relevant; at most 2 passages per article). "
+          "If no article is relevant it says so plainly instead of returning weak matches.",
+          {"query": _s("Keywords or the question to search for."),
+           "limit": {"type": "integer", "description": f"Max passages, 1 to {MAX_SEARCH}; 0 means {DEFAULT_SEARCH}."}},
           ["query", "limit"]),
     _tool("get_article", "Read one knowledge article in full: Title, Summary and the complete FAQ answer.",
           {"article_id": _s("The knowledge article Id (starts with ka0).")}, ["article_id"]),
@@ -359,7 +386,7 @@ def _selftest() -> int:
     env = CRMEnv("b2b")
     s = env.open_task()
     ex = lambda name, args: execute(s, name, args, "b2b")
-    rows = lambda o: ast.literal_eval(next(ln for ln in o.text.split("\n") if ln.startswith("["))) if o.ok else []
+    rows = lambda o: ast.literal_eval(next((ln for ln in o.text.split("\n") if ln.startswith("[")), "[]")) if o.ok else []
     raw = lambda q, p=(): [dict(zip([d[0] for d in c.description], r)) for c in [s.conn.execute(q, p)] for r in c]
 
     # --- schemas
@@ -403,10 +430,19 @@ def _selftest() -> int:
     check("get_case: missing id -> error", not o.ok and "case_id" in o.text, o.text[:100])
 
     # --- search_knowledge / get_article
-    o = ex("search_knowledge", {"query": "HPC Accelerator Suite", "limit": 0})
-    check("search_knowledge: default 5, one row per article, Knowledge only", o.ok and o.rows_total == 5
-          and len({r["Id"] for r in rows(o)}) == 5 and all(r["Title"] for r in rows(o)), o.text[:140])
-    o = ex("search_knowledge", {"query": "design", "limit": 99})
+    norm = lambda x: " ".join(str(x).split())
+    o = ex("search_knowledge", {"query": "extended technical support offer duration", "limit": 0})
+    rs = rows(o)
+    arts = {r["Id"]: norm(raw("SELECT Summary || ' ' || FAQ_Answer__c AS t FROM Knowledge__kav WHERE Id = ?", [r["Id"]])[0]["t"])
+            for r in rs}
+    check("search_knowledge: default 5 passages, keys Id/Title/passage/score, <= 2 per article, scores descending",
+          o.ok and o.rows_total == 5 and all(set(r) == {"Id", "Title", "passage", "score"} for r in rs)
+          and max(collections.Counter(r["Id"] for r in rs).values()) <= 2
+          and [r["score"] for r in rs] == sorted((r["score"] for r in rs), reverse=True), o.text[:140])
+    check("search_knowledge: every passage is shown in full (a whole stretch of its article, > 200 chars)",
+          all(norm(r["passage"]) in arts[r["Id"]] and len(r["passage"]) > 200 for r in rs),
+          f"passage lengths {[len(r['passage']) for r in rs]}")
+    o = ex("search_knowledge", {"query": "TechPulse EDA software installation support", "limit": 99})
     check("search_knowledge: limit clamped to 10", o.ok and o.rows_total == 10, f"{o.rows_total}")
     o = ex("search_knowledge", {"query": "x' OR 1=1 --", "limit": 3})
     check("search_knowledge: injection text is just words", o.ok or "searchable" in o.text, o.text[:100])
@@ -414,7 +450,23 @@ def _selftest() -> int:
     check("search_knowledge: no words -> error", not o.ok and "no searchable words" in o.text, o.text)
     o = ex("search_knowledge", {"query": "billing", "limit": -1})
     check("search_knowledge: negative limit -> error", not o.ok and "between 1 and 10" in o.text, o.text)
-    aid = rows(ex("search_knowledge", {"query": "billing", "limit": 1}))[0]["Id"]
+    o = ex("search_knowledge", {"query": "return policy for purchased items", "limit": 1})
+    check("search_knowledge: limit 1 still returns at least 3 passages", o.ok and o.rows_total == 3, f"{o.rows_total}")
+    small = CRMEnv("b2b", char_cap=3000).open_task()
+    o = execute(small, "search_knowledge", {"query": "extended technical support offer duration", "limit": 10}, "b2b")
+    check("search_knowledge: char cap (3000) is a safety net, whole rows only", o.ok and len(o.text) <= 3000
+          and o.truncated and o.rows_shown < o.rows_total, f"{len(o.text)} chars, shown {o.rows_shown} of {o.rows_total}")
+    small.close()
+    nq = next(t for t in tasks if t.idx == 688).query
+    o = ex("search_knowledge", {"query": nq, "limit": 5})
+    check("search_knowledge: below the cutoff (idx 688) -> passages still shown, flagged LOW RELEVANCE",
+          o.ok and o.rows_total >= 3 and "LOW RELEVANCE" in o.text.split("\n")[0], o.text[:200])
+    o = ex("search_knowledge", {"query": "ChipEffic Pro compliance standards", "limit": 3})
+    check("search_knowledge: absent product -> NOTE names it", o.ok and o.text.startswith(
+        'NOTE: no article and no product in the knowledge base mentions "ChipEffic Pro"'), o.text[:160])
+    o = ex("search_knowledge", {"query": "SecureAnalytics Pro scalability", "limit": 3})
+    check("search_knowledge: a real product -> no NOTE", o.ok and not o.text.startswith("NOTE"), o.text[:120])
+    aid = rows(ex("search_knowledge", {"query": "return policy for purchased items", "limit": 1}))[0]["Id"]
     o = ex("get_article", {"article_id": aid})
     full = raw("SELECT FAQ_Answer__c f FROM Knowledge__kav WHERE Id = ?", [aid])[0]["f"]
     check("get_article: full FAQ answer", o.ok and full in o.text and o.text.startswith(f"ARTICLE {aid}"), f"{len(o.text)} chars")
@@ -570,7 +622,7 @@ def _selftest() -> int:
         issue = re.search(r"Issue: \w+ \(([^)]+)\)", case).group(1)
         offer = "Workflow Optimization Consultation"
         say(f"case issue is {issue!r}; in the chat the agent offered {offer!r} ({offer in case})")
-        hits = rows(act("search_knowledge", {"query": issue, "limit": 5}))
+        hits = list({h["Id"]: h for h in rows(act("search_knowledge", {"query": issue, "limit": 5}))}.values())
         for h in hits:
             body = act("get_article", {"article_id": h["Id"]}).text
             say(f"candidate {h['Id']} {h['Title']!r}: mentions the offer: {offer in body}")
@@ -591,7 +643,7 @@ def _selftest() -> int:
 
     def knowledge(act, say, sess, t):
         say("the question is about data privacy compliance in telecom networks; keywords from it")
-        hits = rows(act("search_knowledge", {"query": "data privacy compliance telecom networks", "limit": 5}))
+        hits = list({h["Id"]: h for h in rows(act("search_knowledge", {"query": "data privacy compliance telecom networks", "limit": 5}))}.values())
         key = set(normalize_answer(t.answer[0]).split())
         best = (-1.0, None, "")
         for h in hits:

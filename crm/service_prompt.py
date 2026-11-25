@@ -38,17 +38,20 @@ Follow the case routing policy in the task context exactly, in this order:
    reason what the agent did against which rule (or that nothing contradicted policy).""",
     "knowledge_qa": """\
 # Your job: answer a question from the knowledge base
-1. Call search_knowledge with the key terms of the question. Compare the titles and snippets of ALL results,
-   then open the one or two that best match the question with get_article.
-2. CHECK THE SUBJECT: if the question names a product or topic, the article must be about THAT product or
-   topic. An article about a different product does not answer the question, however similar it sounds.
-   Never attribute one product's features to another.
-3. If no article is about what was asked, answer: "Our knowledge base does not cover <the product or topic>."
-   That honest answer is correct; a guess about a different product is wrong.
-4. Otherwise answer in ONE short sentence, reusing the article's own wording where you can, adding nothing the
-   article does not say.
-5. Call respond with that sentence as the answer and, as the reason, the article's title (or that no article
-   covers it).""",
+1. Call search_knowledge with the question's key terms. It returns the most relevant passages IN FULL, best
+   first, each with a relevance score; read all of them. Use get_article only if a passage is cut off or you
+   need its surrounding context.
+2. If search_knowledge says no article is relevant, or its NOTE says no article and no product mentions the
+   product you were asked about, answer: "Our knowledge base does not cover <the product or topic>." That honest
+   answer is correct; a guess is wrong. A LOW RELEVANCE flag means read carefully: answer only if a passage
+   actually states the answer.
+3. CHECK THE SUBJECT: if the question names a product, the passage must be about THAT product. A passage about a
+   different product does not answer the question, however similar it sounds; never attribute one product's
+   features to another. If no returned passage covers what was asked, answer that the knowledge base does not
+   cover it.
+4. Otherwise answer in ONE short sentence from the passage, reusing its wording, adding nothing it does not say.
+5. Call respond with that sentence as the answer and, as the reason, the title of the article it came from (or
+   that no article covers it).""",
 }
 
 GENERIC_JOB = """\

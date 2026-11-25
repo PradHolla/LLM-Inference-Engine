@@ -33,7 +33,8 @@ export function ResultTable({ columns, rows }: { columns: string[]; rows: Record
       <thead><tr>{names.map((name) => <th key={name} scope="col" className={typeof rows[0][name] === "number" ? "num" : undefined}>
         {name}</th>)}</tr></thead>
       <tbody>{rows.map((row, index) => <tr key={index}>
-        {names.map((name) => <td key={name} className={typeof row[name] === "number" ? "num" : name === "snippet" ? "wide" : undefined}>
+        {names.map((name) => <td key={name} className={typeof row[name] === "number" ? "num"
+          : name === "snippet" || name === "passage" ? "wide passage" : undefined}>
           <Cell value={row[name]} column={name} />
         </td>)}
       </tr>)}</tbody>
