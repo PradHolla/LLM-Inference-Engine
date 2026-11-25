@@ -18,6 +18,8 @@ serve = [
     "transformers>=4.44",
     "jinja2>=3.1",
     "langgraph==1.2.12",
+    # crm/retrieval.py: embedding search for the service agent (ONNX runtime, no PyTorch).
+    "fastembed==0.9.1",
 ]
 
 [tool.uv]

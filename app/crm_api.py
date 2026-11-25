@@ -159,8 +159,9 @@ def _protocol(agent: str) -> str:
 
 
 def _models_payload() -> dict:
+    # The demo runs on Qwen only (owner, 2026-11-24); CRM_MODEL_PICKER=1 brings the xLAM switch back.
     return {"current": _STATE["current"], "switching": _STATE["switching"],
-            "options": MODEL_OPTIONS}
+            "options": MODEL_OPTIONS, "picker": os.environ.get("CRM_MODEL_PICKER") == "1"}
 
 
 async def _finish_switch(model_id: str) -> None:

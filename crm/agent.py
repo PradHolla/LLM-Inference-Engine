@@ -290,6 +290,20 @@ def _seen_before(earlier: list[dict], name: str, args: dict) -> int | None:
     return None
 
 
+_MERGED = re.compile(r"^\s*answer\s*:\s*(.*?)\s*\n?\s*reason\s*:\s*(.*)$", re.I | re.S)
+
+
+def _split_answer(answer: str, reason: str) -> tuple[str, str | None]:
+    """(answer, reason); a model that wrote 'answer: X reason: Y' into the answer field gets it split."""
+    answer, reason = answer.strip(), reason.strip()
+    m = _MERGED.match(answer)
+    if m and not reason:
+        answer, reason = m.group(1).strip(), m.group(2).strip()
+    elif re.match(r"^\s*answer\s*:", answer, re.I):
+        answer = re.sub(r"^\s*answer\s*:\s*", "", answer, flags=re.I)
+    return answer, reason or None
+
+
 def _loads_or_none(s: str):
     try:
         return json.loads(s)
@@ -355,8 +369,9 @@ def _preview(text: str) -> dict:
         return {"ok": True, "rows_total": None, "rows_shown": None, "truncated": len(text) > 6000, "columns": [],
                 "preview": [], "error": None, "text": text[:6000]}
     cols = list(rows[0]) if rows else []
-    return {"ok": ok, "rows_total": total if total is not None else len(rows), "rows_shown": min(len(rows), 8),
-            "truncated": total is not None, "columns": cols, "preview": rows[:8],
+    # 20 rows: an 8-row preview hid the issue the agent picked from a 15-row list
+    return {"ok": ok, "rows_total": total if total is not None else len(rows), "rows_shown": min(len(rows), 20),
+            "truncated": total is not None, "columns": cols, "preview": rows[:20],
             "error": None if ok else text[:500], "text": None}
 
 
@@ -426,7 +441,8 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             args = None
         texts.append(json.dumps(args) if args is not None else str(fn.get("arguments")))
         if name == "respond" and isinstance(args, dict) and "answer" in args:
-            out.update(answer=str(args["answer"]).strip(), reason=str(args.get("reason") or "").strip() or None)
+            ans, why = _split_answer(str(args["answer"]), str(args.get("reason") or ""))
+            out.update(answer=ans, reason=why)
             reply = "Answer submitted."
         elif action_names is not None:
             prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None

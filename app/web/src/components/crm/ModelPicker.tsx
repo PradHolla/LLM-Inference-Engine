@@ -68,6 +68,10 @@ export function ModelPicker({ onBusyChange }: { onBusyChange?: (busy: boolean) =
   }
   const selected = target ?? models.current;
   const shown = models.options.find((option) => option.id === selected);
+  if (!models.picker) {  // single-model demo: name the model, no switch
+    return <div className="model-picker"><span className="model-fixed" title={shown?.note}>{shown?.label ?? models.current}</span>
+      <p className="model-note">{shown?.note ?? ""}</p></div>;
+  }
   return <div className="model-picker">
     <div className="crm-segments" role="radiogroup" aria-label="Model">
       {models.options.map((option) => <button key={option.id} type="button" role="radio"

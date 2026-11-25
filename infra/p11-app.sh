@@ -23,11 +23,19 @@ launch() {
     esac
 }
 
+FASTEMBED_PIN=fastembed==0.9.1
+FASTEMBED_CACHE=/opt/llm/hf-cache/fastembed
+
 start_app() {
+    # Hybrid knowledge search needs fastembed; without it the app falls back to BM25, so a failure here only warns.
+    if ! "$PY" -c "import fastembed" 2>/dev/null; then
+        /home/ubuntu/.local/bin/uv pip install --python "$PY" "$FASTEMBED_PIN" || echo "P11_WARN: fastembed install failed"
+    fi
+    FASTEMBED_CACHE_PATH="$FASTEMBED_CACHE" "$PY" -m crm.retrieval build --org all || echo "P11_WARN: embedding cache build failed"
     systemctl stop llm-app 2>/dev/null
     for i in $(seq 1 20); do ss -ltn | grep -q ':8090 ' || break; sleep 1; done
     systemd-run --unit=llm-app --collect --working-directory=/opt/llm \
-        --setenv=PYTHONUNBUFFERED=1 --setenv=CRM_AGENT_LIVE=1 --setenv=CRM_VLLM_URL=http://localhost:8000 \
+        --setenv=PYTHONUNBUFFERED=1 --setenv=FASTEMBED_CACHE_PATH="$FASTEMBED_CACHE" --setenv=CRM_AGENT_LIVE=1 --setenv=CRM_VLLM_URL=http://localhost:8000 \
         "$PY" -m uvicorn app.server:app --host 127.0.0.1 --port 8090 >/dev/null 2>&1
     ok=0
     for i in $(seq 1 30); do

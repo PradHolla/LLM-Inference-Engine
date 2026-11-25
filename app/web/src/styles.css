@@ -425,6 +425,8 @@ button { color: inherit; }
   mask-image: linear-gradient(to bottom, #000 60%, transparent); }
 .crm-doc.open { max-height: none; mask-image: none; }
 .crm-doc-toggle { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.model-fixed { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--surface); color: var(--text); font-size: 13px; }
 .crm-answer-reason, .crm-answer-sources { margin: 10px 0 0; color: var(--text-soft); font-size: 14px; line-height: 1.5; }
 .crm-answer-reason span, .crm-answer-sources > span:first-child { display: block; margin-bottom: 3px; color: var(--text-faint);
   font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }

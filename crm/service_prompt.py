@@ -18,9 +18,11 @@ JOBS = {
 Follow the case routing policy in the task context exactly, in this order:
 1. Call list_issues and pick the ONE known issue most similar to the new case's subject and description.
 2. Call agent_expertise with kind "issue" and that issue's Id. The agent with the most closed cases wins.
-3. Only if several agents tie at the top: call list_products, pick the product the case is about, call
-   agent_expertise with kind "product", and among the tied agents keep the one with the most closed cases.
-4. Only if still tied: call agent_workload for the tied agents and pick the one with the fewest open cases.
+3. If several agents tie at the top (the result says TIED), do NOT skip this step: call list_products, pick
+   the product the case is about, and call agent_expertise with kind "product" and `among` set to exactly the
+   tied agents' Ids. The one with the most closed cases for that product wins.
+4. Only if still tied: call agent_workload for the agents still tied and pick the one with the fewest open
+   cases.
 5. Call respond with the winning agent's Id as the answer (it starts with 005) and, as the reason, the
    deciding fact (for example: most closed cases for the issue, or the tie-break that settled it).""",
     "policy_violation_identification": """\
@@ -38,9 +40,15 @@ Follow the case routing policy in the task context exactly, in this order:
 # Your job: answer a question from the knowledge base
 1. Call search_knowledge with the key terms of the question. Compare the titles and snippets of ALL results,
    then open the one or two that best match the question with get_article.
-2. Answer in ONE short sentence, reusing the article's own wording where you can. Do not add anything the
-   articles do not say. If no article answers the question, say the knowledge base does not cover it.
-3. Call respond with that sentence as the answer and the article's title as the reason.""",
+2. CHECK THE SUBJECT: if the question names a product or topic, the article must be about THAT product or
+   topic. An article about a different product does not answer the question, however similar it sounds.
+   Never attribute one product's features to another.
+3. If no article is about what was asked, answer: "Our knowledge base does not cover <the product or topic>."
+   That honest answer is correct; a guess about a different product is wrong.
+4. Otherwise answer in ONE short sentence, reusing the article's own wording where you can, adding nothing the
+   article does not say.
+5. Call respond with that sentence as the answer and, as the reason, the article's title (or that no article
+   covers it).""",
 }
 
 GENERIC_JOB = """\

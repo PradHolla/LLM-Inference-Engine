@@ -67,7 +67,7 @@ export type CrmExample = {
   context_summary: string; mode: CrmMode; has_expected: boolean; job?: string;
 };
 export type CrmModelOption = { id: string; label: string; note: string };
-export type CrmModels = { current: string; switching: boolean; options: CrmModelOption[] };
+export type CrmModels = { current: string; switching: boolean; options: CrmModelOption[]; picker?: boolean };
 export type AskRequest = {
   question: string | null; example_id: string | null; mode: CrmMode; thinking: boolean; agent: CrmAgent;
 };

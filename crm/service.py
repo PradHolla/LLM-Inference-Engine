@@ -12,7 +12,8 @@ import re
 import sys
 import time
 
-from crm.actions import ActionError, _close, _fail, _parse_rows
+from crm.actions import ActionError, _close, _fail
+from crm import retrieval
 from crm.env import Observation, TaskSession, render_rows
 from crm.prompts import TOOLS, _tool
 
@@ -117,18 +118,20 @@ def get_case(session: TaskSession, case_id) -> Observation:
 
 
 def search_knowledge(session: TaskSession, query, limit) -> Observation:
+    """Hybrid article search (BM25 + passage embeddings, RRF); plain BM25 if embeddings are unavailable."""
     t0 = time.monotonic()
     # At least 3: a model asking for 1 took the first hit unseen and answered from the wrong article.
     n = max(MIN_SEARCH, _bounded(limit, DEFAULT_SEARCH, MAX_SEARCH, "limit"))
-    obs = session.search(str(query or ""), ["Knowledge__kav"], limit=min(n * 8, session.row_cap))
+    obs, best = retrieval.bm25_articles(session, str(query or ""), min(n * 8, session.row_cap))
     if not obs.ok:
         return obs
-    note = "(no article matched all words; showing articles matching any word)\n" \
-        if obs.text.startswith("(no record matched all words") else ""
-    best: dict[str, dict] = {}
-    for r in _parse_rows(obs.text):  # one row per article: its best-ranked matching passage
-        best.setdefault(r["Id"], r)
-    keep = list(best.values())[:n]
+    hits = retrieval.hybrid_rank(session.org, str(query or ""), best, n)
+    if hits is not None:
+        keep, note = [{"Id": h.Id, "field": h.field, "snippet": h.snippet} for h in hits], ""
+    else:
+        keep = list(best.values())[:n]
+        note = "(no article matched all words; showing articles matching any word)\n" \
+            if obs.text.startswith("(no record matched all words") else ""
     titles = {r["Id"]: r["Title"] for r in _rows(
         session, f"SELECT Id, Title FROM Knowledge__kav WHERE Id IN ({', '.join('?' * len(keep))})",
         [r["Id"] for r in keep])} if keep else {}
@@ -160,12 +163,38 @@ def list_products(session: TaskSession) -> Observation:
                          [DESC_CAP])
 
 
-def agent_expertise(session: TaskSession, kind, rid, top) -> Observation:
+def _among(among) -> list[str]:
+    """Validated, de-duplicated User Ids to rank; empty means all agents."""
+    if among in (None, ""):
+        return []
+    if not isinstance(among, list):
+        raise ActionError("among must be a list of User Ids (an empty list means all agents)")
+    ids = list(dict.fromkeys(_id(a, "each id in among") for a in among))
+    if len(ids) > MAX_AGENTS:
+        raise ActionError(f"at most {MAX_AGENTS} ids in among, got {len(ids)}")
+    return ids
+
+
+def _tie_note(kind: str, tied: list[dict]) -> str:
+    """The sentence after the ranking: who wins, or the next routing step when the top is tied."""
+    ids = ", ".join(r["OwnerId"] for r in tied)
+    if len(tied) == 1:
+        return f"No tie: {tied[0]['Name'] or tied[0]['OwnerId']} ({tied[0]['OwnerId']}) clearly has the most closed cases."
+    if kind == "issue":
+        return (f"TIED: {len(tied)} agents share the top count ({ids}). Per the routing policy, next call "
+                f"agent_expertise with kind \"product\" for the product this case is about, with among set to "
+                f"these {len(tied)} agent ids.")
+    return (f"Still TIED among {len(tied)} agents ({ids}). Per the policy, next call agent_workload for these "
+            "agents and pick the fewest open cases.")
+
+
+def agent_expertise(session: TaskSession, kind, rid, top, among=None) -> Observation:
     t0 = time.monotonic()
     if kind not in KINDS:
         raise ActionError(f"kind must be one of {', '.join(KINDS)}, got {kind!r}")
     n = _bounded(top, DEFAULT_TOP, MAX_TOP, "top")
     rid = _id(rid, f"{kind} id")
+    only = _among(among)
     if kind == "issue":
         _exists(session, "Issue__c", rid, "issue", "Use list_issues to see the issue Ids.")
         frm, cond = '"Case" c', "c.IssueId__c = ?"
@@ -173,19 +202,33 @@ def agent_expertise(session: TaskSession, kind, rid, top) -> Observation:
         _exists(session, "Product2", rid, "product", "Use list_products to see the product Ids.")
         frm = '"Case" c JOIN OrderItem oi ON oi.Id = c.OrderItemId__c'
         cond = "oi.Product2Id = ?"
+    marks = f" AND c.OwnerId IN ({', '.join('?' * len(only))})" if only else ""
     allrows = _rows(session, f"SELECT c.OwnerId AS OwnerId, u.FirstName || ' ' || u.LastName AS Name, "
                     f"COUNT(*) AS closed_cases FROM {frm} LEFT JOIN User u ON u.Id = c.OwnerId "
-                    f"WHERE c.Status = 'Closed' AND {cond} GROUP BY c.OwnerId ORDER BY closed_cases DESC, c.OwnerId",
-                    [rid])
+                    f"WHERE c.Status = 'Closed' AND {cond}{marks} GROUP BY c.OwnerId "
+                    f"ORDER BY closed_cases DESC, c.OwnerId", [rid, *only])
+    unknown: list[str] = []
+    if only:  # agents with no closed case for this issue/product still take part, with 0
+        have = {r["OwnerId"] for r in allrows}
+        users = {r["Id"]: r["Name"] for r in _rows(
+            session, f"SELECT Id, FirstName || ' ' || LastName AS Name FROM User WHERE Id IN ({', '.join('?' * len(only))})",
+            only)}
+        unknown = [i for i in only if i not in users]
+        allrows += [{"OwnerId": i, "Name": users[i], "closed_cases": 0} for i in sorted(only) if i in users and i not in have]
     if not allrows:
-        return _obs(f"[] (no agent has closed a case for this {kind})", 0, 0, False, t0)
+        why = f"none of the given ids is a User Id: {', '.join(unknown)}" if unknown else \
+            f"no agent has closed a case for this {kind}"
+        return _obs(f"[] ({why})", 0, 0, False, t0)
     shown = allrows[:n]
     names = ["OwnerId", "Name", "closed_cases"]
-    text, k, _ = render_rows(names, [tuple(r[c] for c in names) for r in shown], len(shown), session.char_cap - 200)
+    text, k, _ = render_rows(names, [tuple(r[c] for c in names) for r in shown], len(shown), session.char_cap - 600)
     best = allrows[0]["closed_cases"]
-    tied = [r["OwnerId"] for r in allrows if r["closed_cases"] == best]
-    text += (f"\n[{len(allrows)} agents have closed cases for this {kind}; top count {best} closed cases"
-             + (f", TIED among {len(tied)} agents: {', '.join(tied)}]" if len(tied) > 1 else ", no tie at the top]"))
+    tied = [r for r in allrows if r["closed_cases"] == best]
+    head = (f"{len(allrows)} agents ranked among the {len(only) - len(unknown)} given" if only
+            else f"{len(allrows)} agents have closed cases for this {kind}")
+    text += f"\n[{head}; top count {best} closed cases. {_tie_note(kind, tied)}]"
+    if unknown:
+        text += f"\n[not a User Id: {', '.join(unknown)}]"
     return _obs(text, len(allrows), k, k < len(allrows), t0)
 
 
@@ -230,7 +273,7 @@ def execute(session: TaskSession, name: str, args: dict, org: str) -> Observatio
         if name == "list_products":
             return list_products(session)
         if name == "agent_expertise":
-            return agent_expertise(session, a.get("kind"), a.get("id"), a.get("top"))
+            return agent_expertise(session, a.get("kind"), a.get("id"), a.get("top"), a.get("among"))
         if name == "agent_workload":
             return agent_workload(session, a.get("agent_ids"))
     except ActionError as e:
@@ -260,8 +303,8 @@ SERVICE_TOOLS: list[dict] = [
     _tool("get_case", "Read one support case in full: its fields (with issue and product names), its emails, live "
           "chat transcripts and change history, each oldest first. Long bodies are cut with a note.",
           {"case_id": _s("The Case Id (starts with 500).")}, ["case_id"]),
-    _tool("search_knowledge", "Keyword search over knowledge articles only. Returns Id, Title and a snippet of the "
-          "best matching passage, one row per article.",
+    _tool("search_knowledge", "Search knowledge articles by keywords and meaning (articles only). Returns Id, Title and a snippet of "
+          "the best matching passage, one row per article, best first.",
           {"query": _s("Keywords to search for."),
            "limit": {"type": "integer", "description": f"Max articles, 1 to {MAX_SEARCH}; 0 means {DEFAULT_SEARCH}."}},
           ["query", "limit"]),
@@ -270,11 +313,15 @@ SERVICE_TOOLS: list[dict] = [
     _tool("list_issues", "List every issue category (Id, Name, Description) that cases can be filed under.", {}, []),
     _tool("list_products", "List every product (Id, Name, short Description).", {}, []),
     _tool("agent_expertise", "Rank agents by how many CLOSED cases they have for an issue or a product, most first. "
-          "Ties at the top are flagged.",
+          "Ties at the top are flagged, with the next step of the routing policy. Set among to a list of agent ids "
+          "to rank only those agents (agents with no closed case count 0); an empty list ranks all agents.",
           {"kind": _s("issue or product.", enum=KINDS),
            "id": _s("The issue Id (from list_issues) or product Id (from list_products)."),
-           "top": {"type": "integer", "description": f"Max agents, 1 to {MAX_TOP}; 0 means {DEFAULT_TOP}."}},
-          ["kind", "id", "top"]),
+           "top": {"type": "integer", "description": f"Max agents, 1 to {MAX_TOP}; 0 means {DEFAULT_TOP}."},
+           "among": {"type": "array", "items": {"type": "string"},
+                     "description": f"User Ids of the agents to rank, at most {MAX_AGENTS} (for example the agents "
+                                    "tied on the issue). An empty list means all agents."}},
+          ["kind", "id", "top", "among"]),
     _tool("agent_workload", "For each given agent (User Id), the number of cases whose Status is not Closed; "
           "agents with none show 0.",
           {"agent_ids": {"type": "array", "items": {"type": "string"},
@@ -402,6 +449,52 @@ def _selftest() -> int:
     check("agent_expertise: injection rejected", not o.ok and "15 or 18" in o.text, o.text[:90])
     o = ex("agent_expertise", {"kind": "issue", "id": iss, "top": -2})
     check("agent_expertise: negative top -> error", not o.ok and "between 1 and 20" in o.text, o.text)
+    # --- agent_expertise among + tie notes
+    tied_issue = next((i["Id"] for i in rows(ex("list_issues", {}))
+                       if "TIED:" in ex("agent_expertise", {"kind": "issue", "id": i["Id"], "top": 1, "among": []}).text), None)
+    o = ex("agent_expertise", {"kind": "issue", "id": tied_issue, "top": 20, "among": []})
+    ids = [r["OwnerId"] for r in rows(o) if r["closed_cases"] == rows(o)[0]["closed_cases"]]
+    want = (f"TIED: {len(ids)} agents share the top count ({', '.join(ids)}). Per the routing policy, next call "
+            f'agent_expertise with kind "product" for the product this case is about, with among set to these '
+            f"{len(ids)} agent ids.")
+    check("agent_expertise issue tie: note names the product step", o.ok and want in o.text, o.text[-330:])
+    prod = raw("SELECT oi.Product2Id p, c.OwnerId a, COUNT(*) n FROM \"Case\" c JOIN OrderItem oi ON oi.Id=c.OrderItemId__c "
+               "WHERE c.Status='Closed' GROUP BY 1, 2 ORDER BY n DESC, a")
+    pid2 = prod[0]["p"]
+    by_prod = [r for r in prod if r["p"] == pid2]
+    others = [r["Id"] for r in raw("SELECT Id FROM User WHERE Id NOT IN (SELECT c.OwnerId FROM \"Case\" c JOIN OrderItem oi "
+                                   "ON oi.Id=c.OrderItemId__c WHERE c.Status='Closed' AND oi.Product2Id=?) ORDER BY Id LIMIT 2", [pid2])]
+    pick = [by_prod[-1]["a"], *others]
+    o = ex("agent_expertise", {"kind": "product", "id": pid2, "top": 20, "among": pick})
+    got = {r["OwnerId"]: r["closed_cases"] for r in rows(o)}
+    check("agent_expertise among: only the given agents, zero-count agents included as 0",
+          o.ok and set(got) == set(pick) and got[by_prod[-1]["a"]] == by_prod[-1]["n"]
+          and all(got[i] == 0 for i in others) and "ranked among the 3 given" in o.text, str(got))
+    o = ex("agent_expertise", {"kind": "product", "id": pid2, "top": 20, "among": []})
+    check("agent_expertise among empty list: all agents with closed cases", o.ok
+          and {r["OwnerId"] for r in rows(o)} == {r["a"] for r in by_prod}, o.text[-120:])
+    top2 = [r["a"] for r in by_prod if r["n"] == by_prod[0]["n"]]
+    if len(top2) > 1:
+        o = ex("agent_expertise", {"kind": "product", "id": pid2, "top": 20, "among": top2})
+        want = (f"Still TIED among {len(top2)} agents ({', '.join(sorted(top2))}). Per the policy, next call "
+                "agent_workload for these agents and pick the fewest open cases.")
+        check("agent_expertise product tie: note names agent_workload", o.ok and want in o.text, o.text[-250:])
+    else:  # no natural product tie in the data: a pair of agents with 0 closed cases is tied at 0
+        z = others[:2]
+        o = ex("agent_expertise", {"kind": "product", "id": pid2, "top": 20, "among": z})
+        check("agent_expertise product tie: note names agent_workload", o.ok and "Still TIED among 2 agents" in o.text
+              and "next call agent_workload" in o.text and "fewest open cases" in o.text, o.text[-250:])
+    o = ex("agent_expertise", {"kind": "product", "id": pid2, "top": 20, "among": [by_prod[0]["a"], others[0]]})
+    check("agent_expertise single winner: note says so", o.ok and "No tie:" in o.text and "TIED" not in o.text, o.text[-200:])
+    o = ex("agent_expertise", {"kind": "issue", "id": iss, "top": 5, "among": ["x' OR 1=1 --"]})
+    check("agent_expertise among: injection rejected", not o.ok and "15 or 18" in o.text, o.text[:90])
+    o = ex("agent_expertise", {"kind": "issue", "id": iss, "top": 5, "among": "005Wt000003ZZZZZZZ"})
+    check("agent_expertise among: not a list -> error", not o.ok and "list of User Ids" in o.text, o.text[:90])
+    o = ex("agent_expertise", {"kind": "issue", "id": iss, "top": 5, "among": ["005Wt000003ZZZZZZZ"]})
+    check("agent_expertise among: unknown User Id flagged", o.ok and o.rows_total == 0 and "is a User Id: 005Wt000003ZZZZZZZ" in o.text, o.text[:120])
+    props = next(t for t in SERVICE_TOOLS if t["function"]["name"] == "agent_expertise")["function"]["parameters"]
+    check("agent_expertise schema: among is a required array of strings",
+          props["properties"]["among"]["type"] == "array" and "among" in props["required"])
     owners = [r["OwnerId"] for r in raw('SELECT DISTINCT OwnerId FROM "Case" ORDER BY OwnerId LIMIT 5')]
     o = ex("agent_workload", {"agent_ids": owners})
     want = {r["OwnerId"]: r["n"] for r in raw("SELECT OwnerId, COUNT(*) n FROM \"Case\" WHERE Status != 'Closed' "
@@ -447,15 +540,15 @@ def _selftest() -> int:
     def route(act, say, sess, t):
         iid = next(i["Id"] for i in rows(act("list_issues", {})) if i["Name"] == JUDGE_ISSUE[t.idx])
         say(f"case text is about issue {JUDGE_ISSUE[t.idx]!r} ({iid})")
-        r = rows(act("agent_expertise", {"kind": "issue", "id": iid, "top": 20}))
+        r = rows(act("agent_expertise", {"kind": "issue", "id": iid, "top": 20, "among": []}))
         top = [x for x in r if x["closed_cases"] == r[0]["closed_cases"]]
         say(f"issue expertise: top count {r[0]['closed_cases']} closed, {len(top)} agent(s) at the top")
         if len(top) == 1:
             return top[0]["OwnerId"]
         pid = next(p["Id"] for p in rows(act("list_products", {})) if p["Name"] == JUDGE_PRODUCT[t.idx])
         say(f"tie on issue; the case names product {JUDGE_PRODUCT[t.idx]!r} ({pid})")
-        pr = {x["OwnerId"]: x["closed_cases"] for x in rows(act("agent_expertise", {"kind": "product", "id": pid, "top": 20}))}
-        scored = sorted(((pr.get(x["OwnerId"], 0), x["OwnerId"]) for x in top), reverse=True)
+        pr = rows(act("agent_expertise", {"kind": "product", "id": pid, "top": 20, "among": [x["OwnerId"] for x in top]}))
+        scored = sorted(((x["closed_cases"], x["OwnerId"]) for x in pr), reverse=True)
         best = [a for c, a in scored if c == scored[0][0]]
         say(f"product expertise among the {len(top)} tied agents (closed, agent): {scored}")
         if len(best) == 1:
@@ -492,7 +585,8 @@ def _selftest() -> int:
     unans = kqs[0]
     o = ex("search_knowledge", {"query": "HPC", "limit": 5})
     print(f"finding: knowledge_qa idx {unans.idx} asks about {unans.query!r}; search_knowledge('HPC') -> {o.text[:60]!r}")
-    check("knowledge_qa idx 688 is unanswerable from the articles (no HPC article)", o.ok and o.rows_total == 0)
+    check("knowledge_qa idx 688 is unanswerable from the articles (no HPC article)",
+          o.ok and not any("hpc" in str(r["Title"]).lower() for r in rows(o)), f"{o.rows_total} weak matches")
     kq = next(t for t in kqs if t.idx == 773)
 
     def knowledge(act, say, sess, t):
