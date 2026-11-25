@@ -7672,3 +7672,13 @@ Both arms: q-off, b2b dev, 20 policy tasks x 5 seeds, concurrency 4, GPU reranke
 | POL-7 | baseline (reason-first, current) correct runs | 85-97 / 100 | p11-pol3 was 20/20 once, p11-svc4 flipped 1459; the inversion is a per-run sampling slip on the few violation cases |
 | POL-8 | check_offers version correct runs | 97-100 / 100 | the verdict is no longer sampled; what remains is naming the offered fixes, which every earlier reason did correctly |
 | POL-9 | check_offers wall time p50 | 4-7 s | 3 model calls instead of 4-6, no knowledge searches |
+
+### P11-POL2 actuals (runs p11-pol4-base-s0..4, p11-pol5-check-s0..4)
+- POL-7 HIT: baseline 96/100 runs, but violations 11/15 (1412 2/5, 1459 4/5); clean 85/85. In the 1412 misses
+  the model named the fix correctly and then wrote "approved" for an unapproved fix, or "not listed ...
+  therefore no violation".
+- POL-8 HIT (top): check_offers 100/100 runs, violations 15/15, clean 85/85. Verified in the records: all 100
+  runs called get_case -> check_offers -> respond, and all 100 answers equal the tool's "Answer to give". The
+  named fixes were identical across the 5 seeds for every task.
+- POL-9 below range: 3.5 s p50 (predicted 4-7 s); three short model calls are cheaper than estimated.
+- Limits unchanged: dev has 3 violation tasks, none of them late offers; the 80 test tasks are the check.
