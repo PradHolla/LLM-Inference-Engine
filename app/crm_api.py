@@ -300,7 +300,8 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
         yield {"data": json.dumps({"type": "error", "message": f"no model is being served at {VLLM_URL}"})}
         yield {"data": json.dumps({"type": "done"})}
         return
-    arm = agent.ARMS["xlam-t0"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-off"]
+    # q-judge: thinking on knowledge and customer answers, off where code holds the rules (P11 test results)
+    arm = agent.ARMS["xlam-t0"] if "xLAM" in model else agent.ARMS["q-think" if body.thinking else "q-judge"]
     arm = dataclasses.replace(arm, model=model)
     protocol = _protocol(body.agent)
     start = {"type": "run_start", "run_id": f"live-{uuid.uuid4().hex[:8]}", "question": question,

@@ -57,6 +57,16 @@ class Arm:
     enable_thinking: bool | None
     thinking_token_budget: int | None = None
     think_first_only: bool = False  # think on step 0 (planning) only; later steps run thinking off
+    think_on_judgement: bool = False  # think (budget 2048) on knowledge and customer answers; off elsewhere
+
+
+THINKING = dict(enable_thinking=True, thinking_token_budget=2048, temperature=0.6, top_p=0.95, max_tokens=4096)
+
+
+def job_arm(arm: Arm, judgement: bool) -> Arm:
+    """The arm for a task: think_on_judgement turns thinking on for the jobs that are judgement calls."""
+    return dataclasses.replace(arm, think_on_judgement=False, **THINKING) if arm.think_on_judgement and judgement \
+        else arm
 
 
 def step_arm(arm: Arm, step: int) -> Arm:
@@ -75,6 +85,9 @@ ARMS = {
     # Phase 7's sweet spot: a 128-token budget beat off and every budget from 256 to 1024 on maths.
     "q-b128": Arm("q-b128", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 2048, True, 128),
     "q-b128-first": Arm("q-b128-first", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 2048, True, 128, think_first_only=True),
+    # Thinking where the model makes a judgement (knowledge, customer answers, the support check); routing and
+    # policy, whose rules run in code, stay thinking off (P11 dev comparison: no gain there, twice the time).
+    "q-judge": Arm("q-judge", "Qwen/Qwen3-8B", 0.7, 0.8, 20, 0.0, 2048, False, think_on_judgement=True),
 }
 
 
@@ -531,6 +544,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     if protocol == SERVICE_PROTOCOL:
         from crm import service, service_prompt  # the service desk agent: purpose-built actions, short prompt
         customer = service.logged_in_customer(task.required)
+        arm = job_arm(arm, task.task_type == "knowledge_qa" or customer is not None)
         tools, executor = service.service_tools(task.org, task.task_type, customer), service.execute
         action_names = frozenset(t["function"]["name"] for t in tools)
         messages = service_prompt.service_messages(task, arm.model)
@@ -558,9 +572,12 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             obs = [m.get("content") or "" for m in traj if m.get("role") == "tool"]
             problem = service.grounding_problem(quote, obs, 8 if customer else service.MIN_QUOTE_CHARS)
             if problem is None:  # the quote is real: does it state THIS answer to THIS question?
-                prompt = service.SUPPORT_PROMPT.format(question=task.query.strip(), answer=ans, quote=str(quote).strip())
-                check_arm = dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None,
-                                                temperature=0.7, top_p=0.8, max_tokens=300)
+                title, passage = service.source_of(str(quote), obs)
+                prompt = service.SUPPORT_PROMPT.format(question=task.query.strip(), answer=ans, quote=str(quote).strip(),
+                                                       title=title, passage=passage)
+                check_arm = (dataclasses.replace(arm, thinking_token_budget=1024, max_tokens=2048) if arm.enable_thinking
+                             else dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None,
+                                                      temperature=0.7, top_p=0.8, max_tokens=300))
                 cres, _, _, _, cerr = await model_call(http_client, base_url, check_arm,
                                                        [{"role": "user", "content": prompt}], seed, window, None)
                 ok, why = service.support_verdict(cres.content if cres else "")
@@ -1064,6 +1081,22 @@ def _selftest() -> int:
         check("13 grounding: an honest 'not covered' needs no quote and no support call",
               rec["answer"].startswith("Our knowledge base does not cover") and
               [c["result"] for c in rec["grounding_checks"]] == ["abstain"] and len(fake.bodies) == 2)
+
+        # 14. q-judge: thinking on for knowledge (agent and support check), off for routing
+        rec, _, fake = await one(kq, grounded_script("yes"), arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)
+        tool_calls = [b for b in fake.bodies if b.get("tools")]
+        support = [b for b in fake.bodies if b.get("tools") is None]
+        check("14 q-judge on knowledge: every agent call and the support check think",
+              all(b["chat_template_kwargs"]["enable_thinking"] for b in tool_calls + support)
+              and support and support[0]["max_tokens"] == 2048 and rec["arm"] == "q-judge",
+              str([b["chat_template_kwargs"]["enable_thinking"] for b in fake.bodies]))
+        rt = next(t for t in tasks if t.task_type == "case_routing" and t.split == "dev")
+        _, _, fake = await one(rt, [tc(("route_case", {"issue": "AI Feature Malfunction",
+                                                         "product": "SecureAnalytics Pro"})),
+                                    tc(("respond", {"reason": "r", "answer": "005Wt000003NIYnIAO"}))],
+                               arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)
+        check("14 q-judge on routing: thinking stays off",
+              not any(b["chat_template_kwargs"]["enable_thinking"] for b in fake.bodies))
 
     def service_fallback() -> str:
         from crm import service

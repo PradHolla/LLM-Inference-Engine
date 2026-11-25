@@ -497,12 +497,17 @@ _RESPOND_KNOWLEDGE = _tool(
     "respond", "Give the final answer. Write the reason first, then the source sentence, then the answer.",
     {"reason": {"type": "string", "description": "Write this FIRST: which passage answers the question and why "
                 "it is about the product or topic asked, or that no passage does."},
+     "question_subject": {"type": "string", "description": "The product, industry or context the question asks "
+                          "about (for example 'telecom networks', 'SecureAnalytics Pro', or 'general' if none)."},
+     "source_subject": {"type": "string", "description": "What the article you would quote is about (for example "
+                        "'EDA software security'). If it differs from question_subject, the answer is that the "
+                        "knowledge base does not cover the question."},
      "quote": {"type": "string", "description": "The ONE sentence from a tool result you were shown (a knowledge "
                "passage, or a case record) that states the answer, copied exactly. Empty if nothing you were shown "
                "answers it, or when refusing."},
      "answer": {"type": "string", "description": "One short sentence answering the question, taken from that "
                 "quote; or 'Our knowledge base does not cover <the product or topic>.'"}},
-    ["reason", "quote", "answer"])
+    ["reason", "question_subject", "source_subject", "quote", "answer"])
 
 ABSTAIN_PHRASES = ("does not cover", "do not cover", "doesn't cover", "not covered", "no information",
                    "no article", "not in our knowledge base", "not in the knowledge base")
@@ -545,10 +550,31 @@ def grounding_problem(quote: str | None, observations: list[str], min_chars: int
 SUPPORT_PROMPT = """Question: {question}
 Proposed answer: {answer}
 Source sentence: "{quote}"
+It comes from: {title}
+Its passage: {passage}
 
-Does the source sentence itself state this answer to this question? It must be about the same product or subject the
-question asks about, and contain the answer's key facts. Write one short line of reasoning, then on a new line
-VERDICT: yes or VERDICT: no."""
+Does the source state this answer to THIS question? Check two things:
+1. Subject: the question asks about a specific product, industry or context (for example telecom networks, IoT
+   devices, vehicles, 5G, a named product). The source must be about that same thing. A source about EDA software
+   or another product does not answer a question about something else, even if the topic sounds similar. If the
+   question names no specific context, skip this check.
+2. Facts: the answer's key facts are stated in the source sentence or its passage.
+Write one short line of reasoning, then on a new line VERDICT: yes (both checks pass) or VERDICT: no."""
+
+
+def source_of(quote: str, observations: list[str]) -> tuple[str, str]:
+    """(title, passage text) of the tool result the quote came from; best effort, for the support check."""
+    key = _alnum(quote)
+    for obs in observations:
+        for m in re.finditer(r"'Title': (?:'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"), 'passage': "
+                             r"(?:'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\")", obs):
+            title, body = (m.group(1) or m.group(2) or ""), (m.group(3) or m.group(4) or "")
+            if key and key in _alnum(body):
+                return title, body.replace("\\n", " ")[:2000]
+        if key and key in _alnum(obs):
+            t = re.search(r"Title: (.+)", obs) or re.search(r"CASE \S+: (.+)", obs)
+            return (t.group(1).strip() if t else "a tool result"), obs[:2000]
+    return "unknown", ""
 VERDICT_RE = re.compile(r"VERDICT:\s*(yes|no)", re.I)
 
 
@@ -746,9 +772,14 @@ def _selftest() -> int:
           and not is_abstain("Encryption protects data."))
     kt = service_tools("b2b", "knowledge_qa")
     kprops = kt[-1]["function"]["parameters"]["properties"]
-    check("knowledge job: search, article, respond with reason -> quote -> answer",
+    check("knowledge job: search, article, respond with reason -> subjects -> quote -> answer",
           [t["function"]["name"] for t in kt] == ["search_knowledge", "get_article", "respond"]
-          and list(kprops) == ["reason", "quote", "answer"])
+          and list(kprops) == ["reason", "question_subject", "source_subject", "quote", "answer"])
+    title, body = source_of("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
+    check("source_of: finds the title and passage the quote came from",
+          title == "T" and "end-to-end encryption" in body and "More text" in body, f"{title!r} {body[:60]!r}")
+    check("source_of: an unknown quote -> ('unknown', '')", source_of("nothing like it at all here", shown)
+          == ("unknown", ""))
     ct = service_tools("b2b", "free_question", "003Wt00000Jqt7DIAR")
     check("customer job: respond also carries a quote",
           ct[-1]["function"]["name"] == "respond" and "quote" in ct[-1]["function"]["parameters"]["properties"])

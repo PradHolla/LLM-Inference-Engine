@@ -42,15 +42,17 @@ say which fixes were offered; the check_offers tool applies the policy and decid
    product you were asked about, answer: "Our knowledge base does not cover <the product or topic>." That honest
    answer is correct; a guess is wrong. A LOW RELEVANCE flag means read carefully: answer only if a passage
    actually states the answer.
-3. CHECK THE SUBJECT: if the question names a product, the passage must be about THAT product. A passage about a
-   different product does not answer the question, however similar it sounds; never attribute one product's
-   features to another. If no returned passage covers what was asked, answer that the knowledge base does not
-   cover it.
+3. CHECK THE SUBJECT: if the question names a product, industry or context (a product name, telecom networks,
+   IoT devices, vehicles, 5G, hospitals), the passage must be about THAT. The knowledge base is about EDA design
+   software: a passage about EDA tools does not answer a question about telecom, IoT or vehicles, however similar
+   the topic sounds, and one product's features are never another's. If no returned passage is about what was
+   asked, answer that the knowledge base does not cover it.
 4. Otherwise find the ONE sentence in a passage that states the answer to exactly what was asked.
 5. Call respond: `reason` says which passage answers it and why it is about the product or topic asked;
-   `quote` is that sentence copied exactly; `answer` is one short sentence taken from the quote. Your answer is
-   checked against the quote and the question; if no sentence states the answer, answer that the knowledge base
-   does not cover it, with an empty quote.""",
+   `question_subject` and `source_subject` name what the question and the source are about (if they differ, the
+   answer is that the knowledge base does not cover it); `quote` is that sentence copied exactly; `answer` is one
+   short sentence taken from the quote. Your answer is checked against the source and the question; if no
+   sentence states the answer, answer that the knowledge base does not cover it, with an empty quote.""",
 }
 
 CUSTOMER_JOB = """\
