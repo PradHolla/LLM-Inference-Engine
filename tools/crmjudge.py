@@ -152,11 +152,25 @@ def parse_verdict(resp) -> dict:
     return {"verdict": obj["verdict"], "why": obj["why"]}
 
 
+# USD per token, from the Claude API docs bundled with Claude Code (models.md / model-migration.md, 2026-11-25).
+PRICES = {"claude-haiku-5-5": (0.10 / 1e6, 0.50 / 1e6), "claude-sonnet-5-5": (2.00 / 1e6, 10.00 / 1e6)}
+EFFORT = "low"
+
+
+def use_model(model: str, effort: str) -> None:
+    """Switch the judge model, its prices and effort (and room for its thinking)."""
+    global MODEL, PRICE_IN, PRICE_OUT, EFFORT, MAX_TOKENS, EST_OUT_TOKENS
+    MODEL, EFFORT = model, effort
+    PRICE_IN, PRICE_OUT = PRICES[model]
+    if effort != "low":
+        MAX_TOKENS, EST_OUT_TOKENS = 4096, 1500
+
+
 def call_judge(client, user: str) -> tuple[dict, int, int]:
     """One structured-output call; returns (parsed, input_tokens, output_tokens)."""
     resp = client.messages.create(
         model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, messages=[{"role": "user", "content": user}],
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}})
+        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": SCHEMA}})
     return parse_verdict(resp), resp.usage.input_tokens, resp.usage.output_tokens
 
 
@@ -184,19 +198,35 @@ def knowledge_records(path: Path, org: str, limit: int | None) -> list[dict]:
     return recs[:limit] if limit is not None else recs
 
 
+# Reviewed per-question labels (tools/kqlabel.py): is the reference stated in the knowledge base? When loaded,
+# they replace the question-name detector, and results go to a separate .judged-labelled.jsonl.
+LABELS: dict[int, dict] = {}
+
+
+def load_labels(path: Path) -> dict[int, dict]:
+    return {r["idx"]: r for r in json.loads(path.read_text())["labels"]}
+
+
 def prepare(rec: dict, data: OrgData) -> dict | None:
-    """Classify one record; None when its question is not in crm.tasks."""
+    """Classify one record; None when its question is not in crm.tasks (or has no label when labels are used)."""
     task = data.tasks.get(rec["idx"])
     if task is None:
         return None
-    names = missing_names(task.query, data.conn)
     ref = "; ".join(str(x) for x in (rec.get("gt") or task.answer or []))
+    if LABELS:
+        lab = LABELS.get(rec["idx"])
+        if lab is None:
+            return None
+        names = [] if lab["supported"] else (lab["absent_terms"] or ["reference not stated in the knowledge base"])
+    else:
+        names = missing_names(task.query, data.conn)
     return {"rec": rec, "question": task.query, "reference": ref, "names": names,
             "cls": "not_in_data" if names else "answerable"}
 
 
 def judged_path(path: Path) -> Path:
-    return path.with_name(path.name + ".judged.jsonl")
+    tag = f".judged-labelled-{MODEL.split('-')[1]}.jsonl" if LABELS else ".judged.jsonl"  # never mix judges
+    return path.with_name(path.name + tag)
 
 
 def process_file(path: Path, args, data: OrgData, client, spend: Spend, key: str) -> None:
@@ -213,11 +243,11 @@ def process_file(path: Path, args, data: OrgData, client, spend: Spend, key: str
                 continue
             row = {"run_id": rec.get("run_id"), "arm": rec.get("arm"), "idx": rec["idx"], "class": item["cls"],
                    "verdict": None, "why": None, "model": None, "input_tokens": 0, "output_tokens": 0}
-            if item["cls"] == "not_in_data":
+            if item["cls"] == "not_in_data" and (abstains(rec.get("answer")) or not LABELS):
                 ok = abstains(rec.get("answer"))
                 row.update(verdict="correct_abstain" if ok else "wrong_substitute", model="rule",
                            why=f"not in data: {', '.join(item['names'])}")
-            else:
+            else:  # with labels, an answer to an unsupported question is still judged: matching the reference is fine
                 user = build_user(item["question"], item["reference"], rec.get("answer"))
                 if spend.total + est_call_cost(user) > args.max_cost:
                     spend.capped = True
@@ -289,6 +319,10 @@ def run(args, env_path: Path = ROOT / ".env", make_client=None) -> int:
     """Run the CLI body; returns the exit status (0 ok, 2 missing key, 3 spending cap reached)."""
     paths = [Path(p) for p in args.files]
     data = OrgData(args.org)
+    LABELS.clear()
+    if getattr(args, "labels", None):
+        LABELS.update(load_labels(Path(args.labels)))
+    use_model(getattr(args, "model", None) or "claude-haiku-5-5", getattr(args, "effort", None) or "low")
     if args.dry_run:
         for p in paths:
             dry_run_file(p, args, data)
@@ -317,6 +351,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true", help="no API calls; print counts, names, an example and an estimate")
     ap.add_argument("--org", default="b2b")
     ap.add_argument("--max-cost", type=float, default=1.00, help="hard cap in USD on actual spend (default 1.00)")
+    ap.add_argument("--labels", help="reviewed labels file (crm/kq_labels_<org>.json) replacing the name detector")
+    ap.add_argument("--model", choices=sorted(PRICES), default="claude-haiku-5-5")
+    ap.add_argument("--effort", choices=["low", "medium", "high"], default="low")
     ap.add_argument("--selftest", action="store_true")
     return ap.parse_args(argv)
 
