@@ -7726,3 +7726,17 @@ run of 18 unanswerable dev questions: 2-6 answered with something that did not m
 | KG-2 | Answerable dev questions (2 per run) answered correctly or partly | 1-2 of 2 per run, mean | both have their answer in the top search results; the quote step forces the right detail |
 | KG-3 | Knowledge time per question p50, q-off | 4-7 s | was 4.6 s; one extra short model call (~0.5-1 s) and occasional retries |
 | KG-4 | Runs ending in the grounding fallback | under 15% of knowledge runs | most answers either quote correctly or abstain first time |
+
+### Dev comparison on the redesigned agent (runs p11-cmp-dev-{q-off,q-b128}-s0; 1 pass, 20 per job; GPU reranker)
+Smoke gate first (p11-smoke-q-off, 12 showcase): 12/12 ended by respond, routing 3/3, policy 3/3.
+
+| Arm | Routing | Policy | Knowledge (Sonnet, labels) | p50 s routing / policy / knowledge |
+|---|---|---|---|---|
+| q-off | 19/20 = 95% | 20/20, violations 3/3 | 75%, made up 2 of 20 | 3.1 / 5.1 / 5.4 |
+| q-b128 | 19/20 = 95% | 20/20, violations 3/3 | 75%, made up 3 of 20 | 8.0 / 9.9 / 10.6 |
+
+- RT-1 HIT on this pass (95%, predicted 88-95%). RT-2 HIT (3.1 s, predicted 2-4 s). RT-3 HIT (gap 0 points).
+- KG-1 HIT (2 made up per 20, predicted 0-2 per 18). KG-3 HIT (5.4 s, predicted 4-7 s). KG-2 and KG-4 not yet
+  broken out.
+- Decision (2026-11-25): the test run uses q-off. Same accuracy, half the time; with the rules in code, thinking
+  has nothing left to decide. One pass of 20 per job is enough to choose an arm, not a score.
