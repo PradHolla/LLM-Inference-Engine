@@ -79,6 +79,7 @@ class TaskSession:
         self._timed_out = False
         self._internal = False
         self._denied: str | None = None
+        self.customer_id: str | None = None  # set for a logged-in customer: service actions scope to them
         conn.execute("PRAGMA query_only = ON")
         conn.set_progress_handler(self._progress, 4000)
         conn.set_authorizer(self._authorize)

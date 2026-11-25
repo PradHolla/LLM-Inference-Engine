@@ -28,7 +28,8 @@ export function saveAgent(agent: CrmAgent): void {
   try { window.localStorage.setItem(AGENT_KEY, agent); } catch { /* storage unavailable */ }
 }
 
-export type RunContext = { today: string | null; focus_ids: string[]; policy_title: string | null };
+export type RunContext = { today: string | null; focus_ids: string[]; policy_title: string | null;
+  customer?: string | null };
 export type RunExample = { id: string; task_type: string; skill: string };
 
 export type RunStartEvent = {
@@ -169,7 +170,7 @@ export const ACTION_LABELS: Record<string, string> = {
   get_case: "Open the case", search_knowledge: "Search the knowledge base", get_article: "Read an article",
   list_issues: "List known issues", list_products: "List products", agent_expertise: "Rank agents by experience",
   agent_workload: "Check agent workload", get_issue_policy: "Check the policy for this issue",
-  check_offers: "Check the offered fixes against policy",
+  check_offers: "Check the offered fixes against policy", get_my_cases: "List my cases",
 };
 
 export function humanize(name: string): string {

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { BookOpen, Bot, Calendar, Check, CircleAlert, Cpu, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
+import { BookOpen, Bot, Calendar, Check, CircleAlert, Cpu, Lock, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { AGENT_LABELS, buildRun, formatCell, formatCost, formatInt, formatSeconds, humanize, isSalesforceId,
   type AnswerEvent, type CrmAgent, type CrmEvent, type CrmMode, type StatsEvent } from "../../lib/crm";
@@ -107,6 +107,8 @@ export function RunTimeline({ events, running, stopped = false, question, mode, 
           {AGENT_LABELS[shownAgent] ?? humanize(shownAgent)}</span>}
         {context?.today && <span className="crm-chip meta"><Calendar size={12} aria-hidden="true" />Today {context.today}</span>}
         {shownMode && <span className="crm-chip meta"><UserRound size={12} aria-hidden="true" />{MODE_LABEL[shownMode]} mode</span>}
+        {context?.customer && <span className="crm-chip meta"><Lock size={12} aria-hidden="true" />
+          Logged in as {context.customer}: sees only their own records</span>}
         {context?.policy_title && <span className="crm-chip meta"><BookOpen size={12} aria-hidden="true" />{context.policy_title}</span>}
         {start?.model && <span className="crm-chip meta"><Cpu size={12} aria-hidden="true" />{start.model}</span>}
         {context?.focus_ids.map((id) => <span key={id} className="crm-chip meta">

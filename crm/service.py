@@ -95,9 +95,36 @@ def _case_text(case: dict, emails: list[dict], chats: list[dict], hist: list[dic
     return "\n".join(lines)
 
 
+LOGIN_RE = re.compile(r"logged in as Id:\s*(003[A-Za-z0-9]{12,15})")
+# What a logged-in customer may use: their own cases and the public knowledge base, nothing internal.
+CUSTOMER_TOOLS = ("get_my_cases", "get_case", "search_knowledge", "get_article", "respond")
+NOT_YOURS = "No case with Id {cid!r} among your cases. You can only see your own cases (get_my_cases lists them)."
+
+
+def logged_in_customer(required: str) -> str | None:
+    """The Contact Id of the logged-in customer named in the task context, or None (employee mode)."""
+    m = LOGIN_RE.search(required or "")
+    return m.group(1) if m else None
+
+
+def get_my_cases(session: TaskSession) -> Observation:
+    """The logged-in customer's own cases, newest first."""
+    if not session.customer_id:
+        raise ActionError("get_my_cases is only available to a logged-in customer")
+    return session.query('SELECT c.Id, c.Subject, c.Status, c.CreatedDate, c.ClosedDate, p.Name AS Product '
+                         'FROM "Case" c LEFT JOIN OrderItem oi ON oi.Id = c.OrderItemId__c '
+                         'LEFT JOIN Product2 p ON p.Id = oi.Product2Id WHERE c.ContactId = ? '
+                         'ORDER BY c.CreatedDate DESC', [session.customer_id])
+
+
 def get_case(session: TaskSession, case_id) -> Observation:
     t0 = time.monotonic()
     cid = _id(case_id, "case_id")
+    if session.customer_id:  # a customer sees only their own cases; others look exactly like missing ones
+        own = _rows(session, 'SELECT COUNT(*) AS n FROM "Case" WHERE Id = ? AND ContactId = ?',
+                    [cid, session.customer_id])[0]["n"]
+        if not own:
+            raise ActionError(NOT_YOURS.format(cid=cid))
     cases = _rows(session, 'SELECT c.*, i.Name AS IssueName, oi.Product2Id AS Product2Id, p.Name AS ProductName, '
                   'o.EffectiveDate AS PurchaseDate, '
                   'CAST(julianday(c.CreatedDate) - julianday(o.EffectiveDate) AS INTEGER) AS DaysSincePurchase '
@@ -335,7 +362,12 @@ def execute(session: TaskSession, name: str, args: dict, org: str) -> Observatio
     if name == "respond":
         return None
     a = args if isinstance(args, dict) else {}
+    if session.customer_id and name not in CUSTOMER_TOOLS:  # enforced here too, not only by the tool list
+        return _fail(f"{name} is not available to customers; customers can use: "
+                     f"{', '.join(t for t in CUSTOMER_TOOLS if t != 'respond')}", t0)
     try:
+        if name == "get_my_cases":
+            return get_my_cases(session)
         if name == "get_case":
             return get_case(session, a.get("case_id"))
         if name == "search_knowledge":
@@ -432,12 +464,16 @@ def _check_offers_tool(org: str) -> dict:
 JOB_TOOLS = {"policy_violation_identification": ("get_case", "check_offers", "respond")}
 
 
-def service_tools(org: str, task_type: str) -> list[dict]:
-    """The tools for one job: the policy job's three, or the general service list for the other jobs."""
-    keep = JOB_TOOLS.get(task_type)
+_MY_CASES = _tool("get_my_cases", "List YOUR OWN cases (the logged-in customer's): Id, Subject, Status, dates and "
+                  "product, newest first.", {}, [])
+
+
+def service_tools(org: str, task_type: str, customer: str | None = None) -> list[dict]:
+    """The tools for one job: a logged-in customer's five, the policy job's three, or the general service list."""
+    keep = CUSTOMER_TOOLS if customer else JOB_TOOLS.get(task_type)
     if keep is None:
         return SERVICE_TOOLS
-    pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org)]}
+    pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org), _MY_CASES]}
     return [pool[n] for n in keep]
 
 
@@ -526,6 +562,44 @@ def _selftest() -> int:
     check("routing and knowledge keep the general list, without check_offers",
           service_tools("b2b", "case_routing") is SERVICE_TOOLS
           and "check_offers" not in {t["function"]["name"] for t in SERVICE_TOOLS})
+
+    # --- customer scope: a logged-in customer sees only their own cases (Kofi Nkrumah, 4 cases)
+    kofi, other_case = "003Wt00000Jqt7DIAR", "500Wt00000DDyznIAD"  # 1381's case belongs to someone else
+    check("logged_in_customer: parses the benchmark's login line; None without one",
+          logged_in_customer("The customer you are interacting with is logged in as Id: 003Wt00000Jqy3aIAB.")
+          == "003Wt00000Jqy3aIAB" and logged_in_customer("Today's date: 2023-11-24") is None)
+    cs = env.open_task()
+    cs.customer_id = kofi
+    cx = lambda name, args: execute(cs, name, args, "b2b")
+    mine = rows(cx("get_my_cases", {}))
+    own_ok = all(raw('SELECT ContactId FROM "Case" WHERE Id = ?', [r["Id"]])[0]["ContactId"] == kofi for r in mine)
+    check("customer: get_my_cases lists exactly their 4 cases", len(mine) == 4 and own_ok, str([r["Id"] for r in mine]))
+    o = cx("get_case", {"case_id": mine[0]["Id"]})
+    check("customer: get_case on their own case works", o.ok and mine[0]["Id"] in o.text, o.text[:80])
+    o = cx("get_case", {"case_id": other_case})
+    o2 = cx("get_case", {"case_id": "500Wt00000ZZZZZZZZ"})
+    check("customer: another customer's case refused, same message as a missing case, no data",
+          not o.ok and not o2.ok and o.text.replace(other_case, "X") == o2.text.replace("500Wt00000ZZZZZZZZ", "X")
+          and "among your cases" in o.text, o.text[:120])
+    for name, args in (("agent_expertise", {"kind": "issue", "id": "a03Wt00000JqhItIAJ", "top": 3, "among": []}),
+                       ("agent_workload", {"agent_ids": ["005Wt000003NIYnIAO"]}), ("list_issues", {}),
+                       ("check_offers", {"case_id": other_case, "offered": []}),
+                       ("get_issue_policy", {"issue_id": "a03Wt00000JqhItIAJ"})):
+        o = cx(name, args)
+        check(f"customer: internal action {name} refused at the service layer",
+              not o.ok and "not available to customers" in o.text, o.text[:90])
+    o = cx("search_knowledge", {"query": "return policy for purchased items", "limit": 3})
+    check("customer: knowledge search still works", o.ok and o.rows_total >= 3)
+    cs.close()
+    check("customer tool list: exactly the five customer tools",
+          [t["function"]["name"] for t in service_tools("b2b", "private_customer_information", kofi)]
+          == list(CUSTOMER_TOOLS))
+    check("knowledge task with no login keeps the general list (eval unchanged)",
+          service_tools("b2b", "knowledge_qa", None) is SERVICE_TOOLS)
+    o = ex("get_case", {"case_id": other_case})
+    check("employee mode (no login): any case still opens", o.ok and other_case in o.text)
+    o = ex("get_my_cases", {})
+    check("employee mode: get_my_cases refused", not o.ok and "logged-in customer" in o.text, o.text[:80])
 
     # --- get_issue_policy (case 1381: scalability, 367 whole days after purchase, limit 365)
     o = ex("get_case", {"case_id": "500Wt00000DDyznIAD"})

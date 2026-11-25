@@ -21,11 +21,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from crm import events, tasks
+from crm import events, service, tasks
 
 router = APIRouter(prefix="/api/crm")
 
 DEMO_TODAY = "2023-11-24"
+DEMO_CUSTOMER_ID = "003Wt00000Jqt7DIAR"  # Kofi Nkrumah: the b2b contact with the most cases (4), for customer mode
 SWITCH_SECONDS = 3.0
 SHOWCASE_IDX = (881, 780, 987, 2067, 107)
 SHOWCASE_FIRST_OF = ("case_routing", "wrong_stage_rectification", "lead_qualification",
@@ -263,10 +264,24 @@ async def _served_model() -> str | None:
         return None
 
 
+@functools.lru_cache(maxsize=64)
+def _contact_name(contact_id: str) -> str | None:
+    import sqlite3
+    from crm.env import CRMEnv
+    conn = sqlite3.connect(f"file:{CRMEnv('b2b').db_path}?mode=ro", uri=True)
+    try:
+        row = conn.execute("SELECT FirstName || ' ' || LastName FROM Contact WHERE Id = ?", [contact_id]).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def _context(task: tasks.Task) -> dict:
     ids = sorted(set(re.findall(r"\b[0-9a-zA-Z]{3}Wt[0-9a-zA-Z]{10,13}\b", task.required)))
     m = re.search(r"##\s*([^\n#]+)", task.required)
-    return {"today": task.today, "focus_ids": ids[:5], "policy_title": m.group(1).strip() if m else None}
+    cust = service.logged_in_customer(task.required)
+    return {"today": task.today, "focus_ids": ids[:5], "policy_title": m.group(1).strip() if m else None,
+            "customer": (_contact_name(cust) or cust) if cust else None}
 
 
 async def _live(body: AskBody, question: str, example: dict | None, request: Request):
@@ -276,6 +291,10 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
     from crm.env import CRMEnv
     task = _task_by_id()[example["id"]] if example else _free_task(question, body.mode)
     task = dataclasses.replace(task, external=body.mode == "customer")
+    if body.mode == "customer" and not service.logged_in_customer(task.required):
+        # Customer mode is always a logged-in customer, so the agent's tools are always scoped to one person.
+        task = dataclasses.replace(task, required=f"{task.required}\nThe customer you are interacting with is "
+                                                  f"logged in as Id: {DEMO_CUSTOMER_ID}.")
     model = await _served_model()
     if model is None:
         yield {"data": json.dumps({"type": "error", "message": f"no model is being served at {VLLM_URL}"})}
