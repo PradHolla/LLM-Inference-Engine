@@ -7647,3 +7647,14 @@ passage 20/20; with Qwen at KV pin 10213733807 the GPU had 972 MiB free (nvidia-
 | RR-3 | search total, one at a time, GPU service | 50-150 ms p50 | 31 ms scoring + HTTP and tokenising + ~12 ms candidates |
 | RR-4 | search total, three at once | 100-300 ms p50 | the service lock queues them, but each is ~31 ms, not 3 s |
 | RR-5 | same top passage as the CPU reranker | 19-20 / 20 | the probe's 20/20; fp16 vs fp32 ONNX can swap near-ties |
+
+### P11-RR actuals (box, Qwen up with the new pin; tools/searchbench.py; run p11-svc4-q-off for end to end)
+- RR-1 HIT: 120,320 KV tokens. RR-2 HIT after use: 1,097 MiB free once the reranker had served searches
+  (1,427 MiB right after its start, before its activations were allocated).
+- RR-3 HIT (slightly below): 45 ms p50 one at a time (37 ms rerank). RR-4 HIT: 107 ms p50 three at once.
+- RR-5 HIT: same top passage 20/20, same top-5 order 19/20.
+- End to end, one question at a time (p11-svc4-q-off): knowledge 1.3-6.1 s (was 7.8-15.4 s in p11-svc3), the
+  search step 0.05 s except a 0.9 s first call; the model is now the whole latency. Routing 3/3.
+- Policy 2/3 in this run: 1459 wrote "not listed in the approved fixes ... No violation." and answered None.
+  The same task passed in p11-pol3-q-off. Reason-first removed answer-after-reason contradictions but not a
+  conclusion inverted inside the reason, under sampled decoding (temperature 0.7). Flip rate not yet measured.
