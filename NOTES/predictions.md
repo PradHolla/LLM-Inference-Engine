@@ -7625,3 +7625,11 @@ consequence is not "move the decision into code" but "reason before answering": 
 |---|---|---|---|
 | POL-5 | q-off correct with a reasoning-first respond schema (same 20) | 16-20 / 20 | every q-off error had a correct reason; generated first, it should drive the answer |
 | POL-6 | q-b128 correct, same change | 17-20 / 20 | as POL-5, plus thinking where it happens |
+
+### POL-5 / POL-6 actuals (runs p11-pol3-q-off, p11-pol3-q-b128; same 20 b2b dev policy tasks)
+- q-off **20/20** (POL-5 HIT, top of range), wall p50 14.1 s. q-b128 **20/20** (POL-6 HIT), wall p50 13.3 s,
+  thinking p50 124 tokens per step (est.).
+- Verified in the raw tool calls: 20/20 and 20/20 respond calls generated `reason` before `answer`.
+- Limits: dev holds 3 violations, all "fix not approved for the issue"; no late-offer violation was exercised
+  on the GPU. The diagnosis was made on these same 20 tasks, so this is a development score; the 80 test
+  policy tasks are the held-out check.
