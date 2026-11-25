@@ -8,6 +8,7 @@ cd /opt/llm || exit 1
 UV=/home/ubuntu/.local/bin/uv
 TYPES=case_routing,policy_violation_identification,knowledge_qa
 export FASTEMBED_CACHE_PATH=/opt/llm/hf-cache/fastembed
+export CRM_RERANK_URL=http://127.0.0.1:8010  # GPU reranker (p11-app.sh rerank); search falls back to CPU if down
 
 run() {  # split, arm, seed, run id
     $UV run tools/crmeval.py run --url http://localhost:8000 --arm "$2" --model Qwen/Qwen3-8B --org b2b \
@@ -17,6 +18,8 @@ run() {  # split, arm, seed, run id
 
 served=$(curl -s -m 5 http://localhost:8000/v1/models | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ "$served" = "Qwen/Qwen3-8B" ] || { echo "P11_EVAL_FAIL: served model is '$served', not Qwen"; exit 1; }
+# Search would silently fall back to the CPU reranker and measure a different setup: refuse instead.
+curl -sf -m 5 "$CRM_RERANK_URL/health" >/dev/null || { echo "P11_EVAL_FAIL: GPU reranker not up at $CRM_RERANK_URL"; exit 1; }
 
 case "${1:-}" in
   practice)

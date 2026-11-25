@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import collections
 import hashlib
+import json
 import logging
 import math
 import os
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -58,6 +60,8 @@ _model_lock = threading.Lock()
 _embed_lock = threading.Lock()
 _reranker = None
 _reranker_failed = False
+_remote_warned = False
+REMOTE_TIMEOUT_S = 5.0
 _reranker_lock = threading.Lock()
 _rerank_lock = threading.Lock()
 _indexes: dict[str, "Index | None"] = {}
@@ -97,6 +101,7 @@ class Result:
     n_candidates: int = 0
     vector: bool = True  # False when the vector side was unavailable (BM25-only candidates)
     rerank_ms: float = 0.0
+    reranker: str = ""  # "gpu" (crm/rerank_gpu.py service), "cpu" (local fastembed), or "none"
 
 
 @dataclass
@@ -366,8 +371,38 @@ def candidates(idx: Index, query: str) -> tuple[list[int], bool]:
     return order[:CANDIDATES], vec is not None
 
 
+def _remote_scores(query: str, docs: list[str]) -> list[float] | None:
+    """Scores from the GPU reranker service (crm/rerank_gpu.py) at CRM_RERANK_URL; None if unset or failing."""
+    global _remote_warned
+    url = os.environ.get("CRM_RERANK_URL", "").rstrip("/")
+    if not url:
+        return None
+    body = json.dumps({"query": query, "docs": docs}).encode()
+    req = urllib.request.Request(f"{url}/rerank", body, {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=REMOTE_TIMEOUT_S) as resp:
+            scores = json.loads(resp.read())["scores"]
+        if len(scores) == len(docs):
+            return [float(s) for s in scores]
+        raise ValueError(f"{len(scores)} scores for {len(docs)} passages")
+    except Exception as e:  # noqa: BLE001 - any failure falls back to the CPU reranker
+        if not _remote_warned:
+            _remote_warned = True
+            log.warning("GPU reranker at %s failed (%s: %s); using the CPU reranker", url, type(e).__name__, e)
+        return None
+
+
+def score_passages(query: str, docs: list[str]) -> tuple[list[float] | None, str]:
+    """(scores, where): the GPU service when configured and up, else the local CPU cross-encoder."""
+    s = _remote_scores(query, docs)
+    if s is not None:
+        return s, "gpu"
+    s = rerank_scores(query, docs)
+    return s, ("cpu" if s is not None else "none")
+
+
 def rerank_scores(query: str, docs: list[str]) -> list[float] | None:
-    """Cross-encoder score of each (query, doc); None if the reranker is unavailable or fails."""
+    """Local CPU cross-encoder score of each (query, doc); None if the reranker is unavailable or fails."""
     model = _get_reranker()
     if model is None:
         return None
@@ -403,17 +438,18 @@ def search(org: str, query: str, n: int = 5, rerank: bool = True) -> Result | No
         return Result([], "reranked", False, None, None, [], 0, used_vec)
     passages = [Passage(idx.ids[p], idx.titles[p], idx.texts[p], None, idx.pidx[p]) for p in cand]
     t0 = time.monotonic()
-    scores = rerank_scores(query, [f"{p.Title}\n{p.text}" for p in passages]) if rerank else None
+    scores, where = score_passages(query, [f"{p.Title}\n{p.text}" for p in passages]) if rerank else (None, "none")
     ms = (time.monotonic() - t0) * 1000
     if scores is None:
-        return Result(_pick(passages, n), "unranked", True, passages[0].Title, None, passages, len(cand), used_vec, ms)
+        return Result(_pick(passages, n), "unranked", True, passages[0].Title, None, passages, len(cand), used_vec, ms,
+                      where)
     for p, s in zip(passages, scores):
         p.score = s
     passages.sort(key=lambda p: -p.score)  # stable: ties keep the fusion order
     best = passages[0]
     ok = best.score >= MIN_RELEVANCE
     return Result(_pick(passages, n) if ok else [], "reranked", ok, best.Title, best.score, passages, len(cand),
-                  used_vec, ms)
+                  used_vec, ms, where)
 
 
 def not_covered_text(r: Result) -> str:
@@ -766,6 +802,21 @@ def _selftest() -> int:
               not r3.vector and r3.mode == "unranked" and len(r3.passages) > 0, f"{len(r3.passages)} passages")
     finally:
         _model, _model_failed, _reranker, _reranker_failed = saved
+
+    # --- GPU reranker service: unset -> local CPU; set but down -> local CPU, same ranking
+    saved_url = os.environ.pop("CRM_RERANK_URL", None)
+    try:
+        base = search("b2b", q, 5)
+        check("no CRM_RERANK_URL -> local CPU reranker", base.reranker == "cpu", base.reranker)
+        os.environ["CRM_RERANK_URL"] = "http://127.0.0.1:9"  # nothing listens on port 9
+        down = search("b2b", q, 5)
+        check("GPU service down -> falls back to the CPU reranker, same top passages",
+              down.reranker == "cpu" and [p.text for p in down.passages] == [p.text for p in base.passages],
+              f"{down.reranker}, {len(down.passages)} passages")
+    finally:
+        os.environ.pop("CRM_RERANK_URL", None)
+        if saved_url is not None:
+            os.environ["CRM_RERANK_URL"] = saved_url
 
     # --- through the search_knowledge action
     from crm.service import search_knowledge

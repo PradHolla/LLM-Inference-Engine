@@ -7633,3 +7633,17 @@ consequence is not "move the decision into code" but "reason before answering": 
 - Limits: dev holds 3 violations, all "fix not approved for the issue"; no late-offer violation was exercised
   on the GPU. The diagnosis was made on these same 20 tasks, so this is a development score; the 80 test
   policy tasks are the held-out check.
+
+## P11-RR: GPU reranker next to Qwen (2026-11-25)
+
+Measured before this entry (box g5.2xlarge, A10G): CPU bge-reranker-base 3,250 ms per search one at a time,
+9,720 ms three at once (a lock serialises them); GPU fp16 probe on an idle GPU: 31 ms, 1,119 MiB, same top
+passage 20/20; with Qwen at KV pin 10213733807 the GPU had 972 MiB free (nvidia-smi), 138,528 KV tokens.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| RR-1 | KV tokens with the pin lowered to 8871556527 | ~120,300 | 138,528 x 8871556527 / 10213733807, tokens scale with bytes at fixed dtype and layers |
+| RR-2 | nvidia-smi free with Qwen + reranker up | ~1,100 MiB | 972 + 1,280 freed - 1,119 held |
+| RR-3 | search total, one at a time, GPU service | 50-150 ms p50 | 31 ms scoring + HTTP and tokenising + ~12 ms candidates |
+| RR-4 | search total, three at once | 100-300 ms p50 | the service lock queues them, but each is ~31 ms, not 3 s |
+| RR-5 | same top passage as the CPU reranker | 19-20 / 20 | the probe's 20/20; fp16 vs fp32 ONNX can swap near-ties |
