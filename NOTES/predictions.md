@@ -7682,3 +7682,16 @@ Both arms: q-off, b2b dev, 20 policy tasks x 5 seeds, concurrency 4, GPU reranke
   named fixes were identical across the 5 seeds for every task.
 - POL-9 below range: 3.5 s p50 (predicted 4-7 s); three short model calls are cheaper than estimated.
 - Limits unchanged: dev has 3 violation tasks, none of them late offers; the 80 test tasks are the check.
+
+### Note on P11-EVAL before scoring it (2026-11-25)
+E-1..E-9 were written before the policy rebuild (records, reason-first, check_offers) and the GPU reranker.
+They stand as written and get scored as written. Two are now superseded by measurements on the same dev
+tasks, so they are not independent predictions any more: E-2 and E-3 (policy; measured 100/100 runs and 15/15
+violations with q-off in p11-pol5) and E-7 (time per question; search is now ~0.05 s, measured 1.3-6.1 s per
+knowledge answer one at a time). New predictions for this run, made with those measurements in hand:
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| E-10 | Practice eval wall time, all 9 runs (3 arms x 3 seeds x 60 tasks, concurrency 4) | 30-60 min | q-off ~4 s per task, b128 arms ~1.5-2x, 4 at a time: 60 x 4 / 4 = 1 min per q-off run, longer thinking and queueing on one GPU |
+| E-11 | Policy, every arm and seed | 19-20 / 20 | the verdict is code-decided; thinking only changes how the fixes are named |
+| E-12 | Routing, q-off mean over seeds | 70-90% | 3/3 on the showcase; the routing policy has 3 tie-break levels and some dev cases tie deeper |
