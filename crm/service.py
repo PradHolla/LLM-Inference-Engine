@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import html
 import re
 import sys
 import time
 
 from crm.actions import ActionError, _close, _fail
-from crm import retrieval
+from crm import policy, retrieval
 from crm.env import Observation, TaskSession, render_rows
 from crm.prompts import TOOLS, _tool
 
@@ -76,6 +77,9 @@ def _case_text(case: dict, emails: list[dict], chats: list[dict], hist: list[dic
         lines.append(f"  {k}: {case[k]}")
     lines.append(f"  Issue: {case['IssueId__c']} ({case['IssueName']})")
     lines.append(f"  Product: {case['Product2Id']} ({case['ProductName']}), OrderItem {case['OrderItemId__c']}")
+    if case.get("PurchaseDate"):
+        lines.append(f"  Purchased: {str(case['PurchaseDate'])[:10]}, {case['DaysSincePurchase']} days before this "
+                     "case was opened")
     lines.append(f"  Description: {_clip(case['Description'], body_cap)}")
     lines.append(f"EMAILS ({len(emails)}, oldest first):")
     for i, e in enumerate(emails, 1):
@@ -94,10 +98,12 @@ def _case_text(case: dict, emails: list[dict], chats: list[dict], hist: list[dic
 def get_case(session: TaskSession, case_id) -> Observation:
     t0 = time.monotonic()
     cid = _id(case_id, "case_id")
-    cases = _rows(session, 'SELECT c.*, i.Name AS IssueName, oi.Product2Id AS Product2Id, p.Name AS ProductName '
+    cases = _rows(session, 'SELECT c.*, i.Name AS IssueName, oi.Product2Id AS Product2Id, p.Name AS ProductName, '
+                  'o.EffectiveDate AS PurchaseDate, '
+                  'CAST(julianday(c.CreatedDate) - julianday(o.EffectiveDate) AS INTEGER) AS DaysSincePurchase '
                   'FROM "Case" c LEFT JOIN Issue__c i ON i.Id = c.IssueId__c '
                   'LEFT JOIN OrderItem oi ON oi.Id = c.OrderItemId__c LEFT JOIN Product2 p ON p.Id = oi.Product2Id '
-                  'WHERE c.Id = ?', [cid])
+                  'LEFT JOIN "Order" o ON o.Id = oi.OrderId WHERE c.Id = ?', [cid])
     if not cases:
         raise ActionError(f"no Case with Id {cid!r}. A new case that is not in the database has no case file; "
                           "work from the text you were given.")
@@ -182,6 +188,22 @@ def get_article(session: TaskSession, article_id) -> Observation:
 
 def list_issues(session: TaskSession) -> Observation:
     return session.query("SELECT Id, Name, Description__c FROM Issue__c ORDER BY Name", [])
+
+
+@functools.lru_cache(maxsize=4)
+def _policies(org: str) -> dict:
+    return policy.load(org)
+
+
+def get_issue_policy(session: TaskSession, issue_id) -> Observation:
+    """The reviewed policy record for one issue: its guide article, approved fixes and each fix's day limit."""
+    t0 = time.monotonic()
+    iid = _id(issue_id, "issue_id")
+    p = _policies(session.org).get(iid)
+    if p is None:
+        _exists(session, "Issue__c", iid, "issue", "Use the Issue Id shown in the case file (starts with a03).")
+        raise ActionError(f"no policy record for issue {iid!r}; read its guide with search_knowledge and get_article")
+    return _obs(policy.describe(p), 1 + len(p.fixes), 1 + len(p.fixes), False, t0)
 
 
 def list_products(session: TaskSession) -> Observation:
@@ -296,6 +318,8 @@ def execute(session: TaskSession, name: str, args: dict, org: str) -> Observatio
             return get_article(session, a.get("article_id"))
         if name == "list_issues":
             return list_issues(session)
+        if name == "get_issue_policy":
+            return get_issue_policy(session, a.get("issue_id"))
         if name == "list_products":
             return list_products(session)
         if name == "agent_expertise":
@@ -338,6 +362,9 @@ SERVICE_TOOLS: list[dict] = [
     _tool("get_article", "Read one knowledge article in full: Title, Summary and the complete FAQ answer.",
           {"article_id": _s("The knowledge article Id (starts with ka0).")}, ["article_id"]),
     _tool("list_issues", "List every issue category (Id, Name, Description) that cases can be filed under.", {}, []),
+    _tool("get_issue_policy", "The company policy for one issue: its guide article Id, the fixes approved for that "
+          "issue, and how many days after purchase each fix may be offered.",
+          {"issue_id": _s("The issue Id from the case file (starts with a03).")}, ["issue_id"]),
     _tool("list_products", "List every product (Id, Name, short Description).", {}, []),
     _tool("agent_expertise", "Rank agents by how many CLOSED cases they have for an issue or a product, most first. "
           "Ties at the top are flagged, with the next step of the routing policy. Set among to a list of agent ids "
@@ -406,6 +433,20 @@ def _selftest() -> int:
     o = ex("list_products", {})
     check("list_products: 51 rows, description cut to 120", o.ok and o.rows_total == 51
           and all(len(r["Description"] or "") <= 120 for r in rows(o)) and len(o.text) <= s.char_cap, f"{len(o.text)} chars")
+
+    # --- get_issue_policy (case 1381: scalability, 367 whole days after purchase, limit 365)
+    o = ex("get_case", {"case_id": "500Wt00000DDyznIAD"})
+    check("get_case: purchase date and days since purchase", o.ok and "Purchased: 2021-09-20, " in o.text
+          and "367 days before this case was opened" in o.text, next((ln for ln in o.text.split("\n")
+                                                                       if "Purchased" in ln), "no Purchased line"))
+    o = ex("get_issue_policy", {"issue_id": "a03Wt00000JqxtvIAB"})
+    check("get_issue_policy: scalability guide, package limited to 365 days", o.ok
+          and "ka0Wt000000EoD3IAK" in o.text and "Scalability Enhancement Package: only up to 365 days" in o.text,
+          o.text[:160])
+    o = ex("get_issue_policy", {"issue_id": "a03Wt00000ZZZZZZZZ"})
+    check("get_issue_policy: unknown issue -> error naming the Id format", not o.ok and "a03" in o.text, o.text[:120])
+    check("get_issue_policy: all 15 issues have a record with at least one fix",
+          len(_policies("b2b")) == 15 and all(p.fixes for p in _policies("b2b").values()))
 
     # --- get_case
     many = raw('SELECT ParentId, COUNT(*) n FROM EmailMessage WHERE ParentId IS NOT NULL GROUP BY 1 '

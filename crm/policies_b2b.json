@@ -1,0 +1,308 @@
+{
+  "source": "drafted by claude-haiku-5-5 from each issue's guide article; every entry reviewed by hand before use",
+  "reviewed": "2026-11-24: two entries corrected or cleared by hand (see 'review'); records + rule match the answer key on 99/100 b2b policy tasks (python -m crm.policy check), the miss being a paraphrased fix name the string matcher cannot see",
+  "issues": [
+    {
+      "issue_id": "a03Wt00000JqxVjIAJ",
+      "issue": "AI Feature Malfunction",
+      "article_id": "ka0Wt000000Eo1lIAC",
+      "title": "Addressing AI Feature Malfunction: Ensuring Optimal Performance with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "AI Diagnostic Update",
+          "max_days": 180,
+          "quote": "The AI Diagnostic Update is valid for 180 days post-deployment, ensuring clients have an ample window to apply these critical improvements.",
+          "problems": []
+        },
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "The Priority Support Upgrade remains available for 365 days after purchase, guaranteeing long-term peace of mind.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqmLvIAJ",
+      "issue": "Billing Discrepancy",
+      "article_id": "ka0Wt000000Eo9pIAC",
+      "title": "Resolving Billing Discrepancies: Enhancing Client Satisfaction with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "This upgrade is valid for 365 days after the billing transaction in question, providing substantial time for clients to reconcile any unexpected charges.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "TechPulse Solutions emphasizes user-friendly experiences, and the comprehensive suite of training modules is available without a time limit, ensuring continuous access.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqmX6IAJ",
+      "issue": "Customizability Limitation",
+      "article_id": "ka0Wt000000EnwwIAC",
+      "title": "Enhancing Customization: Bridging the Gap for Niche Industry Needs with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Custom Feature Workshop",
+          "max_days": 30,
+          "quote": "These workshops, valid for 30 days after purchase, provide an optimal setting for clients to bring their unique challenges and ideas directly to the table, facilitating bespoke solution development that meets specific industry needs.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "This means the modules are valid indefinitely, transcending time limitations.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqzKcIAJ",
+      "issue": "Data Integration Error",
+      "article_id": "ka0Wt000000Eo09IAC",
+      "title": "Resolving Data Integration Errors with TechPulse Solutions: Strategies for Seamless Workflow Integration",
+      "fixes": [
+        {
+          "name": "Data Integration Toolkit",
+          "max_days": null,
+          "quote": "Users have unrestricted access to this toolkit, as it is available indefinitely (with no time constraints), making it an invaluable resource for consistent and reliable data management.",
+          "problems": []
+        },
+        {
+          "name": "Workflow Optimization Consultation",
+          "max_days": 60,
+          "quote": "The consultation is available within the first 60 days after the purchase date, providing a crucial window for users to optimize their integration efforts early in the adoption process.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqvvOIAR",
+      "issue": "Data Loss Incident",
+      "article_id": "ka0Wt000000Ens6IAC",
+      "title": "Effective Strategies for Mitigating Data Loss During Software Updates at TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Data Integration Toolkit",
+          "max_days": null,
+          "quote": "Importantly, this toolkit is not time-bound and can be utilized indefinitely, allowing our clients to integrate it at any stage of their operational lifecycle.",
+          "problems": []
+        },
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "This upgrade is available for 365 days from the date of purchase, underscoring TechPulse Solutions' commitment to responsive and efficient service.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqzSfIAJ",
+      "issue": "Feature Update Notification",
+      "article_id": "ka0Wt000000Eo6cIAC",
+      "title": "Maximizing Software Potential: Ensuring Timely Feature Update Notifications at TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "Notably, this solution is perpetually available, as evidenced by its validity period set to -1, meaning it has no expiration and remains continuously accessible to all clients.",
+          "problems": []
+        },
+        {
+          "name": "Custom Feature Workshops",
+          "max_days": 30,
+          "quote": "The workshops are particularly beneficial within a defined period of 30 days from new feature deployment, allowing users to capitalize on the enhancements while they are fresh and relevant.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqvLsIAJ",
+      "issue": "License Renewal Confusion",
+      "article_id": "ka0Wt000000Eo50IAC",
+      "title": "Streamlining License Renewal with Effective Training and Support Solutions at TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "This solution comes with no expiration or validity constraints, ensuring that clients can continuously update their knowledge without limitations, thus maintaining clarity and reducing the likelihood of service interruptions attributable to renewal misunderstandings.",
+          "problems": []
+        },
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "Available for a one-year term (365 days post upgrade), this support upgrade guarantees faster response times, thereby curtailing delays and reinforcing service efficiency.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqzUHIAZ",
+      "issue": "ROI Assessment Discrepancy",
+      "article_id": "ka0Wt000000Eo8DIAS",
+      "title": "Bridging the ROI Gap: Enhancing Client Satisfaction with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "This solution is effective over the entire year following the transaction date, as it spans 365 days, ensuring long-term support and accelerated service delivery.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "This solution is timelessly valid, with no expiration, supporting clients continuously as they adapt and grow their capabilities.",
+          "problems": []
+        },
+        {
+          "name": "Custom Feature Workshop",
+          "max_days": 30,
+          "quote": "The Custom Feature Workshop is available within 30 days of the transaction date, setting a precise yet flexible timeframe for establishing bespoke functionalities that enhance client satisfaction and performance outcomes.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqxtvIAB",
+      "issue": "Scalability Issue",
+      "article_id": "ka0Wt000000EoD3IAK",
+      "title": "Addressing Scalability Challenges in Electronic Design Automation with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Scalability Enhancement Package",
+          "max_days": 365,
+          "quote": "It is constructed to operate within a validity period of 365 days, meaning it is designed to address scalability concerns throughout one full year of operation post-deployment.",
+          "problems": [],
+          "review": "corrected by hand: the draft took the '30 days after the purchase date' sentence; the limit is the 365-day validity in the next sentence"
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqzPSIAZ",
+      "issue": "Security Compliance Query",
+      "article_id": "ka0Wt000000Eo3NIAS",
+      "title": "Navigating Security Compliance with TechPulse Solutions: Effective Strategies for Clients",
+      "fixes": [
+        {
+          "name": "Security Compliance Audit",
+          "max_days": 90,
+          "quote": "Offered as a focused service, it is available to clients for 90 days following the audit request, ensuring that they remain well-aligned with the latest compliance benchmarks and requirements.",
+          "problems": []
+        },
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "Valid for up to 365 days after opting for the upgrade, this solution ensures that clients can swiftly resolve any compliance-related concerns or issues, further fostering confidence in our services.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "With ongoing access and no time limitation, clients can delve into a wide array of training modules, allowing them to deepen their knowledge and expertise.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqhItIAJ",
+      "issue": "Software Installation Error",
+      "article_id": "ka0Wt000000Em4zIAC",
+      "title": "Navigating Installation Challenges: Solutions for Seamless Setup of TechPulse EDA Tools",
+      "fixes": [
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "Notably, this upgrade is available for a duration of 365 days post-purchase, allowing users ample time to resolve any initial setup issues that may arise.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "Unlike the 'Priority Support Upgrade', the training access is not limited by time constraints, allowing users to take advantage of this resource whenever they wish to refine their skills or revisit certain modules.",
+          "problems": [],
+          "review": "checked by hand: 'not limited by time constraints' is a no-limit statement the validator's pattern missed"
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqtOtIAJ",
+      "issue": "Support Response Delay",
+      "article_id": "ka0Wt000000Eo6bIAC",
+      "title": "Enhancing Service Efficiency: Addressing Support Response Delays at TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "The solution is available for activation and remains valid for 365 days, allowing users a full year of enhanced support experience following the transaction date.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqvNUIAZ",
+      "issue": "Training Module Access",
+      "article_id": "ka0Wt000000Eo4zIAC",
+      "title": "Enhancing Access to Online Training Modules at TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "This solution is feasible for a full year (365 days) following the transaction.",
+          "problems": []
+        },
+        {
+          "name": "Comprehensive Training Access",
+          "max_days": null,
+          "quote": "Unlike the Priority Support Upgrade, this solution has no time constraints, offering perpetual access (-1 valid days) for users to engage with the training content.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqnHwIAJ",
+      "issue": "User Interface Bug",
+      "article_id": "ka0Wt000000EoBRIA0",
+      "title": "Addressing User Interface Glitches in TechPulse EDA Software",
+      "fixes": [
+        {
+          "name": "AI Diagnostic Update",
+          "max_days": 180,
+          "quote": "This solution is particularly effective and valid for 180 days following the detection of the malfunction, ensuring users benefit from high performance during this critical period.",
+          "problems": []
+        },
+        {
+          "name": "Priority Support Upgrade",
+          "max_days": 365,
+          "quote": "The enhancement provides peace of mind and sustained reliability for a valid duration of 365 days from the date of upgrade, effectively minimizing the impact of usability disruptions over an extended period.",
+          "problems": []
+        }
+      ]
+    },
+    {
+      "issue_id": "a03Wt00000JqzR3IAJ",
+      "issue": "Workflow Integration Lag",
+      "article_id": "ka0Wt000000Eo0AIAS",
+      "title": "Enhancing Workflow Efficiency: Tackling Integration Latency with TechPulse Solutions",
+      "fixes": [
+        {
+          "name": "Data Integration Toolkit",
+          "max_days": null,
+          "quote": "Notably, the Data Integration Toolkit is designed with a perpetually valid window, meaning there is no expiry period upon its deployment.",
+          "problems": []
+        },
+        {
+          "name": "Workflow Optimization Consultation",
+          "max_days": 60,
+          "quote": "This service is particularly beneficial within the first 60 days after purchase, offering an intensive period to make impactful adjustments and improvements.",
+          "problems": []
+        }
+      ]
+    }
+  ]
+}

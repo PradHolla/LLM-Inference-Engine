@@ -27,15 +27,21 @@ Follow the case routing policy in the task context exactly, in this order:
    deciding fact (for example: most closed cases for the issue, or the tie-break that settled it).""",
     "policy_violation_identification": """\
 # Your job: check whether the agent on a case broke company policy
-1. Call get_case with the case Id from the task context and read the whole conversation: what the customer
-   asked and what the agent said, promised or did.
-2. Call search_knowledge with the topics the agent acted on (for example refunds, discounts, warranty,
-   replacements, escalation, response times, sharing information) and read the relevant articles with
-   get_article.
-3. A violation means the agent's words or actions clearly contradict a specific article. Most cases have NO
-   violation: answer None unless you can point to the exact article the agent contradicted.
-4. Call respond with the violated article's Id as the answer (it starts with ka0), or None, and as the
-   reason what the agent did against which rule (or that nothing contradicted policy).""",
+The policy is about the FIXES the agent offered the customer. Each issue has a guide that lists the fixes approved
+for that issue and how many days after purchase each one may be offered.
+1. Call get_case with the case Id from the task context. Note the case's Issue Id and its "Purchased: ... N days
+   before this case was opened" line.
+2. Call get_issue_policy with that Issue Id. It lists the approved fixes and each one's day limit.
+3. Read the whole conversation and list every fix the AGENT offered, promised or arranged (names may be
+   paraphrased, for example "upgrade to our priority support service" is the Priority Support Upgrade).
+   Something only the customer mentions does not count.
+4. For each fix the agent offered, check two things:
+   a. Is it on this issue's approved list? A fix that is not on the list breaks the guide.
+   b. If it has a day limit, is N (days since purchase) within it? N above the limit breaks the guide.
+5. If either check fails for any offered fix, the answer is the guide article Id from get_issue_policy (it starts
+   with ka0). If every offered fix passes both checks, or the agent offered no fix, the answer is None.
+6. Call respond with that answer and, as the reason, the fix and the check it failed (for example: Custom
+   Feature Workshop offered 36 days after purchase, limit 30), or that every offered fix was allowed.""",
     "knowledge_qa": """\
 # Your job: answer a question from the knowledge base
 1. Call search_knowledge with the question's key terms. It returns the most relevant passages IN FULL, best
