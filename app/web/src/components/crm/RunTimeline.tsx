@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { BookOpen, Bot, Calendar, Check, CircleAlert, Cpu, Lock, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
+import { BookOpen, Bot, Calendar, Check, CircleAlert, Cpu, Lock, ShieldCheck, Sparkles, TriangleAlert, UserRound, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { AGENT_LABELS, buildRun, formatCell, formatCost, formatInt, formatSeconds, humanize, isSalesforceId,
   type AnswerEvent, type CrmAgent, type CrmEvent, type CrmMode, type StatsEvent } from "../../lib/crm";
@@ -34,12 +34,20 @@ function Badge({ answer }: { answer: AnswerEvent }) {
   return null;
 }
 
+const refused = (answer: AnswerEvent) => (answer.checks ?? []).filter((c) => c.result === "rejected").length;
+
 function AnswerCard({ answer }: { answer: AnswerEvent }) {
   return <motion.section className="crm-answer" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
     transition={{ duration: 0.26, ease: "easeOut" }} aria-label="Answer">
     <div className="crm-answer-head"><Sparkles size={14} aria-hidden="true" /><span>Answer</span><Badge answer={answer} /></div>
     <p className="crm-answer-text"><WithIds text={answer.text} /></p>
     {answer.reason && <p className="crm-answer-reason"><span>Why</span><WithIds text={answer.reason} /></p>}
+    {answer.quote && <p className="crm-answer-reason"><span>Source</span>
+      <q>{answer.quote}</q> <span className="crm-chip meta"><ShieldCheck size={12} aria-hidden="true" />
+      checked against the source{refused(answer) ? ` after ${refused(answer)} refused answer${refused(answer) > 1 ? "s" : ""}` : ""}
+      </span></p>}
+    {!answer.quote && refused(answer) > 0 && <p className="crm-answer-reason"><span>Checked</span>
+      {refused(answer)} answer{refused(answer) > 1 ? "s" : ""} refused: no source sentence states them</p>}
     {answer.sources && answer.sources.length > 0 &&
       <p className="crm-answer-sources"><span>Based on</span>
         {answer.sources.map((s) => <span key={s.id} className="crm-chip" title={s.id}>{s.title || s.id}</span>)}</p>}

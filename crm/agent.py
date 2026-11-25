@@ -42,6 +42,7 @@ CTX_MARGIN, CTX_MIN_OUT = 16, 256
 BACKOFF_S = [1.0, 3.0]  # one sleep per retry; the selftest shortens it
 CALL_TIMEOUT_S = 600.0
 ACTION_TEXT_CAP = 2000
+MAX_REJECTIONS = 2  # ungrounded answers refused before the honest fallback
 
 
 @dataclass(frozen=True)
@@ -422,7 +423,7 @@ def _emit_step(on_event, step: int, new: list[dict]) -> None:
 
 async def _tool_step(res: CallResult, session, messages: list[dict], trajectory: list[dict],
                      action_names: frozenset[str] | None = None, org: str | None = None,
-                     executor=None) -> dict:
+                     executor=None, verify=None) -> dict:
     """Execute every tool call in one model reply; append the assistant turn and the tool replies.
 
     action_names (the offered tools) switches from the tools_v1 tools to crm.actions dispatch."""
@@ -464,8 +465,14 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
         texts.append(json.dumps(args) if args is not None else str(fn.get("arguments")))
         if name == "respond" and isinstance(args, dict) and "answer" in args:
             ans, why = _split_answer(str(args["answer"]), str(args.get("reason") or ""))
-            out.update(answer=ans, reason=why)
-            reply = "Answer submitted."
+            problem = await verify(ans, args.get("quote"), trajectory) if verify else None
+            if problem:  # not grounded: the answer is refused and the agent tries again
+                out["rejected"] = problem
+                reply = (f"Answer NOT accepted: {problem}. Either answer with one sentence copied exactly from a "
+                         "passage you were shown, or answer that the knowledge base does not cover it.")
+            else:
+                out.update(answer=ans, reason=why, quote=args.get("quote"))
+                reply = "Answer submitted."
         elif action_names is not None:
             prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None
             if prior is not None:  # an identical repeat cannot give a new result; break the loop
@@ -535,11 +542,36 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         tools = TOOLS if protocol == TOOLS_PROTOCOL else None
         messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
-    end_reason = end_detail = answer = reason = None
+    end_reason = end_detail = answer = reason = quote = None
     n_calls = n_format = n_sql_err = n_search = n_trunc = 0
     prompt_toks, cached_toks, completion_toks = [], [], []
     session = await asyncio.to_thread(env.open_task)
     session.customer_id = customer
+    checks: list[dict] = []
+    verify = None
+    if protocol == SERVICE_PROTOCOL and (task.task_type == "knowledge_qa" or customer):
+        async def verify(ans: str, quote, traj: list[dict]) -> str | None:
+            """None if the answer is grounded (or an honest 'not covered' / privacy refusal), else the problem."""
+            if service.is_abstain(ans) or (customer and service.is_refusal(ans)):
+                checks.append({"answer": ans, "result": "abstain"})
+                return None
+            obs = [m.get("content") or "" for m in traj if m.get("role") == "tool"]
+            problem = service.grounding_problem(quote, obs, 8 if customer else service.MIN_QUOTE_CHARS)
+            if problem is None:  # the quote is real: does it state THIS answer to THIS question?
+                prompt = service.SUPPORT_PROMPT.format(question=task.query.strip(), answer=ans, quote=str(quote).strip())
+                check_arm = dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None,
+                                                temperature=0.7, top_p=0.8, max_tokens=300)
+                cres, _, _, _, cerr = await model_call(http_client, base_url, check_arm,
+                                                       [{"role": "user", "content": prompt}], seed, window, None)
+                ok, why = service.support_verdict(cres.content if cres else "")
+                if cres is not None:
+                    prompt_toks.append(cres.prompt_tokens)
+                    completion_toks.append(cres.completion_tokens)
+                if not ok:
+                    problem = f"that sentence does not state this answer to the question ({why or cerr or 'no verdict'})"
+            checks.append({"answer": ans, "quote": quote, "result": "rejected" if problem else "grounded",
+                           "problem": problem})
+            return problem
     try:
         for step in range(max_turns):
             if on_event:
@@ -562,7 +594,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             completion_toks.append(res.completion_tokens)
             if tools:
                 n_before = len(trajectory)
-                step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org, executor)
+                step_out = await _tool_step(res, session, messages, trajectory, action_names, task.org, executor,
+                                            verify)
                 if on_event:
                     _emit_step(on_event, step, trajectory[n_before:])
                 rec.update(prompt_tokens=res.prompt_tokens, cached_tokens=res.cached_tokens,
@@ -577,7 +610,13 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                 emit(calls_out, rec)
                 if step_out["answer"] is not None:
                     end_reason, answer, end_detail = "respond", step_out["answer"], step_out["detail"]
-                    reason = step_out.get("reason")
+                    reason, quote = step_out.get("reason"), step_out.get("quote")
+                    break
+                if sum(c["result"] == "rejected" for c in checks) >= MAX_REJECTIONS:
+                    # two ungrounded answers: say so honestly rather than let a third guess through
+                    end_reason, end_detail = "respond", "grounding_fallback"
+                    answer = service.FALLBACK_CUSTOMER if customer else service.FALLBACK_KNOWLEDGE
+                    reason = "No sentence in the passages shown states an answer to this question."
                     break
                 continue
             action, text = parse_action(res.content)
@@ -615,7 +654,9 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     if on_event:
         wall = (time.perf_counter() - t0) * 1000
         if answer is not None:
-            on_event({"type": "answer", "text": answer, "reason": reason, "sources": _sources(trajectory, f"{reason or ''} {answer or ''}"),
+            on_event({"type": "answer", "text": answer, "reason": reason, "quote": quote,
+                      "checks": [{"result": c["result"], "problem": c.get("problem")} for c in checks],
+                      "sources": _sources(trajectory, f"{reason or ''} {answer or ''}"),
                       "expected": None if task.reward_metric in ("none", "privacy_rejection") else list(task.answer),
                       "correct": None if g["reward"] is None or task.reward_metric != "exact_match"
                       else g["reward"] == 1.0})
@@ -632,7 +673,8 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             "end_detail": end_detail, "n_calls": n_calls, "n_format_errors": n_format, "n_sql_errors": n_sql_err,
             "n_searches": n_search, "n_truncations": n_trunc, "prompt_tokens_total": _sum(prompt_toks),
             "cached_tokens_total": _sum(cached_toks), "completion_tokens_total": _sum(completion_toks),
-            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "trajectory": trajectory}
+            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "quote": quote,
+            "grounding_checks": checks, "trajectory": trajectory}
 
 
 def done_keys(path: str | Path) -> set[tuple[str, int, str]]:
@@ -974,6 +1016,58 @@ def _selftest() -> int:
                                  protocol="actions_v1")
         check("12 actions_v1: respond without answer is a format error, not a crash",
               rec["n_format_errors"] == 1 and rec["end_reason"] == "respond", str(rec["n_format_errors"]))
+
+        # 13. knowledge grounding: invented quote refused, real quote + support "yes" accepted, two refusals fall back
+        kq = by_idx[717]
+
+        def passage_from(body) -> str:
+            tool = next(m["content"] for m in reversed(body["messages"]) if m["role"] == "tool"
+                        and "'passage':" in m["content"])
+            return re.search(r"'passage': [\"']([^\"'\\\\]{30,80})", tool).group(1)
+
+        def grounded_script(verdict: str):
+            state = {"n": 0}
+
+            def script(body):
+                state["n"] += 1
+                if body.get("tools") is None:  # the support check: a plain streaming call
+                    return f"It states it.\nVERDICT: {verdict}"
+                if state["n"] == 1:
+                    return tc(("search_knowledge", {"query": "AI predict integration challenges", "limit": 3}))
+                if state["n"] == 2:
+                    return tc(("respond", {"reason": "r", "quote": "QuantumPCB Modeler is middleware for HPC apps.",
+                                           "answer": "QuantumPCB Modeler."}))
+                if state["n"] == 3:
+                    return tc(("respond", {"reason": "r", "quote": passage_from(body), "answer": "Artificial intelligence."}))
+                return tc(("respond", {"reason": "r", "quote": "still invented, nothing like the passages",
+                                       "answer": "A guess."}))
+            return script
+
+        rec, calls, fake = await one(kq, grounded_script("yes"), protocol=SERVICE_PROTOCOL)
+        res = [c["result"] for c in rec["grounding_checks"]]
+        check("13 grounding: invented quote refused, real quote accepted after a 'yes' support check",
+              res == ["rejected", "grounded"] and rec["answer"] == "Artificial intelligence." and rec["quote"]
+              and "does not appear" in rec["grounding_checks"][0]["problem"]
+              and sum(b.get("tools") is None for b in fake.bodies) == 1, f"{res} answer={rec['answer']!r}")
+        rejected_msg = next(m["content"] for m in fake.bodies[2]["messages"] if m["role"] == "tool"
+                            and m["content"].startswith("Answer NOT accepted"))
+        check("13 grounding: the agent is told why its answer was refused", "copied exactly" in rejected_msg)
+        rec, _, _ = await one(kq, grounded_script("no"), protocol=SERVICE_PROTOCOL)
+        res = [c["result"] for c in rec["grounding_checks"]]
+        check("13 grounding: support 'no' refuses a real quote; two refusals -> honest fallback",
+              res == ["rejected", "rejected"] and rec["answer"] == service_fallback()
+              and rec["end_detail"] == "grounding_fallback", f"{res} answer={rec['answer']!r}")
+        rec, _, fake = await one(kq, [tc(("search_knowledge", {"query": "x y", "limit": 3})),
+                                      tc(("respond", {"reason": "r", "quote": "",
+                                                      "answer": "Our knowledge base does not cover that."}))],
+                                 protocol=SERVICE_PROTOCOL)
+        check("13 grounding: an honest 'not covered' needs no quote and no support call",
+              rec["answer"].startswith("Our knowledge base does not cover") and
+              [c["result"] for c in rec["grounding_checks"]] == ["abstain"] and len(fake.bodies) == 2)
+
+    def service_fallback() -> str:
+        from crm import service
+        return service.FALLBACK_KNOWLEDGE
 
     asyncio.run(scenarios())
 

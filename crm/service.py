@@ -492,6 +492,73 @@ _RESPOND = _tool("respond", "Give the final answer. Call this once, when you are
                              "an Id, None, or one short sentence for a knowledge question."}},
                  ["reason", "answer"])
 
+# Knowledge answers carry the source sentence; the agent loop checks it (grounding_problem, support check).
+_RESPOND_KNOWLEDGE = _tool(
+    "respond", "Give the final answer. Write the reason first, then the source sentence, then the answer.",
+    {"reason": {"type": "string", "description": "Write this FIRST: which passage answers the question and why "
+                "it is about the product or topic asked, or that no passage does."},
+     "quote": {"type": "string", "description": "The ONE sentence from a tool result you were shown (a knowledge "
+               "passage, or a case record) that states the answer, copied exactly. Empty if nothing you were shown "
+               "answers it, or when refusing."},
+     "answer": {"type": "string", "description": "One short sentence answering the question, taken from that "
+                "quote; or 'Our knowledge base does not cover <the product or topic>.'"}},
+    ["reason", "quote", "answer"])
+
+ABSTAIN_PHRASES = ("does not cover", "do not cover", "doesn't cover", "not covered", "no information",
+                   "no article", "not in our knowledge base", "not in the knowledge base")
+MIN_QUOTE_CHARS = 20
+
+
+REFUSAL_PHRASES = ("can't share", "cannot share", "can not share", "only help with your own", "for privacy")
+FALLBACK_KNOWLEDGE = "Our knowledge base does not cover this question."
+FALLBACK_CUSTOMER = ("I'm sorry, I couldn't find that in your records or our knowledge base. "
+                     "Could you tell me more, or ask about one of your own cases?")
+
+
+def is_abstain(answer: str | None) -> bool:
+    low = (answer or "").lower()
+    return any(p in low for p in ABSTAIN_PHRASES)
+
+
+def is_refusal(answer: str | None) -> bool:
+    """The customer job's privacy refusal, which needs no source sentence."""
+    low = (answer or "").lower().replace("’", "'")
+    return any(p in low for p in REFUSAL_PHRASES)
+
+
+def _alnum(s: str) -> str:
+    """Letters and digits only, lowercased: survives the escaping and spacing of rendered tool results."""
+    return re.sub(r"[^a-z0-9]", "", html.unescape(s or "").lower())
+
+
+def grounding_problem(quote: str | None, observations: list[str], min_chars: int = MIN_QUOTE_CHARS) -> str | None:
+    """Why a knowledge answer's quote is not acceptable, or None: it must appear in a passage the agent was shown."""
+    q = (quote or "").strip()
+    if len(q) < min_chars:
+        return "the quote is missing or too short; copy the one sentence from a passage that states the answer"
+    key = _alnum(q)
+    if not any(key in _alnum(o) for o in observations):
+        return "the quote does not appear in any passage you were shown; copy it exactly from a search result"
+    return None
+
+
+SUPPORT_PROMPT = """Question: {question}
+Proposed answer: {answer}
+Source sentence: "{quote}"
+
+Does the source sentence itself state this answer to this question? It must be about the same product or subject the
+question asks about, and contain the answer's key facts. Write one short line of reasoning, then on a new line
+VERDICT: yes or VERDICT: no."""
+VERDICT_RE = re.compile(r"VERDICT:\s*(yes|no)", re.I)
+
+
+def support_verdict(text: str) -> tuple[bool, str]:
+    """(supported, the model's reasoning line) from a support-check reply; anything unparseable is 'no'."""
+    m = VERDICT_RE.findall(text or "")
+    why = (text or "").split("VERDICT")[0].strip()[:300]
+    return (bool(m) and m[-1].lower() == "yes"), why
+
+
 SERVICE_TOOLS: list[dict] = [
     _tool("get_case", "Read one support case in full: its fields (with issue and product names), its emails, live "
           "chat transcripts and change history, each oldest first. Long bodies are cut with a note.",
@@ -554,7 +621,8 @@ def _route_case_tool(org: str) -> dict:
 
 # The policy and routing jobs get only what they need; the verdict and the winner are decided in code.
 JOB_TOOLS = {"policy_violation_identification": ("get_case", "check_offers", "respond"),
-             "case_routing": ("route_case", "respond")}
+             "case_routing": ("route_case", "respond"),
+             "knowledge_qa": ("search_knowledge", "get_article", "respond_knowledge")}
 
 
 _MY_CASES = _tool("get_my_cases", "List YOUR OWN cases (the logged-in customer's): Id, Subject, Status, dates and "
@@ -563,11 +631,13 @@ _MY_CASES = _tool("get_my_cases", "List YOUR OWN cases (the logged-in customer's
 
 def service_tools(org: str, task_type: str, customer: str | None = None) -> list[dict]:
     """The tools for one job: a logged-in customer's five, the policy job's three, or the general service list."""
-    keep = CUSTOMER_TOOLS if customer else JOB_TOOLS.get(task_type)
+    # a customer's answers are grounded like knowledge answers, so they get the respond form with a quote
+    keep = (*CUSTOMER_TOOLS[:-1], "respond_knowledge") if customer else JOB_TOOLS.get(task_type)
     if keep is None:
         return SERVICE_TOOLS
     pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org), _MY_CASES,
                                                 _route_case_tool(org)]}
+    pool["respond_knowledge"] = _RESPOND_KNOWLEDGE  # still named "respond" to the model
     return [pool[n] for n in keep]
 
 
@@ -653,9 +723,35 @@ def _selftest() -> int:
     enum = pol_tools[1]["function"]["parameters"]["properties"]["offered"]["items"]["enum"]
     check("check_offers enum: the 8 catalog fixes + other, strict schema",
           len(enum) == 9 and policy.OTHER in enum and pol_tools[1]["function"].get("strict") is True, str(enum))
-    check("knowledge keeps the general list, without check_offers or route_case",
-          service_tools("b2b", "knowledge_qa") is SERVICE_TOOLS
+    check("other jobs (e.g. a typed question) keep the general list, without the job-specific tools",
+          service_tools("b2b", "free_question") is SERVICE_TOOLS
           and not {"check_offers", "route_case"} & {t["function"]["name"] for t in SERVICE_TOOLS})
+
+    # --- grounding: knowledge answers must quote a sentence the agent was shown
+    shown = ["[{'Id': 'ka0X', 'Title': 'T', 'passage': 'TechPulse\\'s tools use end-to-end encryption to protect "
+             "sensitive design data.\\nMore text.'}]"]
+    check("grounding: a quote copied from a shown passage passes (escapes and spacing ignored)",
+          grounding_problem("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
+          is None)
+    check("grounding: an invented quote is refused",
+          "does not appear" in (grounding_problem("QuantumPCB Modeler acts as middleware between HPC and quantum.",
+                                                  shown) or ""))
+    check("grounding: a missing or tiny quote is refused", grounding_problem("", shown) is not None
+          and grounding_problem("encryption", shown) is not None)
+    check("support verdict: reasoning then VERDICT yes / no / garbage",
+          support_verdict("It names the tool.\nVERDICT: yes") == (True, "It names the tool.")
+          and support_verdict("Different product.\nVERDICT: no")[0] is False and support_verdict("hmm")[0] is False)
+    check("abstain and refusal phrases", is_abstain("Our knowledge base does not cover IDPS.")
+          and is_refusal("I'm sorry, I can’t share information about other customers.")
+          and not is_abstain("Encryption protects data."))
+    kt = service_tools("b2b", "knowledge_qa")
+    kprops = kt[-1]["function"]["parameters"]["properties"]
+    check("knowledge job: search, article, respond with reason -> quote -> answer",
+          [t["function"]["name"] for t in kt] == ["search_knowledge", "get_article", "respond"]
+          and list(kprops) == ["reason", "quote", "answer"])
+    ct = service_tools("b2b", "free_question", "003Wt00000Jqt7DIAR")
+    check("customer job: respond also carries a quote",
+          ct[-1]["function"]["name"] == "respond" and "quote" in ct[-1]["function"]["parameters"]["properties"])
 
     # --- route_case: names in, the routing policy applied in code
     def routed(issue, product):
@@ -716,8 +812,9 @@ def _selftest() -> int:
     check("customer tool list: exactly the five customer tools",
           [t["function"]["name"] for t in service_tools("b2b", "private_customer_information", kofi)]
           == list(CUSTOMER_TOOLS))
-    check("knowledge task with no login keeps the general list (eval unchanged)",
-          service_tools("b2b", "knowledge_qa", None) is SERVICE_TOOLS)
+    check("knowledge task with no login gets the knowledge job's tools, not the customer's",
+          [t["function"]["name"] for t in service_tools("b2b", "knowledge_qa", None)]
+          == ["search_knowledge", "get_article", "respond"])
     o = ex("get_case", {"case_id": other_case})
     check("employee mode (no login): any case still opens", o.ok and other_case in o.text)
     o = ex("get_my_cases", {})

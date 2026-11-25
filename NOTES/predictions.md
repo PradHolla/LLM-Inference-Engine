@@ -7709,3 +7709,20 @@ expected agent is reachable with the case's own named product for 96/100 b2b rou
 | RT-1 | Routing, dev, per arm, 3 seeds | 88-95% | Id errors removed; 1500 (5% of dev) stays wrong; a few wrong issue or product picks remain |
 | RT-2 | Routing time per task p50, q-off | 2-4 s | 2 model calls instead of 3-6 |
 | RT-3 | q-off vs q-b128-first gap on routing | under 4 points | thinking mainly helped with the multi-step tie-break, which is now code |
+
+## P11-KG: grounded knowledge answers, 2026-11-25
+
+Change: the knowledge job gets only search_knowledge, get_article and a respond with reason -> quote -> answer.
+A non-abstaining answer must quote a sentence present in a tool result of the run (code check, letters and
+digits only), then pass a focused support call to the same model ("does this sentence state this answer to this
+question", reason then VERDICT). Refused answers are sent back with the reason; after 2 refusals the code
+answers "not covered". Same for customer mode (quotes may come from their case file).
+Grading: Sonnet 5.5 judge with the reviewed labels (crm/kq_labels_b2b.json). Practice before the change, per
+run of 18 unanswerable dev questions: 2-6 answered with something that did not match the reference.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG-1 | Made-up answers on unanswerable dev questions, per run of 18 | 0-2 | an invented fact has no sentence to quote; a real but off-subject sentence must also pass the support call |
+| KG-2 | Answerable dev questions (2 per run) answered correctly or partly | 1-2 of 2 per run, mean | both have their answer in the top search results; the quote step forces the right detail |
+| KG-3 | Knowledge time per question p50, q-off | 4-7 s | was 4.6 s; one extra short model call (~0.5-1 s) and occasional retries |
+| KG-4 | Runs ending in the grounding fallback | under 15% of knowledge runs | most answers either quote correctly or abstain first time |

@@ -49,6 +49,7 @@ export type ObservationEvent = {
 export type AnswerEvent = {
   type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null;
   reason?: string | null; sources?: { id: string; title: string }[];
+  quote?: string | null; checks?: { result: string; problem?: string | null }[];
 };
 export type StatsEvent = {
   type: "stats"; steps: number; actions: number; wall_ms: number; prompt_tokens: number;
