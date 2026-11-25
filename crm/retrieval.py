@@ -19,7 +19,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
+try:  # numpy and fastembed are optional: without them knowledge search is BM25 only, never a crash
+    import numpy as np
+except ImportError:
+    np = None
 
 from crm.actions import _parse_rows
 from crm.env import DATA, CRMEnv, Observation, TaskSession
@@ -147,6 +150,8 @@ def _get_model():
     with _model_lock:
         if _model is None and not _model_failed:
             try:
+                if np is None:
+                    raise ImportError("numpy is not installed")
                 from fastembed import TextEmbedding
                 cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(DATA / "fastembed-cache")
                 _model = TextEmbedding(model_name=MODEL, cache_dir=cache)

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["httpx"]
+# dependencies = ["httpx", "fastembed==0.9.1"]
 # ///
 """Run the CRM agent harness against a vLLM endpoint and report results tables.
 
