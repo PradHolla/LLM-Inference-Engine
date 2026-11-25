@@ -25,6 +25,9 @@ KINDS = ["issue", "product"]
 BODY_CAP = 4000  # per email / chat / description; shrinks only if the whole case file exceeds the char cap
 DESC_CAP = 120
 MAX_SEARCH, DEFAULT_SEARCH, MIN_SEARCH = 10, 5, 3
+# Best rerank score below which knowledge results are flagged LOW RELEVANCE (still shown): calibrated on the
+# synthetic practice set crm/kqdev_b2b.json, where it flags 19/20 traps and 1/20 answerable (A03, right article).
+FLAG_RELEVANCE = 2.4
 MAX_TOP, DEFAULT_TOP = 20, 10
 MAX_AGENTS = 50
 
@@ -170,9 +173,10 @@ def search_knowledge(session: TaskSession, query, limit) -> Observation:
     if missing:  # a fact, not a score: the reranker cannot tell an absent product from a similar topic
         notes.append("NOTE: no article and no product in the knowledge base mentions "
                      + ", ".join(f'"{m}"' for m in missing) + ". Do not answer with another product's information.")
-    if not res.relevant:  # below the cutoff: still shown (policy searches use short keywords), but flagged
+    if res.best_score is not None and res.best_score < FLAG_RELEVANCE:  # flagged, not hidden (see FLAG_RELEVANCE)
         notes.append(f"LOW RELEVANCE: no passage clearly matches (best score {res.best_score:.2f}, below "
-                     f"{retrieval.MIN_RELEVANCE:.2f}); the knowledge base may not cover this.")
+                     f"{FLAG_RELEVANCE:.2f}); the knowledge base may not cover this. Answer only if a passage is "
+                     "about exactly what was asked.")
     if res.mode != "reranked":
         notes.append("(unranked: the relevance model is unavailable; passages may not answer the question)")
     note = "".join(f"{n_}\n" for n_ in notes)

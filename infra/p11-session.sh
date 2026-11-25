@@ -44,6 +44,30 @@ PY
     done
     echo "P11_SESSION_DONE prepare"
     ;;
+  kqdev)  # the synthetic knowledge practice set (crm/kqdev_b2b.json), one pass, then check before ktest
+    arm="${2:?usage: p11-session.sh kqdev <arm>}"
+    served=$(curl -s -m 5 http://localhost:8000/v1/models | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ "$served" != "Qwen/Qwen3-8B" ]; then /bin/bash /opt/llm/infra/p11-app.sh launch qwen || fail "qwen launch"; fi
+    curl -sf -m 5 "$CRM_RERANK_URL/health" >/dev/null || /bin/bash /opt/llm/infra/p11-app.sh rerank
+    curl -sf -m 5 "$CRM_RERANK_URL/health" >/dev/null || fail "GPU reranker not up"
+    $UV run tools/crmeval.py run --url http://localhost:8000 --arm "$arm" --model Qwen/Qwen3-8B --org b2b \
+        --tasks-file crm/kqdev_b2b.json --split kqdev --types knowledge_qa --concurrency 4 --run-seed 0 \
+        --run-id "p11-kqdev-$arm-s0" --protocol service_v1 || fail "kqdev run"
+    n=$(wc -l < "results/p11-kqdev-$arm-s0.tasks.jsonl")
+    [ "$n" -eq 40 ] || fail "kqdev produced $n of 40 records"
+    echo "P11_SESSION_DONE kqdev $arm ($n records)"
+    ;;
+  ktest)  # knowledge only on the held-out test set, 3 passes
+    arm="${2:?usage: p11-session.sh ktest <arm>}"
+    for seed in 0 1 2; do
+        $UV run tools/crmeval.py run --url http://localhost:8000 --arm "$arm" --model Qwen/Qwen3-8B --org b2b \
+            --split test --types knowledge_qa --concurrency 4 --run-seed "$seed" \
+            --run-id "p11-ktest-$arm-s$seed" --protocol service_v1 || fail "ktest seed $seed"
+    done
+    n=$(cat results/p11-ktest-"$arm"-s*.tasks.jsonl | wc -l)
+    [ "$n" -eq 240 ] || fail "ktest produced $n of 240 records"
+    echo "P11_SESSION_DONE ktest $arm ($n records)"
+    ;;
   test)
     arm="${2:?usage: p11-session.sh test <arm>}"
     /bin/bash /opt/llm/infra/p11-eval.sh test "$arm" | grep -E "P11_EVAL|mean_reward" | tail -20
@@ -51,6 +75,6 @@ PY
     [ "$n" -eq 720 ] || fail "test produced $n of 720 records"
     echo "P11_SESSION_DONE test $arm ($n records)"
     ;;
-  *) echo "usage: p11-session.sh prepare | test <arm>"; exit 2 ;;
+  *) echo "usage: p11-session.sh prepare | kqdev <arm> | ktest <arm> | test <arm>"; exit 2 ;;
 esac
 exit 0

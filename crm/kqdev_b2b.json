@@ -1,0 +1,642 @@
+[
+ {
+  "org": "b2b",
+  "idx": 9001,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What percentage discount does an order totalling at least $20 qualify for under the volume-based discount tiers?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "15%"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9002,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How many days does installation take when a customer buys a batch of 25 units?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "14 days"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9003,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What is the window for requesting a return after buying a product?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Within 30 days of the purchase date"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9004,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What is the maximum number of SecureAnalytics Pro units that can go on a single order?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "12 units"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9005,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Which two additional products have to be added to a quote when a customer wants PulseSim Pro?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "CircuitMaster Analyzer and VeriSim Express"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9006,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Which TechPulse product should not be used together with SecureFlow Suite?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "SecureTrack Pro"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9007,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What does a customer need to show in order to get TechPulse to adjust its price because of a rival vendor's pricing?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "A valid, written offer from another vendor stating the competing price"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9008,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What is the main weakness of Quantum Circuits Inc, according to the knowledge base?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Limited customizability and flexibility in its offerings"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9009,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Which CryptGuard Module capability gives transparency and accountability over who touched the data?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Detailed audits and comprehensive logs of data access and modification activities"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9010,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What design considerations does AutoLayout Master take into account when it suggests a PCB layout?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Signal integrity, thermal efficiency, and manufacturing reliability"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9011,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Which PCBProto Wizard capability lets designers try out a prototype virtually as they iterate?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Its real-time simulation capabilities"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9012,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "At what times can customers file a support request through the TechPulse support portal?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "At any time, 24/7"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9013,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How can developers observe their code's behaviour while it runs in DevVision IDE?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Through its real-time debugging feature, which runs code in a controlled environment"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9014,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Which routine design tasks does Workflow Genius take off engineers' hands?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Simulation, verification, and error checking"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9015,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Why can SimuCheck Ultra complete simulations faster than conventional methods?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Because it integrates advanced AI that accelerates the simulation process"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9016,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Why can team members in different locations work together on designs in CloudLink Designer?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Its cloud-based architecture allows real-time collaboration regardless of location"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9017,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TrainEDU Suite let learners get practical experience without real-world risk?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Through simulation-based training that replicates real-world scenarios"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9018,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Through which channels does TechPulse collect input from its customers?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Direct surveys, user group meetings, and dedicated feedback portals"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9019,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How soon after a new feature goes live are the Custom Feature Workshops most useful?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Within 30 days of the new feature deployment"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9020,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Why might CircuitWave Technologies fall behind more innovation-driven competitors?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "It is relatively slow at introducing roadmap enhancements and new features"
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9101,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What is a critical aspect of access control in telecom networks?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9102,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse reduce power draw in 5G base stations?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9103,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse help validate railway signalling circuits against fail-safe standards?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9104,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What does TechPulse recommend for keeping HIPAA-compliant patient records in a hospital?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9105,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse detect fraudulent card transactions at a bank?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9106,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse harden satellite electronics against space radiation?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9107,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse protect SCADA systems in industrial plants from cyberattacks?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9108,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse schedule warehouse resources for supply chain operations?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9109,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does DevVision IDE help me debug Android apps?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9110,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What does TechPulse recommend for antenna tuning in Wi-Fi 6 router designs?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9111,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse keep a blockchain ledger tamper-proof?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9112,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does TechPulse simulate joint torque and motion in industrial robot arms?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9113,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What safety features does TechPulse's automotive design suite include?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9114,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What phone number reaches TechPulse's 24/7 support hotline?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9115,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How do I install the TechPulse mobile app to open my training modules on my phone?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9116,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How much faster does TechPulse's hardware simulation accelerator card run my simulations?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9117,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How long is the extended warranty on TechPulse EDA licenses?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9118,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "What encryption does SecureSim Nexus use to protect simulation data?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9119,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "Does PCB OptiForge automate component placement and routing?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ },
+ {
+  "org": "b2b",
+  "idx": 9120,
+  "task_type": "knowledge_qa",
+  "skill": "text",
+  "external": true,
+  "query": "How does ThermoSim Pro model heat dissipation on dense boards?",
+  "required": "- Use the information retrieved from the knowledge articles to answer the question in a concise manner",
+  "optional": "# Domain Details\n## Quarters of the Year\n- Q1: January 1 to March 31 (both inclusive).\n- Q2: April 1 to June 30 (both inclusive).\n- Q3: July 1 to September 30 (both inclusive).\n- Q4: October 1 to December 31 (both inclusive).\n## Seasons\n- Winter (2024): December 1, 2024 to February 28/29, 2025 (both inclusive), specifying the year to avoid ambiguity.\n- Spring: March 1 to May 31 (both inclusive).\n- Summer: June 1 to August 31 (both inclusive).\n- Autumn/Fall: September 1 to November 30 (both inclusive).\n## Time Periods\n- Past 2 quarters: This refers to any timeframe spanning two quarters back from a specified `end_date`. (i.e. begins on the date calculated by subtracting six months from the end_date and ends on the end_date) That translates to a six-month period retrospectively from the `end_date`.\n- Issue Significantly More Than Other Months: This means there is a month where the number of cases reported are larger than all other months.",
+  "answer": [
+   "Our knowledge base does not cover this."
+  ],
+  "reward_metric": "fuzzy_match",
+  "today": null,
+  "split": "kqdev"
+ }
+]

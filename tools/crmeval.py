@@ -33,7 +33,7 @@ from crm.agent import ARMS, PROTOCOLS, run_many  # noqa: E402
 from crm.grade import reward_metric_for  # noqa: E402
 
 SKILLS = ("workflow", "policy", "text", "database")
-SPLITS = ("dev", "test", "holdout", "all")
+SPLITS = ("dev", "test", "holdout", "kqdev", "all")  # kqdev: the synthetic knowledge practice set (crm/kqdev_b2b.json)
 
 
 # ---------------------------------------------------------------- run
@@ -96,7 +96,9 @@ def cmd_run(args: argparse.Namespace, client: httpx.Client | None = None) -> int
     if unknown:
         print(f"error: unknown task types {unknown}", file=sys.stderr)
         return 2
-    picked = select_tasks(crm_tasks.load(args.org), args.split, types, args.limit)
+    source = ([crm_tasks.Task(**d) for d in json.loads(Path(args.tasks_file).read_text())]
+              if getattr(args, "tasks_file", None) else crm_tasks.load(args.org))
+    picked = select_tasks(source, args.split, types, args.limit)
     if args.idx:  # an explicit task list, e.g. the app's curated showcase
         want = {int(x) for x in args.idx.split(",") if x.strip()}
         picked = [t for t in picked if t.idx in want]
@@ -472,6 +474,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--split", default="dev", choices=SPLITS)
     r.add_argument("--types", help="comma-separated task types")
     r.add_argument("--idx", help="comma-separated task idx to keep (applied after split/types/limit)")
+    r.add_argument("--tasks-file", help="JSON list of task dicts (crm.tasks.Task fields) instead of the benchmark, "
+                                        "e.g. crm/kqdev_b2b.json; --split must match their split")
     r.add_argument("--limit", type=int, help="first N tasks per task type, by idx")
     r.add_argument("--concurrency", type=int, default=8)
     r.add_argument("--run-id")

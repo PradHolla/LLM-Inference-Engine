@@ -7766,3 +7766,24 @@ correct, 12 partial, 13 incorrect of 27. CRAG-style score (+1 / +0.5 / 0 / -1) -
   without its article; search always returns 5 passages; the playbook leans toward answering.
 - Earlier crmjudge grading counted grounded answers that differ from an unreachable reference as "made up"
   (the 44); that grading was wrong for unanswerable questions and is replaced by ragjudge.
+
+## P11-KG2: knowledge with thinking on judgement, subject checks, relevance flag (2026-11-25)
+
+Baseline, re-graded with one grader for before and after (ragjudge --references, Sonnet 5.5): test knowledge
+q-off, 240 answers: hallucination 58/240 = 24%; answerable 27: 1 correct, 14 partial, 5 incorrect, 7
+hallucinated; CRAG-style -0.179 per answer. A first grading of the same answers gave 25% and 42 vs 44
+grounded: judge noise is about 2 answers in 100.
+Changes: arm q-judge (thinking, budget 2048, on knowledge and customer answers and in the support check; off
+for routing and policy); support check sees the source title and passage with an explicit subject rule; the
+respond form names question_subject and source_subject before the quote; results below a rerank score of 2.4
+flagged LOW RELEVANCE (shown, not hidden). New practice set crm/kqdev_b2b.json (20 answerable, 20 traps,
+synthetic, written without the benchmark questions): search puts the source article in the top 5 for 20/20
+answerable; 2.4 flags 19/20 traps and 1/20 answerable.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG2-1 | kqdev traps answered "not covered" | 15-19 / 20 | the flag fires on 19, the subject check and thinking catch most of the rest; T09 (a real product, Android context) is the hardest |
+| KG2-2 | kqdev answerable answered correctly (correct or partial) | 15-19 / 20 | the source is always retrieved; the stricter checks may refuse a few good answers (A03 is flagged) |
+| KG2-3 | test knowledge hallucination rate, 240 answers | 5-12% | off-subject answers (39) were the bulk; the subject rule, thinking and the flag target exactly that |
+| KG2-4 | test knowledge CRAG-style score | -0.05 to +0.10 | hallucinations move to "not covered" (0) rather than to correct answers; the answerable set stays small |
+| KG2-5 | test knowledge time per question p50 | 10-20 s | thinking on two to three model calls (agent steps plus the support check) at up to 2048 tokens |
