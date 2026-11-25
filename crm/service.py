@@ -10,6 +10,7 @@ import ast
 import functools
 import html
 import re
+import sqlite3
 import sys
 import time
 
@@ -259,6 +260,83 @@ def check_offers(session: TaskSession, case_id, offered) -> Observation:
     return _obs(text, len(lines), len(lines), False, t0)
 
 
+NO_PRODUCT = "(no product named in the case)"
+
+
+@functools.lru_cache(maxsize=4)
+def _menus(org: str) -> tuple[dict, dict, dict]:
+    """(issue name -> Id, issue name -> description, product name -> Id) for the org, read once."""
+    from crm.env import CRMEnv
+    conn = sqlite3.connect(f"file:{CRMEnv(org).db_path}?mode=ro", uri=True)
+    try:
+        iss = conn.execute("SELECT Name, Id, Description__c FROM Issue__c ORDER BY Name").fetchall()
+        prod = conn.execute("SELECT Name, Id FROM Product2 ORDER BY Name").fetchall()
+    finally:
+        conn.close()
+    return {n: i for n, i, _ in iss}, {n: d for n, _, d in iss}, {n: i for n, i in prod}
+
+
+def _closed_by(session: TaskSession, kind: str, rid: str, among: list[str] | None = None) -> dict[str, int]:
+    """Closed cases per agent for an issue or a product; with `among`, every listed agent appears (0 if none)."""
+    if kind == "issue":
+        sql = 'SELECT OwnerId, COUNT(*) AS n FROM "Case" WHERE Status = \'Closed\' AND IssueId__c = ? GROUP BY OwnerId'
+    else:
+        sql = ('SELECT c.OwnerId, COUNT(*) AS n FROM "Case" c JOIN OrderItem oi ON oi.Id = c.OrderItemId__c '
+               "WHERE c.Status = 'Closed' AND oi.Product2Id = ? GROUP BY c.OwnerId")
+    got = {r["OwnerId"]: r["n"] for r in _rows(session, sql, [rid])}
+    return {a: got.get(a, 0) for a in among} if among else got
+
+
+def _names(session: TaskSession, ids: list[str]) -> dict[str, str]:
+    if not ids:
+        return {}
+    rows = _rows(session, f"SELECT Id, FirstName || ' ' || LastName AS Name FROM User WHERE Id IN "
+                          f"({', '.join('?' * len(ids))})", ids)
+    return {r["Id"]: r["Name"] for r in rows}
+
+
+def route_case(session: TaskSession, issue, product) -> Observation:
+    """The case routing policy applied in code to the issue and product the model chose by name."""
+    t0 = time.monotonic()
+    issue_ids, _, product_ids = _menus(session.org)
+    if issue not in issue_ids:
+        raise ActionError(f"unknown issue {issue!r}; choose one of: {sorted(issue_ids)}")
+    if product != NO_PRODUCT and product not in product_ids:
+        raise ActionError(f"unknown product {product!r}; choose one of the product names or {NO_PRODUCT!r}")
+    lines = [f"ROUTING for issue '{issue}', product '{product}'"]
+    by_issue = _closed_by(session, "issue", issue_ids[issue])
+    if not by_issue:
+        raise ActionError(f"no agent has closed a case for '{issue}'; choose the next most similar issue")
+    top = max(by_issue.values())
+    tied = sorted(a for a, n in by_issue.items() if n == top)
+    lines.append(f"1. Issue expertise: {len(tied)} agent(s) with the most closed '{issue}' cases ({top} each)")
+    decided = "issue expertise"
+    if len(tied) > 1 and product != NO_PRODUCT:
+        by_prod = _closed_by(session, "product", product_ids[product], tied)
+        ptop = max(by_prod.values())
+        tied = sorted(a for a, n in by_prod.items() if n == ptop)
+        lines.append(f"2. Product expertise among them: {len(tied)} with the most closed '{product}' cases ({ptop})")
+        decided = "product expertise"
+    elif len(tied) > 1:
+        lines.append("2. Product expertise: skipped, the case names no product")
+    if len(tied) > 1:
+        load = {r["OwnerId"]: r["n"] for r in _rows(
+            session, f"SELECT OwnerId, COUNT(*) AS n FROM \"Case\" WHERE Status != 'Closed' AND OwnerId IN "
+                     f"({', '.join('?' * len(tied))}) GROUP BY OwnerId", tied)}
+        low = min(load.get(a, 0) for a in tied)
+        tied = sorted(a for a in tied if load.get(a, 0) == low)
+        lines.append(f"3. Workload among them: {len(tied)} with the fewest open cases ({low})")
+        decided = "workload"
+    winner = tied[0]
+    if len(tied) > 1:
+        lines.append(f"   still tied after workload; the first by Id is chosen: {winner}")
+        decided = "Id order after a full tie"
+    name = _names(session, [winner]).get(winner, winner)
+    lines.append(f"WINNER: {name} ({winner}), decided by {decided}")
+    lines.append(f"Answer to give: {winner}")
+    return _obs("\n".join(lines), 1, 1, False, t0)
+
+
 def list_products(session: TaskSession) -> Observation:
     return session.query("SELECT Id, Name, substr(Description, 1, ?) AS Description FROM Product2 ORDER BY Name",
                          [DESC_CAP])
@@ -378,6 +456,8 @@ def execute(session: TaskSession, name: str, args: dict, org: str) -> Observatio
             return list_issues(session)
         if name == "get_issue_policy":
             return get_issue_policy(session, a.get("issue_id"))
+        if name == "route_case":
+            return route_case(session, a.get("issue"), a.get("product"))
         if name == "check_offers":
             return check_offers(session, a.get("case_id"), a.get("offered"))
         if name == "list_products":
@@ -460,8 +540,21 @@ def _check_offers_tool(org: str) -> dict:
                  ["case_id", "offered"])
 
 
-# The policy job gets only what it needs: reading the case and the code-decided check.
-JOB_TOOLS = {"policy_violation_identification": ("get_case", "check_offers", "respond")}
+def _route_case_tool(org: str) -> dict:
+    issue_ids, descs, product_ids = _menus(org)
+    menu = "; ".join(f"{n}: {descs[n]}" for n in issue_ids)
+    return _tool("route_case", "Route a new case with the company routing policy, applied in code: most closed cases "
+                 "for the issue, then (on a tie) for the product, then the fewest open cases. You choose only the "
+                 "issue and the product, by name.",
+                 {"issue": _s(f"The known issue most similar to the case. The issues: {menu}", enum=list(issue_ids)),
+                  "product": _s("The product the case is about (usually named in its subject or description); "
+                                f"'{NO_PRODUCT}' only if none is named.", enum=[*product_ids, NO_PRODUCT])},
+                 ["issue", "product"])
+
+
+# The policy and routing jobs get only what they need; the verdict and the winner are decided in code.
+JOB_TOOLS = {"policy_violation_identification": ("get_case", "check_offers", "respond"),
+             "case_routing": ("route_case", "respond")}
 
 
 _MY_CASES = _tool("get_my_cases", "List YOUR OWN cases (the logged-in customer's): Id, Subject, Status, dates and "
@@ -473,7 +566,8 @@ def service_tools(org: str, task_type: str, customer: str | None = None) -> list
     keep = CUSTOMER_TOOLS if customer else JOB_TOOLS.get(task_type)
     if keep is None:
         return SERVICE_TOOLS
-    pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org), _MY_CASES]}
+    pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org), _MY_CASES,
+                                                _route_case_tool(org)]}
     return [pool[n] for n in keep]
 
 
@@ -559,9 +653,37 @@ def _selftest() -> int:
     enum = pol_tools[1]["function"]["parameters"]["properties"]["offered"]["items"]["enum"]
     check("check_offers enum: the 8 catalog fixes + other, strict schema",
           len(enum) == 9 and policy.OTHER in enum and pol_tools[1]["function"].get("strict") is True, str(enum))
-    check("routing and knowledge keep the general list, without check_offers",
-          service_tools("b2b", "case_routing") is SERVICE_TOOLS
-          and "check_offers" not in {t["function"]["name"] for t in SERVICE_TOOLS})
+    check("knowledge keeps the general list, without check_offers or route_case",
+          service_tools("b2b", "knowledge_qa") is SERVICE_TOOLS
+          and not {"check_offers", "route_case"} & {t["function"]["name"] for t in SERVICE_TOOLS})
+
+    # --- route_case: names in, the routing policy applied in code
+    def routed(issue, product):
+        o = ex("route_case", {"issue": issue, "product": product})
+        m = re.search(r"Answer to give: (\S+)", o.text)
+        return o, (m.group(1) if m else None)
+    o, w = routed("AI Feature Malfunction", "SecureAnalytics Pro")  # 1483: decided by issue expertise
+    check("route_case: single top agent on the issue", o.ok and w == "005Wt000003NIYnIAO"
+          and "decided by issue expertise" in o.text, o.text[-90:])
+    o, w = routed("Scalability Issue", "SecureAnalytics Pro")  # 1489: 7 tied, product breaks it
+    check("route_case: issue tie broken by product (1489)", o.ok and w == "005Wt000003NJD9IAO"
+          and "decided by product expertise" in o.text, o.text[-90:])
+    o, w = routed("Workflow Integration Lag", "NextGen IDE")  # 1576
+    check("route_case: 1576 with the product its description names", w == "005Wt000003NIk5IAG", str(w))
+    o, w = routed("Workflow Integration Lag", "OptiPower Manager")
+    check("route_case: product tie broken by workload", o.ok and "decided by workload" in o.text, o.text[-90:])
+    o, w = routed("Workflow Integration Lag", NO_PRODUCT)
+    check("route_case: no product named -> product step skipped, workload decides",
+          o.ok and "skipped, the case names no product" in o.text and w is not None, o.text[-120:])
+    o, _ = routed("Printer On Fire", "NextGen IDE")
+    check("route_case: unknown issue name -> error listing the names", not o.ok and "AI Feature Malfunction" in o.text)
+    o, _ = routed("Workflow Integration Lag", "a03Wt00000JqzR3IAJ")
+    check("route_case: an Id instead of a product name -> error", not o.ok and "unknown product" in o.text)
+    rt = service_tools("b2b", "case_routing")
+    props = rt[0]["function"]["parameters"]["properties"]
+    check("routing job gets exactly route_case and respond; menus are strict enums of names",
+          [t["function"]["name"] for t in rt] == ["route_case", "respond"] and len(props["issue"]["enum"]) == 15
+          and len(props["product"]["enum"]) == 52 and rt[0]["function"].get("strict") is True)
 
     # --- customer scope: a logged-in customer sees only their own cases (Kofi Nkrumah, 4 cases)
     kofi, other_case = "003Wt00000Jqt7DIAR", "500Wt00000DDyznIAD"  # 1381's case belongs to someone else

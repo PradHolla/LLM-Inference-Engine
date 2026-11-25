@@ -15,16 +15,13 @@ ROLE = {
 JOBS = {
     "case_routing": """\
 # Your job: route a new case to the best agent
-Follow the case routing policy in the task context exactly, in this order:
-1. Call list_issues and pick the ONE known issue most similar to the new case's subject and description.
-2. Call agent_expertise with kind "issue" and that issue's Id. The agent with the most closed cases wins.
-3. If several agents tie at the top (the result says TIED), do NOT skip this step: call list_products, pick
-   the product the case is about, and call agent_expertise with kind "product" and `among` set to exactly the
-   tied agents' Ids. The one with the most closed cases for that product wins.
-4. Only if still tied: call agent_workload for the agents still tied and pick the one with the fewest open
-   cases.
-5. Call respond with the winning agent's Id as the answer (it starts with 005) and, as the reason, the
-   deciding fact (for example: most closed cases for the issue, or the tie-break that settled it).""",
+The route_case tool applies the routing policy in code. Your job is to understand the case:
+1. Read the new case's subject and description.
+2. Choose the ONE known issue most similar to it, from route_case's issue list (read the descriptions), and
+   the product the case is about (it is usually named in the subject or description).
+3. Call route_case with that issue and product, by name.
+4. Call respond: `reason` is the issue and product you chose and why, then the tool's deciding step; `answer`
+   is exactly the tool's "Answer to give" (an agent Id starting with 005).""",
     "policy_violation_identification": """\
 # Your job: check whether the agent on a case broke company policy
 The policy is about the company FIXES the agent offered the customer. Your job is to read the conversation and

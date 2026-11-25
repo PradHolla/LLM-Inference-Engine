@@ -7695,3 +7695,17 @@ knowledge answer one at a time). New predictions for this run, made with those m
 | E-10 | Practice eval wall time, all 9 runs (3 arms x 3 seeds x 60 tasks, concurrency 4) | 30-60 min | q-off ~4 s per task, b128 arms ~1.5-2x, 4 at a time: 60 x 4 / 4 = 1 min per q-off run, longer thinking and queueing on one GPU |
 | E-11 | Policy, every arm and seed | 19-20 / 20 | the verdict is code-decided; thinking only changes how the fixes are named |
 | E-12 | Routing, q-off mean over seeds | 70-90% | 3/3 on the showcase; the routing policy has 3 tie-break levels and some dev cases tie deeper |
+
+## P11-RT: routing with route_case (names in, policy in code), 2026-11-25
+
+Diagnosis of the practice eval (180 routing runs, 38 misses): ~25 were Id copy errors (the reason names the
+right issue, the call carries another issue's Id; all 15 issue Ids share the prefix a03Wt00000Jq), 9 are case
+1500, whose expected agent is reachable only via a product the case never names, ~4 genuine. Offline, the
+expected agent is reachable with the case's own named product for 96/100 b2b routing tasks (unreachable: 1486,
+1500, 1505, 1559; three involve OptiPower Manager).
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| RT-1 | Routing, dev, per arm, 3 seeds | 88-95% | Id errors removed; 1500 (5% of dev) stays wrong; a few wrong issue or product picks remain |
+| RT-2 | Routing time per task p50, q-off | 2-4 s | 2 model calls instead of 3-6 |
+| RT-3 | q-off vs q-b128-first gap on routing | under 4 points | thinking mainly helped with the multi-step tie-break, which is now code |
