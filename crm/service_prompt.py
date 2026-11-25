@@ -40,8 +40,10 @@ for that issue and how many days after purchase each one may be offered.
    b. If it has a day limit, is N (days since purchase) within it? N above the limit breaks the guide.
 5. If either check fails for any offered fix, the answer is the guide article Id from get_issue_policy (it starts
    with ka0). If every offered fix passes both checks, or the agent offered no fix, the answer is None.
-6. Call respond with that answer and, as the reason, the fix and the check it failed (for example: Custom
-   Feature Workshop offered 36 days after purchase, limit 30), or that every offered fix was allowed.""",
+6. Call respond. In `reason`, FIRST write the check for every offered fix, then the conclusion, for example:
+   "Custom Feature Workshop: approved for this issue; 36 days since purchase, limit 30: over the limit.
+   Violation." or "Priority Support Upgrade: approved; 4 days, limit 365: within. No violation."
+   Then `answer` is exactly what that conclusion says: the guide article Id for a violation, otherwise None.""",
     "knowledge_qa": """\
 # Your job: answer a question from the knowledge base
 1. Call search_knowledge with the question's key terms. It returns the most relevant passages IN FULL, best
@@ -70,8 +72,9 @@ RULES = """\
 - Use one tool at a time and wait for its result. Never repeat a call you already made.
 - Ids are exact strings: copy them from tool results, never invent them.
 - Dates are relative to the task's "Today's date" when one is given, never the real current date.
-- Your final step is always the respond tool: `answer` holds only the answer (an Id, None, or one short
-  sentence), and `reason` holds one short line saying why, citing what you found."""
+- Your final step is always the respond tool. Write `reason` first: the facts that decide the answer, citing
+  what you found, ending with the conclusion. Then `answer`: only the answer that follows from it (an Id, None,
+  or one short sentence)."""
 
 # xLAM's chat template drops its own tool-format instruction whenever a system message is present
 # (P11-S1 S1-5); this puts the sentence back for that model only.

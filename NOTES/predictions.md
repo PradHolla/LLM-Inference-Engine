@@ -7573,3 +7573,55 @@ and 80 test each). Knowledge answers graded by Claude Haiku 5.5 (answerable ques
 | E-7 | Time per question, p50 | q-off 5-9 s, q-b128-first 7-12 s, q-b128 12-25 s | ~2.6 s per 128 thinking tokens at ~50 tok/s, times 1 step or ~4 steps |
 | E-8 | Answer flips between passes, per setting | 10-20% of tasks | sampled decoding on multi-step tasks; Phase 4 floors were 1.8-7.8% on single-step items |
 | E-9 | Haiku judge cost for all knowledge records | under $0.50 | ~300 records x ~1.5k input and ~300 output tokens at $0.10 / $0.50 per million |
+
+## P11-POL: policy check with reviewed policy records, thinking settings (2026-11-24)
+
+Setup: Qwen3-8B fp8, service_v1, get_issue_policy + days-since-purchase in the case file, b2b dev policy tasks
+(20; 3 violations, 17 None). Measured before this entry: q-off 6/20 (run p11-pol1-q-off); its errors were
+the answer contradicting its own reason (7), wrong number comparisons (4), inverted logic (3).
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| POL-1 | q-b128 correct | 12-16 / 20 | the errors are comparison and consistency slips, which a short think before each step should catch most of; 128 tokens may cut off multi-fix cases |
+| POL-2 | q-think (unbounded) correct | 15-19 / 20 | Phase 7: unbounded 99.4% vs 128-budget 94.4% on maths; a residual miss or two from reading the conversation wrong |
+| POL-3 | q-think thinking length per step, p50 / p95 | ~150-400 / ~800-1500 tokens | the per-step decision is short (one comparison), but the step after get_case reads a long conversation; estimated as chars/4 |
+| POL-4 | q-think wall time per task, p50 | 15-40 s | ~5 steps x ~300 thinking tokens at ~40-50 tok/s under concurrency 4, plus the q-off ~10 s |
+
+### P11-POL actuals (runs p11-pol1-q-off, p11-pol2-q-b128, p11-pol2-q-think; b2b dev, 20 policy tasks, concurrency 4)
+
+| Setting | Correct | Thinking per step p50 / p95 / max (chars/4 est.) | Wall p50 / p95 |
+|---|---|---|---|
+| q-off | 6/20 | 0 | 16.3 s / 37.1 s |
+| q-b128 | 13/20 | 120 / 158 / 172 | 14.4 s / 29.6 s |
+| q-think | 12/20 | 265 / 500 / 806 | 23.4 s / 32.4 s |
+| always None (reference) | 17/20 | - | - |
+
+- POL-1 HIT (13). POL-2 MISS (12 vs 15-19): the dominant error survives unbounded thinking. The reason
+  states the fix is within its limit and the answer is still the guide Id (1384, 1395, 1400, 1414, 1451, 1454
+  under q-think). More thinking does not repair a mismatch between the conclusion and the answer field; the
+  prediction assumed the errors were comparison slips, and most are not.
+- POL-3 p50 HIT (265), p95 below the range (500): per-step reasoning is shorter than predicted, so 128 cuts it
+  but a budget of ~512 would cover the p95. q-think did no better than q-b128, so the budget is not the lever.
+- POL-4 HIT (23.4 s). Time is inflated by knowledge search (6-13 s per search on the box CPU at concurrency 3,
+  run p11-svc3) which the policy agent still calls although its playbook does not ask for it.
+- Consequence: the model reads correctly and concludes unreliably. Move the decision into code (check an
+  offer: approved? within limit? -> verdict and answer), leaving the model to find what was offered.
+
+**CORRECTION (same day, after the owner challenged the diagnosis).** The POL-2 explanation above is wrong.
+Thinking did not fail to fix the error; at the decision step it often did not happen. Qwen3 emitted empty
+reasoning on later agent turns: the respond step thought in 12/20 tasks under q-think and 17/20 under q-b128.
+Accuracy split by whether the respond step thought:
+
+| Run | Thought at respond: correct / n | No thought at respond: correct / n |
+|---|---|---|
+| q-think | 11 / 12 | 1 / 8 |
+| q-b128 | 13 / 17 | 0 / 3 |
+
+And the respond schema is strict with `answer` before `reason`, so without thinking the verdict is generated
+before any reasoning and `reason` is written after it; that is why wrong answers carried correct reasons. The
+consequence is not "move the decision into code" but "reason before answering": put the reasoning field first.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| POL-5 | q-off correct with a reasoning-first respond schema (same 20) | 16-20 / 20 | every q-off error had a correct reason; generated first, it should drive the answer |
+| POL-6 | q-b128 correct, same change | 17-20 / 20 | as POL-5, plus thinking where it happens |

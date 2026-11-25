@@ -341,13 +341,16 @@ def _s(desc: str, **kw) -> dict:
     return {"type": "string", "description": desc, **kw}
 
 
-# The service agent's final answer carries a one-line reason for the human; only `answer` is graded.
-_RESPOND = _tool("respond", "Give the final answer. Call this once, when you are confident.",
-                 {"answer": {"type": "string", "description": "ONLY the answer: an Id, None, or one short "
-                             "sentence for a knowledge question. No explanation here."},
-                  "reason": {"type": "string", "description": "One short line saying why, citing what you "
-                             "found (for example: closed the most cases of this issue)."}},
-                 ["answer", "reason"])
+# `reason` comes FIRST: the strict schema fixes the generation order, so the reasoning is written before the
+# verdict instead of after it (P11-POL correction). Only `answer` is graded.
+_RESPOND = _tool("respond", "Give the final answer. Call this once, when you are confident. Write the reason "
+                 "first; the answer must follow from it.",
+                 {"reason": {"type": "string", "description": "Write this FIRST: the facts that decide the "
+                             "answer, citing what you found (for a policy check: each offered fix, whether it "
+                             "is approved, and its days against the limit), ending with the conclusion."},
+                  "answer": {"type": "string", "description": "ONLY the answer that follows from the reason: "
+                             "an Id, None, or one short sentence for a knowledge question."}},
+                 ["reason", "answer"])
 
 SERVICE_TOOLS: list[dict] = [
     _tool("get_case", "Read one support case in full: its fields (with issue and product names), its emails, live "
