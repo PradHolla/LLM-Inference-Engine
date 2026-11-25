@@ -51,6 +51,7 @@ Each phase ends with something runnable and a measurement. The full write-up of 
 | 8 | **Inside one decode step** with Nsight Systems and the PyTorch profiler | The 6 ms gap to vLLM is not the math (identical cuBLAS kernels) but 2,079 unfused launches and the GPU idling between them. Replaying the step as a CUDA graph closed 3.5 ms of it | [report](docs/REPORT.md#phase-8) |
 | 9 | **Checking the book's checks**: perplexity as a quality test, and the cost of forcing JSON | Perplexity moved 0.2% on the exact arithmetic where int4 breaks 37% of answers: it never lets an error feed the next token. The planner's JSON schema costs 0.05% per token | [report](docs/REPORT.md#phase-9) |
 | 10 | **L4 vs A10G**: half the bandwidth, native fp8, the A10G's exact traffic replayed | 1.75x slower for one user in every format, and native fp8 is no help there. Under load it is the difference between collapsing (25 s waits) and matching the A10G for 19% less per hour | [report](docs/REPORT.md#phase-10) |
+| 11 | **A CRM service agent from the 8B model** on Salesforce's CRMArena-Pro: case routing, policy checks, knowledge answers | On 240 held-out tasks: routing 94% and policy checks 100% once the model reads and code applies the rules; knowledge hallucination 24% to 4% with checked, quoted sources. 89 of the benchmark's 100 B2B knowledge answers are not in its own articles | [report](docs/REPORT.md#phase-11) |
 
 ## A few results worth a picture
 
@@ -92,6 +93,26 @@ next turn starts hot, and long chats are summarised in the background. The front
 TypeScript, with a separate lab bench UI for watching the engine live.
 ([details](docs/REPORT.md#phase-6c))
 
+## The CRM service agent
+
+The same model and card as a service-desk agent on Salesforce AI Research's CRMArena-Pro: route a new
+case, check a closed case for a policy violation, answer from the knowledge base, and, in customer
+mode, see only the logged-in customer's own records. Held-out results, 240 tasks x 3 passes, Qwen3-8B
+fp8 on one A10G:
+
+| Job | Result | Lazy baseline |
+|---|---|---|
+| Case routing | 94%, the same answer on every pass | 22% |
+| Policy violation check | 100%, all 60 violations caught | 75% |
+| Knowledge answers | 4% hallucinated (24% before), every answer quotes a checked source | - |
+| Customer privacy | 16/16 requests for another customer's data refused, none of it reached the model | - |
+
+The design rule that got there: **the model reads, code decides.** The model picks the issue, names the
+fixes a support agent offered, or quotes the sentence it answers from; tools apply the routing policy,
+the policy records and the grounding checks. Thinking is on only where the model makes a judgement.
+The live app streams every step, the checked source and the answer.
+([details](docs/REPORT.md#phase-11))
+
 ## What this project demonstrates
 
 - **Performance modelling.** Memory, speed and capacity predicted from first principles before
@@ -132,6 +153,10 @@ tools/planeval.py     scores the planner against labelled questions
 tools/plansets.py     builds the planner sets from MTRAG, QReCC, FreshQA and GSM8K
 tools/freshjudge.py   grades FreshQA answers with a separate Qwen3-8B judge
 tools/p9eval.py       perplexity from vLLM's prompt logprobs; JSON-schema cost pairs
+tools/crmeval.py      runs the CRM service agent on CRMArena-Pro tasks; p11report.py summarises
+tools/ragjudge.py     grades knowledge answers for groundedness, subject and correctness
+crm/                  Phase 11: the service agent: actions, policy records, routing and
+                      grounding checks, hybrid reranked search, the GPU reranker service
 tools/mock_server.py  dependency-free fake vLLM with real capacity, so the
                       benchmark harness can be validated without a GPU
 baseline/server.py    Phase 1: HuggingFace .generate() behind a global lock

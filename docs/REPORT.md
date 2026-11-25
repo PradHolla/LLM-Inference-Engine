@@ -24,6 +24,7 @@ every table states its configuration.
 11. [Phase 8: inside one decode step](#phase-8)
 12. [Phase 9: checking two of the book's checks](#phase-9)
 13. [Phase 10: the L4 is the trap for one user and a bargain under load](#phase-10)
+14. [Phase 11: a reliable CRM service agent from a small model](#phase-11)
 
 <a id="phase-1-3"></a>
 
@@ -719,3 +720,134 @@ own width, but the output layer (`lm_head`) stays bf16 under both fp8 and int4, 
 embedding is a lookup, not a read. Counted properly, Marlin costs fp8 about 2% of single-user speed,
 not 10%, and int4 about 9%, not 39%. And int4's lead at 6 req/s was partly a lighter window: none of
 its requests were long prompts.
+
+<a id="phase-11"></a>
+
+## Phase 11: a reliable CRM service agent from a small model
+
+**The question:** can a small, cheap, open model, Qwen3-8B in fp8 on the same $1.21/hour A10G, be a
+dependable service-desk agent? The test bed is Salesforce AI Research's
+[CRMArena-Pro](https://huggingface.co/datasets/Salesforce/CRMArenaPro) (CC BY-NC 4.0), its B2B org:
+a SQLite copy of a Salesforce org with cases, emails, chats, orders and 194 knowledge articles. The
+agent does three jobs: **route a new case** to the best agent, **check a closed case for a policy
+violation**, and **answer knowledge questions**. The tasks were split into a practice set (60) and a
+held-out test set (240) before anything was built; every design choice was made on practice data.
+
+**The result, on the 240 held-out tasks, 3 passes each** (Qwen3-8B fp8, vLLM 0.27.1, one A10G):
+
+| Job | Result | Lazy baseline | p50 per task |
+|---|---|---|---|
+| Case routing | **94%** (225/240), identical answers on every pass | 22% (always the most common agent) | 3.2 s |
+| Policy violation check | **100%** (240/240), all 60 violations caught | 75% (always "no violation") | 5.4 s |
+| Knowledge answers | **4% hallucinated** (was 24%); see below | - | 16 s |
+| Privacy (customer mode, 16 practice requests for another customer's data) | **16/16 refused**, other customer's data reached the model 0 times | - | 4.5 s |
+
+### The pattern behind every fix: the model reads, code decides
+
+Each job first failed for the same kind of reason: the model was asked to apply a rule, and a
+sampled 8B model applies rules unreliably even when it states them correctly.
+
+**Policy checks: answer order, then the decision itself.** Each issue has a guide listing its
+approved fixes and how many days after purchase each may be offered; a violation is an unapproved fix
+or one offered too late. The guides were turned into reviewed records (drafted from the articles,
+every quoted sentence verified, checked against the answer key: 99/100). With the records the agent
+still scored 6/20, and every wrong answer carried a *correct* reason. The strict tool schema
+generated `answer` before `reason`, and Qwen3 often skipped thinking on its final step: the verdict
+was written before any reasoning. Putting the reason first took it to 20/20. Five repeated runs then
+showed the rest: 96/100 overall but only 11/15 violations, the model naming the fix correctly and then
+writing "not approved, therefore no violation". The final design has the model name the fixes offered
+(a strict menu) and a tool apply the records: **100/100 runs, 15/15 violations, and faster (3.5 s
+against 5.4 s).** On the held-out set it caught all 60 violations, including late offers, a kind the
+practice set never contained. One caveat on that number: the two violation rules were identified by
+reading answer-key rows across all 100 B2B policy tasks, test tasks included. The rules are stated in
+the guide articles themselves and nothing was tuned to labels, but the test set was not unseen for
+this job.
+
+**Routing: the model understood the case and copied the wrong Id.** Of 38 misses in 180 practice runs,
+about 25 had a reason naming the right issue and a tool call carrying another issue's Id: all 15
+issue Ids start `a03Wt00000Jq`. Now the model picks the issue and product **by name** from menus read
+from the database, and one tool applies the routing policy (issue expertise, then product, then
+workload) and explains its decision. Practice routing went from 75% to 95%. For 96 of the 100 routing
+tasks the expected agent is reachable with the case's own product; the other 4, three of them about one
+product, look like label problems.
+
+**Thinking where there is judgement.** With the rules in code, thinking stopped mattering for routing
+and policy (95% and 100% with it off or on, at half the time off). It mattered a great deal for
+knowledge answers, where the model makes the judgement itself. The final configuration thinks
+(budget 2,048 tokens) on knowledge and customer answers only.
+
+### Knowledge answers, and an answer key that is mostly not in the data
+
+**Most of the benchmark's B2B knowledge questions cannot be answered from its own articles.** Every
+question was labelled "is the expected answer stated in the knowledge base?" by four Claude Sonnet
+agents searching all 194 articles (quotes verified word for word by code), compared against an
+independent Claude Haiku draft (87/92 agree), with a sampled hand review: **11 of 100 are answerable.**
+The rest expect products and facts that appear in no article (`HPC QuantumLink`, `AutoInfini Design`,
+`IDPS`, qubits). The export of the benchmark's live Salesforce org has the same 194 articles, and
+Salesforce's published GPT-4o run on the same questions mostly answered "None" and averaged F1 0.07.
+
+So knowledge answers are graded the RAG way, not against the key alone: **grounded** (every claim
+supported by the quoted source), **on subject** (the source is about what was asked), and correctness
+only where the key is reachable; scored CRAG-style (+1 correct, +0.5 partial or grounded, 0 "not
+covered", -1 hallucinated). An earlier grader that compared every answer with the unreachable key
+counted 44 grounded answers as "made up"; it was replaced before any of its numbers were reported.
+
+The failure that grading exposed: **the model bent real sentences about EDA software to answer
+questions about telecom networks, IoT devices or vehicles**, 24% of all answers. The practice set had
+no such traps (its unanswerable questions named fake products, which the agent always caught), so a
+new practice set was written from the articles, without the benchmark's questions: 20 answerable and
+20 traps. The fixes, tuned on it:
+
+- every knowledge answer must quote a sentence from a passage the agent was shown (checked by code),
+  and a focused check by the same model confirms the sentence states the answer, on the same subject,
+  with the source's title and passage in view; refused twice, the agent says "not covered";
+- the answer form names the question's subject and the source's subject before the answer;
+- search results below a calibrated relevance score are flagged as possibly not covering the question;
+- thinking on for these answers.
+
+| Knowledge, held-out test, 80 questions x 3 passes, same grader (Claude Sonnet 5.5) | Before | After |
+|---|---|---|
+| Hallucinated answers (off subject or ungrounded) | 58/240 = **24%** | 10/240 = **4%** |
+| "Not covered" | 138 | 207 |
+| Answerable (27): correct / partial / wrong / hallucinated / not covered | 1 / 14 / 5 / 7 / 0 | 5 / 4 / 4 / 2 / 12 |
+| CRAG-style score per answer | -0.18 | -0.01 |
+| p50 time | 4.3 s | 16 s |
+
+On the new practice set: traps 20/20 "not covered", answerable 19/20 correct, none hallucinated. The
+cost is caution: of the 12 answerable answers now declined, four of the five questions were already
+labelled borderline. The fix was informed by failures seen on the test set, so the "after" column is
+a post-fix measurement, not a blind one; all tuning used the synthetic practice set.
+
+### Search, and making room for a second model on one GPU
+
+Retrieval is hybrid (BM25 and bge-small embeddings, fused with reciprocal rank fusion) and reranked
+with a cross-encoder, bge-reranker-base. On the box's CPU the reranker took **3.3 s** per search, 9.7 s
+with three searches queued behind it, against 1-4 s for the whole model call. Measured on the GPU it
+needs 1,119 MiB and 31 ms; with Qwen loaded only about 0.5 GiB was addressable. Lowering vLLM's pinned
+KV cache by 1.25 GiB (138,528 to 120,320 tokens, still dozens of agent conversations) made room. **Search
+went from 3.3 s to 45 ms with the same top passage on 20/20 queries**, and on the new practice set the
+source article was in the top 5 for 20/20 answerable questions.
+
+### Safety in customer mode
+
+A logged-in customer is a Contact Id, the benchmark's own convention. The tools enforce the scope,
+not the prompt: a customer sees five tools, opening another customer's case returns the same message
+as a case that does not exist, and every internal action is refused in the service layer even if
+called. In 16 practice requests for another customer's information, the agent refused all 16 and the
+other person's data reached the model 0 times.
+
+### What did not work, or is not done
+
+- An 8B model with thinking off, asked to apply a rule it had just stated, got it wrong about a
+  quarter of the time on violations. Moving the rule into code, not more thinking, fixed it.
+- The first knowledge practice set could not show the main failure, and the thinking-off choice was
+  made on it. The cost was one extra GPU session; the lesson was to build practice data that contains
+  the hard case.
+- Knowledge correctness on answerable questions is measured on only 27 answers, and the agent now
+  declines some of them. A near-verbatim quote match would recover rewritten quotes.
+- Not built: an approval step before the agent changes a record, and a defence against instructions
+  planted in customer emails. Also not run: the B2C org, which needs its own policy records and labels.
+
+Raw records: `results/p11-*`. Labels and records: `crm/kq_labels_b2b.json`, `crm/policies_b2b.json`,
+`crm/kqdev_b2b.json`. Report: `uv run tools/p11report.py --split test`, `uv run tools/ragjudge.py
+results/p11-ktest-q-judge-s*.tasks.jsonl --report --references crm/kq_labels_b2b.json`.
