@@ -58,6 +58,8 @@ class Arm:
     thinking_token_budget: int | None = None
     think_first_only: bool = False  # think on step 0 (planning) only; later steps run thinking off
     think_on_judgement: bool = False  # think (budget 2048) on knowledge and customer answers; off elsewhere
+    # "required" switches thinking off after step 1 on vLLM 0.27.1 (code-notes: tool_choice); the router uses it
+    tool_choice: str = "auto"
 
 
 THINKING = dict(enable_thinking=True, thinking_token_budget=2048, temperature=0.6, top_p=0.95, max_tokens=4096)
@@ -119,11 +121,11 @@ def task_seed(run_seed: int, org: str, idx: int) -> int:
 
 
 def request_body(arm: Arm, messages: list[dict], seed: int, max_tokens: int, tools: list | None = None) -> dict:
-    """Chat completions body; with tools it is non-streamed and carries tool_choice auto."""
+    """Chat completions body; with tools it is non-streamed and carries the arm's tool_choice."""
     body = {"model": arm.model, "messages": messages, "stream": True, "stream_options": {"include_usage": True},
             "temperature": arm.temperature, "top_p": arm.top_p, "max_tokens": max_tokens, "seed": seed}
     if tools:
-        body.update(stream=False, tools=tools, tool_choice="auto")
+        body.update(stream=False, tools=tools, tool_choice=arm.tool_choice)
         del body["stream_options"]
     if arm.top_k is not None:
         body["top_k"] = arm.top_k
@@ -1090,13 +1092,16 @@ def _selftest() -> int:
               all(b["chat_template_kwargs"]["enable_thinking"] for b in tool_calls + support)
               and support and support[0]["max_tokens"] == 2048 and rec["arm"] == "q-judge",
               str([b["chat_template_kwargs"]["enable_thinking"] for b in fake.bodies]))
+        check("14 q-judge on knowledge: tool_choice stays auto (required suppresses thinking after step 1)",
+              tool_calls and all(b["tool_choice"] == "auto" for b in tool_calls))
         rt = next(t for t in tasks if t.task_type == "case_routing" and t.split == "dev")
         _, _, fake = await one(rt, [tc(("route_case", {"issue": "AI Feature Malfunction",
                                                          "product": "SecureAnalytics Pro"})),
                                     tc(("respond", {"reason": "r", "answer": "005Wt000003NIYnIAO"}))],
                                arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)
-        check("14 q-judge on routing: thinking stays off",
-              not any(b["chat_template_kwargs"]["enable_thinking"] for b in fake.bodies))
+        check("14 q-judge on routing: thinking stays off, tool_choice stays auto",
+              not any(b["chat_template_kwargs"]["enable_thinking"] for b in fake.bodies)
+              and all(b["tool_choice"] == "auto" for b in fake.bodies))
 
     def service_fallback() -> str:
         from crm import service

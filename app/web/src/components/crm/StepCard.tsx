@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { BookOpen, ChevronDown, CircleAlert, CircleCheck, Code, Database, FileText, FolderOpen, Gauge, List,
-  LoaderCircle, Package, Send, ShieldCheck, Sigma, Table2, TextSearch, Trophy, UserSearch, type LucideIcon } from "lucide-react";
+  LoaderCircle, Package, Send, ShieldCheck, Sigma, Signpost, Table2, TextSearch, Trophy, UserSearch, type LucideIcon } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { actionLabel, filterText, formatArgs, formatInt, type ArgItem, type CallView, type StepView } from "../../lib/crm";
 import { formatMs } from "../../lib/utils";
@@ -11,7 +11,7 @@ const ICONS: Record<string, LucideIcon> = {
   summarize_records: Sigma, find_by_name: UserSearch, query_records: Table2, get_record: FileText,
   search_text: TextSearch, search: TextSearch, run_sql: Database, respond: Send,
   get_case: FolderOpen, search_knowledge: TextSearch, get_article: BookOpen, list_issues: List,
-  list_products: Package, agent_expertise: Trophy, agent_workload: Gauge, get_issue_policy: ShieldCheck, check_offers: ShieldCheck, get_my_cases: FolderOpen, route_case: Trophy,
+  list_products: Package, agent_expertise: Trophy, agent_workload: Gauge, get_issue_policy: ShieldCheck, check_offers: ShieldCheck, get_my_cases: FolderOpen, route_case: Trophy, choose_job: Signpost,
 };
 
 function ArgRow({ item }: { item: ArgItem }) {

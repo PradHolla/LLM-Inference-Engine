@@ -7814,3 +7814,49 @@ Test knowledge, same grader as the baseline (ragjudge --references, Sonnet 5.5):
 
 Privacy (customer mode, 16 dev private_customer_information requests, q-judge): 16/16 refused clearly; the other
 person's name appeared in a tool result in 0/16; p50 4.5 s.
+
+## P11-APP: live app dry run and its fixes (2026-11-26)
+Dry run 1 (13 app questions, q-judge, Qwen3-8B fp8, results/p11-app-dryrun.jsonl, 0 errors): routing 3/3 and
+policy 3/3 example buttons correct, 3-4 s. Found: (1) typed staff questions ran as task type "free_question",
+so the generic tool list and prompt, no quote, no check, no thinking (the telecom trap looped 7 searches and
+answered "None"); (2) a plain-text reply (767) skipped the answer form and its check; (3) knowledge buttons
+717/762/767 were a borderline and two traps. Fixes: crm/router.py (pick the job from a strict menu, code
+enforces the Case Id, off-topic reply; as Agentforce's Agent Router); tool_choice "required" on the thinking
+judgement jobs (tools/tool_choice_probe.py: auto 8/8 plain text, required with thinking 4/4 respond, thinking
+length unchanged; required without thinking repeated its last search 4/4, so routing and policy stay "auto");
+knowledge buttons 732, 768 (answerable, borderline) and 762 (trap).
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| APP-1 | kqdev traps "not covered" (40-question practice set, q-judge with required) | 19-20 / 20 | was 20/20; required only removes the plain-text exit |
+| APP-2 | kqdev answerable correct or partial | 18-20 / 20 | was 19/20; the miss (A06) is the quote check, unchanged |
+| APP-3 | kqdev records ending in a plain-text answer | 0 / 40 | constrained decoding makes it impossible on thinking steps |
+| APP-4 | kqdev p50 time | 15-25 s | was 20 s; same thinking budget |
+| APP-5 | router time per typed question | 0.3-1.5 s | one short call, thinking off, about 60-100 output tokens |
+| APP-6 | router picks the intended job on the 8 typed app questions | 8 / 8 | four distinct, plainly worded jobs |
+| APP-7 | typed policy check on case 500Wt00000DE02HIAT | ka0Wt000000Em4zIAC | the same inputs as example 1412, which is correct 3/3 |
+| APP-8 | typed "return window" and telecom trap | quoted and checked answer; "not covered" | they now run the knowledge job |
+| APP-9 | buttons 732, 768 answered with a checked quote | 1-2 / 2 | both borderline in kq_labels; the agent declined borderline ones about half the time on test |
+
+### P11-APP actuals (2026-11-26; runs p11-kqdev-q-judge-req-s0, p11-kqdev-q-judge-auto2-s0, p11-app-dryrun2/3)
+Fix 2 (tool_choice "required" on thinking jobs) was WRONG and is reverted. On the practice set every call
+after step 1 had zero thinking (99/139 calls; 0/83 with "auto"), one question looped 20 steps, answerable fell
+to 16/20 correct with 1 hallucinated, traps to 19/20. Cause: vLLM 0.27.1 decides reasoning has ended by
+scanning the PROMPT for the last think tag, and from step 2 the prompt holds the previous step's `</think>`, so
+the constraint starts at the first token (code-notes: tool_choice). The one-call probe could not show it: its
+history had no reasoning. APP-1 MISS (19), APP-2 MISS (16), APP-3 HIT (0 plain text, for the wrong reason),
+APP-4 HIT (15.5 s, faster because it stopped thinking).
+
+After the revert (auto, q-judge): traps 20/20, answerable 18 correct + 1 partial + 1 not covered, 0
+hallucinated, 0 plain text, p50 19.0 s: the earlier 20/20 and 19/20 reproduce.
+
+App check 3 (19 questions, 0 errors): routing buttons 3/3 and policy buttons 3/3 correct; router picked the
+intended job 8/8 (APP-6 HIT), 0.9-1.1 s per pick (APP-5 HIT); typed policy on 500Wt00000DE02HIAT gave
+ka0Wt000000Em4zIAC (APP-7 HIT); no Case Id -> asked for it; off-topic -> the fixed reply; buttons 732 and 768
+answered with a checked quote (APP-9 HIT, 2/2), 762 "not covered"; telecom trap "not covered" (APP-8 half HIT).
+APP-8 half MISS: the typed return-window question answers "not covered". The search returned the return-policy
+article including the 30-day passage, but the reranker scored the model's short query "return window product"
+at -4.0, the LOW RELEVANCE flag fired, and the model's own reasoning reads "the passages do have the answer ...
+but the scores are low, so according to the rules ... not covered". The model defers to the flag over what it
+read. Not fixed yet; it is a candidate cause of the test set's caution (12 of 27 answerable declined).
+The customer privacy refusal was written as plain text once (correct content, no answer form).

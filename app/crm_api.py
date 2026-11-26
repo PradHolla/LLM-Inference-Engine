@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from typing import Literal
 
@@ -137,7 +138,7 @@ def _examples() -> tuple[dict, ...]:
 # answer-in-article check): many knowledge_qa answers are absent from this org's articles.
 SERVICE_SHOWCASE = {"case_routing": (1483, 1489, 1497),
                     "policy_violation_identification": (1412, 1459, 1384),  # two violations, one None
-                    "knowledge_qa": (717, 762, 767)}  # their article ranks 1st, 1st, 3rd in search
+                    "knowledge_qa": (732, 768, 762)}  # kq_labels: 732, 768 answerable (borderline); 762 a trap
 
 
 @functools.lru_cache(maxsize=1)
@@ -284,6 +285,43 @@ def _context(task: tasks.Task) -> dict:
             "customer": (_contact_name(cust) or cust) if cust else None}
 
 
+async def _route_question(question: str, base_task: tasks.Task, client, model: str):
+    """Pick the job for a typed staff question, reading cases through a private read-only copy."""
+    from crm import router as job_router
+    from crm.env import CRMEnv
+    session = await asyncio.to_thread(CRMEnv("b2b").open_task)
+    try:
+        return await job_router.plan(question, base_task, session.conn, client, VLLM_URL, model,
+                                     seed=uuid.uuid4().int % 10_000)
+    finally:
+        session.close()
+
+
+def _router_events(plan, question: str, ms: float) -> list[dict]:
+    """Step 0 of a typed question (the job chosen), plus the answer and the end when the router replies itself."""
+    from crm import router as job_router
+    label = job_router.JOB_LABELS[plan.job]
+    nxt = "Run this job" if plan.task is not None else "Reply without running a job"
+    evs = [{"type": "step_start", "step": 0},
+           {"type": "action", "step": 0, "call_id": "router", "name": "choose_job",
+            "args": {"job": label, "reason": plan.reason}},
+           {"type": "observation", "step": 0, "call_id": "router", "ok": True, "rows_total": 1, "rows_shown": 1,
+            "truncated": False, "columns": ["Job", "Case Id", "Next"],
+            "preview": [{"Job": label, "Case Id": plan.case_id, "Next": nxt}], "error": None, "elapsed_ms": ms}]
+    if plan.task is None:
+        evs += [{"type": "answer", "text": plan.reply, "reason": plan.reason, "quote": None, "checks": [],
+                 "sources": [], "expected": None, "correct": None},
+                {"type": "stats", "steps": 1, "actions": 1, "wall_ms": ms, "prompt_tokens": None,
+                 "cached_tokens": None, "completion_tokens": None, "est_cost_usd": events.est_cost_usd(ms)},
+                {"type": "done"}]
+    return evs
+
+
+def _shift_step(ev: dict, shift: int) -> dict:
+    """Agent events after the router's step 0 move up one step."""
+    return {**ev, "step": ev["step"] + shift} if shift and "step" in ev else ev
+
+
 async def _live(body: AskBody, question: str, example: dict | None, request: Request):
     """Run the real agent and stream its events (crm/events.py) as SSE data lines."""
     import httpx
@@ -315,10 +353,23 @@ async def _live(body: AskBody, question: str, example: dict | None, request: Req
     runner = None
     try:
         async with httpx.AsyncClient(timeout=agent.CALL_TIMEOUT_S) as client:
+            shift = 0
+            if body.agent == "service" and body.mode == "staff" and example is None:
+                # a typed staff question: pick the job first, then run that job's own path (crm/router.py)
+                t0 = time.perf_counter()
+                plan = await _route_question(question, task, client, model)
+                for ev in _router_events(plan, question, (time.perf_counter() - t0) * 1000):
+                    log["events"].append(ev)
+                    yield {"data": json.dumps(ev, default=str)}
+                log["router"] = {"job": plan.job, "reason": plan.reason, "case_id": plan.case_id}
+                if plan.task is None:
+                    log.update(outcome="finished")
+                    return
+                task, shift = plan.task, 1
             runner = asyncio.create_task(agent.run_task(
                 task, arm, CRMEnv("b2b"), base_url=VLLM_URL, run_id=start["run_id"],
                 run_seed=uuid.uuid4().int % 10_000, window=32768, calls_out=lambda rec: None, http_client=client,
-                protocol=protocol, on_event=queue.put_nowait))
+                protocol=protocol, on_event=lambda ev: queue.put_nowait(_shift_step(ev, shift))))
             while not (runner.done() and queue.empty()):
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=0.5)
