@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import functools
 import html
 import re
@@ -25,8 +26,8 @@ KINDS = ["issue", "product"]
 BODY_CAP = 4000  # per email / chat / description; shrinks only if the whole case file exceeds the char cap
 DESC_CAP = 120
 MAX_SEARCH, DEFAULT_SEARCH, MIN_SEARCH = 10, 5, 3
-# Best rerank score below which knowledge results are flagged LOW RELEVANCE (still shown): calibrated on the
-# synthetic practice set crm/kqdev_b2b.json, where it flags 19/20 traps and 1/20 answerable (A03, right article).
+# Former LOW RELEVANCE flag line, now only measured (tools/flagprobe.py): shown to the model, it was obeyed over
+# what the passages said (code-notes: the LOW RELEVANCE flag). Calibrated on crm/kqdev_b2b.json.
 FLAG_RELEVANCE = 2.4
 MAX_TOP, DEFAULT_TOP = 20, 10
 MAX_AGENTS = 50
@@ -173,17 +174,12 @@ def search_knowledge(session: TaskSession, query, limit) -> Observation:
     if missing:  # a fact, not a score: the reranker cannot tell an absent product from a similar topic
         notes.append("NOTE: no article and no product in the knowledge base mentions "
                      + ", ".join(f'"{m}"' for m in missing) + ". Do not answer with another product's information.")
-    if res.best_score is not None and res.best_score < FLAG_RELEVANCE:  # flagged, not hidden (see FLAG_RELEVANCE)
-        notes.append(f"LOW RELEVANCE: no passage clearly matches (best score {res.best_score:.2f}, below "
-                     f"{FLAG_RELEVANCE:.2f}); the knowledge base may not cover this. Answer only if a passage is "
-                     "about exactly what was asked.")
     if res.mode != "reranked":
         notes.append("(unranked: the relevance model is unavailable; passages may not answer the question)")
     note = "".join(f"{n_}\n" for n_ in notes)
-    names = ["Id", "Title", "passage", "score"]
-    text, shown, trunc = render_rows(
-        names, [(p.Id, p.Title, p.text, None if p.score is None else round(p.score, 2)) for p in passages],
-        len(passages), session.char_cap - len(note))
+    # best first, without scores: rerank scores order passages but are not a relevance verdict (FLAG_RELEVANCE)
+    text, shown, trunc = render_rows(["Id", "Title", "passage"], [(p.Id, p.Title, p.text) for p in passages],
+                                     len(passages), session.char_cap - len(note))
     return _obs(note + text, len(passages), shown, trunc, t0)
 
 
@@ -496,22 +492,35 @@ _RESPOND = _tool("respond", "Give the final answer. Call this once, when you are
                              "an Id, None, or one short sentence for a knowledge question."}},
                  ["reason", "answer"])
 
-# Knowledge answers carry the source sentence; the agent loop checks it (grounding_problem, support check).
-_RESPOND_KNOWLEDGE = _tool(
-    "respond", "Give the final answer. Write the reason first, then the source sentence, then the answer.",
-    {"reason": {"type": "string", "description": "Write this FIRST: which passage answers the question and why "
-                "it is about the product or topic asked, or that no passage does."},
-     "question_subject": {"type": "string", "description": "The product, industry or context the question asks "
-                          "about (for example 'telecom networks', 'SecureAnalytics Pro', or 'general' if none)."},
-     "source_subject": {"type": "string", "description": "What the article you would quote is about (for example "
-                        "'EDA software security'). If it differs from question_subject, the answer is that the "
-                        "knowledge base does not cover the question."},
-     "quote": {"type": "string", "description": "The ONE sentence from a tool result you were shown (a knowledge "
-               "passage, or a case record) that states the answer, copied exactly. Empty if nothing you were shown "
-               "answers it, or when refusing."},
-     "answer": {"type": "string", "description": "One short sentence answering the question, taken from that "
-                "quote; or 'Our knowledge base does not cover <the product or topic>.'"}},
-    ["reason", "question_subject", "source_subject", "quote", "answer"])
+MAX_QUOTES = 5
+
+
+def respond_form(customer: bool) -> dict:
+    """The checked answer form: the model picks the kind of reply; code writes 'not covered' and refusals."""
+    kinds = ["answer", "not_covered", "privacy_refusal"] if customer else ["answer", "not_covered"]
+    kind_desc = ("answer: the quotes state the answer. not_covered: nothing you were shown answers it, or the "
+                 "source is about a different subject (the reply is written for you)."
+                 + (" privacy_refusal: they asked about another person, customer or company, or for internal "
+                    "company data (the refusal is written for you)." if customer else ""))
+    return _tool(
+        "respond", "Give the final answer. Write the reason first, then the subjects, the kind, the quotes and "
+        "the answer.",
+        {"reason": {"type": "string", "description": "Write this FIRST: which tool result answers the question "
+                    "and why it is about what was asked, or why none does."},
+         "question_subject": {"type": "string", "description": "The product, industry or context the question asks "
+                              "about (for example 'telecom networks', 'SecureAnalytics Pro', 'my cases', or "
+                              "'general')."},
+         "source_subject": {"type": "string", "description": "What the tool result you would quote is about (for "
+                            "example 'EDA software security'). If it differs from question_subject, the kind is "
+                            "not_covered."},
+         "kind": {"type": "string", "enum": kinds, "description": kind_desc},
+         "quotes": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_QUOTES,
+                    "description": "For kind answer: each sentence, or each record field such as 'Status: Closed', "
+                    "that states part of the answer, copied exactly from a tool result you were shown. Empty "
+                    "for the other kinds."},
+         "answer": {"type": "string", "description": "For kind answer: one or two short sentences taken from "
+                    "the quotes. For the other kinds: empty."}},
+        ["reason", "question_subject", "source_subject", "kind", "quotes", "answer"])
 
 ABSTAIN_PHRASES = ("does not cover", "do not cover", "doesn't cover", "not covered", "no information",
                    "no article", "not in our knowledge base", "not in the knowledge base")
@@ -522,6 +531,40 @@ REFUSAL_PHRASES = ("can't share", "cannot share", "can not share", "only help wi
 FALLBACK_KNOWLEDGE = "Our knowledge base does not cover this question."
 FALLBACK_CUSTOMER = ("I'm sorry, I couldn't find that in your records or our knowledge base. "
                      "Could you tell me more, or ask about one of your own cases?")
+PRIVACY_REFUSAL = ("I'm sorry, I can't share information about other customers or internal company data. "
+                   "For privacy, I can only help with your own account. I'm happy to help with your own cases.")
+
+
+@dataclasses.dataclass(frozen=True)
+class Reply:
+    kind: str  # answer | not_covered | privacy_refusal
+    text: str  # what the user sees: the model's answer, or the text code writes for the other kinds
+    quotes: tuple[str, ...]
+
+
+def read_reply(args: dict, answer: str, customer: bool) -> Reply:
+    """The respond form read as a Reply; an old-style form (one 'quote', no 'kind') is read by its wording."""
+    kind = args.get("kind")
+    if kind not in ("answer", "not_covered", "privacy_refusal") or (kind == "privacy_refusal" and not customer):
+        kind = ("privacy_refusal" if customer and is_refusal(answer) else
+                "not_covered" if is_abstain(answer) else "answer")
+    raw = args.get("quotes")
+    quotes = [raw] if isinstance(raw, str) else list(raw) if isinstance(raw, list) else []
+    if not quotes and args.get("quote"):
+        quotes = [args["quote"]]
+    quotes = tuple(str(q).strip() for q in quotes if str(q or "").strip())[:MAX_QUOTES]
+    if kind == "answer" and not quotes:  # an "answer" that is really a refusal or a "not covered"
+        kind = ("privacy_refusal" if customer and is_refusal(answer) else
+                "not_covered" if is_abstain(answer) else kind)
+    if kind == "privacy_refusal":
+        return Reply(kind, PRIVACY_REFUSAL, ())
+    if kind == "not_covered":
+        subject = str(args.get("question_subject") or "").strip().strip(".")
+        if customer:
+            return Reply(kind, FALLBACK_CUSTOMER, ())
+        known = subject and subject.lower() not in ("general", "none", "n/a", "unknown")
+        return Reply(kind, f"Our knowledge base does not cover {subject}." if known else FALLBACK_KNOWLEDGE, ())
+    return Reply(kind, answer, quotes)
 
 
 def is_abstain(answer: str | None) -> bool:
@@ -537,33 +580,43 @@ def is_refusal(answer: str | None) -> bool:
 
 def _alnum(s: str) -> str:
     """Letters and digits only, lowercased: survives the escaping and spacing of rendered tool results."""
-    return re.sub(r"[^a-z0-9]", "", html.unescape(s or "").lower())
+    # rendered results show a line break as the two characters \n; drop the escape before the letters are kept
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"\\[ntr]", " ", html.unescape(s or "")).lower())
 
 
 def grounding_problem(quote: str | None, observations: list[str], min_chars: int = MIN_QUOTE_CHARS) -> str | None:
     """Why a knowledge answer's quote is not acceptable, or None: it must appear in a passage the agent was shown."""
     q = (quote or "").strip()
     if len(q) < min_chars:
-        return "the quote is missing or too short; copy the one sentence from a passage that states the answer"
+        return "a quote is missing or too short; copy the sentences or record fields that state the answer"
     key = _alnum(q)
     if not any(key in _alnum(o) for o in observations):
-        return "the quote does not appear in any passage you were shown; copy it exactly from a search result"
+        return f'the quote "{q[:80]}" does not appear in any tool result you were shown; copy it exactly'
     return None
 
 
 SUPPORT_PROMPT = """Question: {question}
 Proposed answer: {answer}
-Source sentence: "{quote}"
-It comes from: {title}
-Its passage: {passage}
+{sources}
 
 Does the source state this answer to THIS question? Check two things:
 1. Subject: the question asks about a specific product, industry or context (for example telecom networks, IoT
    devices, vehicles, 5G, a named product). The source must be about that same thing. A source about EDA software
    or another product does not answer a question about something else, even if the topic sounds similar. If the
    question names no specific context, skip this check.
-2. Facts: the answer's key facts are stated in the source sentence or its passage.
+2. Facts: the answer's key facts are stated in the source sentences or their passages.
 Write one short line of reasoning, then on a new line VERDICT: yes (both checks pass) or VERDICT: no."""
+SOURCE_BUDGET = 3000  # characters of passage context in the support check, shared by the quotes
+
+
+def support_prompt(question: str, answer: str, quotes: tuple[str, ...], observations: list[str]) -> str:
+    """The support check's prompt: each quote with the title and passage it came from."""
+    per = SOURCE_BUDGET // max(1, len(quotes))
+    parts = []
+    for i, q in enumerate(quotes, 1):
+        title, passage = source_of(q, observations)
+        parts.append(f'Source sentence {i}: "{q}"\nIt comes from: {title}\nIts passage: {passage[:per]}')
+    return SUPPORT_PROMPT.format(question=question, answer=answer, sources="\n".join(parts))
 
 
 def source_of(quote: str, observations: list[str]) -> tuple[str, str]:
@@ -594,7 +647,7 @@ SERVICE_TOOLS: list[dict] = [
           "chat transcripts and change history, each oldest first. Long bodies are cut with a note.",
           {"case_id": _s("The Case Id (starts with 500).")}, ["case_id"]),
     _tool("search_knowledge", "Search the knowledge base. Returns the most relevant passages IN FULL, best first, each "
-          "with its article Id, Title and a relevance score (higher is more relevant; at most 2 passages per article). "
+          "with its article Id and Title (at most 2 passages per article). "
           "If no article is relevant it says so plainly instead of returning weak matches.",
           {"query": _s("Keywords or the question to search for."),
            "limit": {"type": "integer", "description": f"Max passages, 1 to {MAX_SEARCH}; 0 means {DEFAULT_SEARCH}."}},
@@ -667,7 +720,7 @@ def service_tools(org: str, task_type: str, customer: str | None = None) -> list
         return SERVICE_TOOLS
     pool = {t["function"]["name"]: t for t in [*SERVICE_TOOLS, _check_offers_tool(org), _MY_CASES,
                                                 _route_case_tool(org)]}
-    pool["respond_knowledge"] = _RESPOND_KNOWLEDGE  # still named "respond" to the model
+    pool["respond_knowledge"] = respond_form(customer is not None)  # still named "respond" to the model
     return [pool[n] for n in keep]
 
 
@@ -763,6 +816,11 @@ def _selftest() -> int:
     check("grounding: a quote copied from a shown passage passes (escapes and spacing ignored)",
           grounding_problem("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
           is None)
+    shown_nl = ["[{'Id': 'k1', 'Title': 'T', 'passage': '4. **Large Batch (Volume: 25)**  \\n   In cases where our "
+                "clients opt for 25 units, the timeline is 14 days.'}]"]
+    check("grounding: a quote with a real line break matches a passage rendered with \\n (P11-KG4, idx 9002)",
+          grounding_problem("4. **Large Batch (Volume: 25)**  \n   In cases where our clients opt for 25 units, "
+                            "the timeline is 14 days.", shown_nl) is None)
     check("grounding: an invented quote is refused",
           "does not appear" in (grounding_problem("QuantumPCB Modeler acts as middleware between HPC and quantum.",
                                                   shown) or ""))
@@ -776,17 +834,35 @@ def _selftest() -> int:
           and not is_abstain("Encryption protects data."))
     kt = service_tools("b2b", "knowledge_qa")
     kprops = kt[-1]["function"]["parameters"]["properties"]
-    check("knowledge job: search, article, respond with reason -> subjects -> quote -> answer",
+    check("knowledge job: search, article, respond with reason -> subjects -> kind -> quotes -> answer",
           [t["function"]["name"] for t in kt] == ["search_knowledge", "get_article", "respond"]
-          and list(kprops) == ["reason", "question_subject", "source_subject", "quote", "answer"])
+          and list(kprops) == ["reason", "question_subject", "source_subject", "kind", "quotes", "answer"]
+          and kprops["kind"]["enum"] == ["answer", "not_covered"])
+    r = read_reply({"kind": "not_covered", "question_subject": "telecom networks", "quotes": ["x"]}, "", False)
+    check("reply: not_covered -> code writes the text naming the subject, no quotes",
+          r == Reply("not_covered", "Our knowledge base does not cover telecom networks.", ()))
+    check("reply: not_covered with subject 'general' -> the generic text",
+          read_reply({"kind": "not_covered", "question_subject": "general"}, "", False).text == FALLBACK_KNOWLEDGE)
+    check("reply: privacy_refusal for a customer -> the fixed refusal; for staff it is not a kind",
+          read_reply({"kind": "privacy_refusal"}, "", True) == Reply("privacy_refusal", PRIVACY_REFUSAL, ())
+          and read_reply({"kind": "privacy_refusal"}, "Encryption.", False).kind == "answer")
+    r = read_reply({"kind": "answer", "quotes": ["Status: Closed", " ", "Status: New"]}, "One closed, one new.", True)
+    check("reply: answer keeps the model's text and its non-empty quotes", r == Reply(
+        "answer", "One closed, one new.", ("Status: Closed", "Status: New")))
+    check("reply: old form (one quote, no kind) read by its wording",
+          read_reply({"quote": "Q."}, "Encryption.", False) == Reply("answer", "Encryption.", ("Q.",))
+          and read_reply({}, "Our knowledge base does not cover IDPS.", False).kind == "not_covered"
+          and read_reply({}, "I'm sorry, I can't share that.", True).kind == "privacy_refusal")
     title, body = source_of("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
     check("source_of: finds the title and passage the quote came from",
           title == "T" and "end-to-end encryption" in body and "More text" in body, f"{title!r} {body[:60]!r}")
     check("source_of: an unknown quote -> ('unknown', '')", source_of("nothing like it at all here", shown)
           == ("unknown", ""))
     ct = service_tools("b2b", "free_question", "003Wt00000Jqt7DIAR")
-    check("customer job: respond also carries a quote",
-          ct[-1]["function"]["name"] == "respond" and "quote" in ct[-1]["function"]["parameters"]["properties"])
+    cprops = ct[-1]["function"]["parameters"]["properties"]
+    check("customer job: respond carries quotes and the privacy_refusal kind",
+          ct[-1]["function"]["name"] == "respond" and "quotes" in cprops
+          and cprops["kind"]["enum"] == ["answer", "not_covered", "privacy_refusal"])
 
     # --- route_case: names in, the routing policy applied in code
     def routed(issue, product):
@@ -897,10 +973,11 @@ def _selftest() -> int:
     rs = rows(o)
     arts = {r["Id"]: norm(raw("SELECT Summary || ' ' || FAQ_Answer__c AS t FROM Knowledge__kav WHERE Id = ?", [r["Id"]])[0]["t"])
             for r in rs}
-    check("search_knowledge: default 5 passages, keys Id/Title/passage/score, <= 2 per article, scores descending",
-          o.ok and o.rows_total == 5 and all(set(r) == {"Id", "Title", "passage", "score"} for r in rs)
+    best = retrieval.search("b2b", "extended technical support offer duration", 5)
+    check("search_knowledge: default 5 passages, keys Id/Title/passage (no score), <= 2 per article, best first",
+          o.ok and o.rows_total == 5 and all(set(r) == {"Id", "Title", "passage"} for r in rs)
           and max(collections.Counter(r["Id"] for r in rs).values()) <= 2
-          and [r["score"] for r in rs] == sorted((r["score"] for r in rs), reverse=True), o.text[:140])
+          and [r["Id"] for r in rs] == [p.Id for p in best.passages], o.text[:140])
     check("search_knowledge: every passage is shown in full (a whole stretch of its article, > 200 chars)",
           all(norm(r["passage"]) in arts[r["Id"]] and len(r["passage"]) > 200 for r in rs),
           f"passage lengths {[len(r['passage']) for r in rs]}")
@@ -921,8 +998,8 @@ def _selftest() -> int:
     small.close()
     nq = next(t for t in tasks if t.idx == 688).query
     o = ex("search_knowledge", {"query": nq, "limit": 5})
-    check("search_knowledge: below the cutoff (idx 688) -> passages still shown, flagged LOW RELEVANCE",
-          o.ok and o.rows_total >= 3 and "LOW RELEVANCE" in o.text.split("\n")[0], o.text[:200])
+    check("search_knowledge: low-scoring search (idx 688) -> passages shown, no score and no relevance flag",
+          o.ok and o.rows_total >= 3 and "LOW RELEVANCE" not in o.text and "'score'" not in o.text, o.text[:200])
     o = ex("search_knowledge", {"query": "ChipEffic Pro compliance standards", "limit": 3})
     check("search_knowledge: absent product -> NOTE names it", o.ok and o.text.startswith(
         'NOTE: no article and no product in the knowledge base mentions "ChipEffic Pro"'), o.text[:160])

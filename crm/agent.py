@@ -43,6 +43,9 @@ BACKOFF_S = [1.0, 3.0]  # one sleep per retry; the selftest shortens it
 CALL_TIMEOUT_S = 600.0
 ACTION_TEXT_CAP = 2000
 MAX_REJECTIONS = 2  # ungrounded answers refused before the honest fallback
+PLAIN_TEXT_RETRIES = 1  # plain-text replies in a checked job asked again before the fallback (as Pydantic AI)
+RESPOND_NUDGE = ("Your reply was plain text, so it was not delivered. Give your answer by calling the respond "
+                 "tool: reason first, then the other fields.")
 
 
 @dataclass(frozen=True)
@@ -443,7 +446,7 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
 
     action_names (the offered tools) switches from the tools_v1 tools to crm.actions dispatch."""
     out = {"action": "none", "text": "", "answer": None, "detail": None, "format_errors": 0, "sql_errors": 0,
-           "searches": 0, "truncations": 0, "obs": {}}
+           "searches": 0, "truncations": 0, "obs": {}, "plain_text": False}
     asst = {"role": "assistant", "content": res.content or None}
     if res.reasoning:
         asst["reasoning"] = res.reasoning  # vLLM passes it to the template as reasoning_content
@@ -459,7 +462,13 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
         asst.update(content=None, tool_calls=res.tool_calls)
         trajectory[-1].update(content="", tool_calls=res.tool_calls, recovered_from_text=True)
     if not res.tool_calls:
-        if res.content.strip():  # a plain-text reply is taken as the final answer
+        if res.content.strip() and verify is not None:
+            # a checked job's answer must come through respond and its check: ask again (bounded by the caller)
+            out.update(action="plain_text", text=res.content.strip(), plain_text=True)
+            nudge = {"role": "user", "content": RESPOND_NUDGE}
+            messages.append(nudge)
+            trajectory.append(dict(nudge))
+        elif res.content.strip():  # a plain-text reply is taken as the final answer
             out.update(action="respond", text=res.content.strip(), answer=res.content.strip(), detail="plain_text")
         else:
             out.update(format_errors=1)
@@ -480,20 +489,27 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
         texts.append(json.dumps(args) if args is not None else str(fn.get("arguments")))
         if name == "respond" and isinstance(args, dict) and "answer" in args:
             ans, why = _split_answer(str(args["answer"]), str(args.get("reason") or ""))
-            problem = await verify(ans, args.get("quote"), trajectory) if verify else None
+            problem, checked = await verify(args, ans, trajectory) if verify else (None, None)
             if problem:  # not grounded: the answer is refused and the agent tries again
                 out["rejected"] = problem
-                reply = (f"Answer NOT accepted: {problem}. Either answer with one sentence copied exactly from a "
-                         "passage you were shown, or answer that the knowledge base does not cover it.")
+                reply = (f"Answer NOT accepted: {problem}. Either answer with quotes copied exactly from tool "
+                         "results you were shown, or use kind not_covered.")
             else:
-                out.update(answer=ans, reason=why, quote=args.get("quote"))
+                if checked is not None:  # the text the user sees, and every quote, come from the checked reply
+                    ans = checked.text
+                    out.update(quotes=list(checked.quotes))
+                quotes = out.get("quotes") or ([args["quote"]] if args.get("quote") else [])
+                out.update(answer=ans, reason=why, quote=" … ".join(quotes) or None)
                 reply = "Answer submitted."
         elif action_names is not None:
             prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None
             if prior is not None:  # an identical repeat cannot give a new result; break the loop
                 out["format_errors"] += 1
+                hint = ("Change the filters, use summarize_records for counts, rates and averages, or respond."
+                        if "summarize_records" in action_names else
+                        f"Use a different call ({', '.join(sorted(action_names))}) or respond with what you have.")
                 reply = (f"Error: you already ran exactly this {name} call; its result is above. Do not repeat it. "
-                         "Change the filters, use summarize_records for counts, rates and averages, or respond.")
+                         + hint)
             elif name in action_names and name != "respond" and isinstance(args, dict):
                 obs = await asyncio.to_thread(executor or actions.execute, session, name, args, org)
                 out["sql_errors"] += not obs.ok
@@ -558,25 +574,26 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         tools = TOOLS if protocol == TOOLS_PROTOCOL else None
         messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
-    end_reason = end_detail = answer = reason = quote = None
-    n_calls = n_format = n_sql_err = n_search = n_trunc = 0
+    end_reason = end_detail = answer = reason = quote = quotes = None
+    n_calls = n_format = n_sql_err = n_search = n_trunc = n_plain = 0
     prompt_toks, cached_toks, completion_toks = [], [], []
     session = await asyncio.to_thread(env.open_task)
     session.customer_id = customer
     checks: list[dict] = []
     verify = None
     if protocol == SERVICE_PROTOCOL and (task.task_type == "knowledge_qa" or customer):
-        async def verify(ans: str, quote, traj: list[dict]) -> str | None:
-            """None if the answer is grounded (or an honest 'not covered' / privacy refusal), else the problem."""
-            if service.is_abstain(ans) or (customer and service.is_refusal(ans)):
-                checks.append({"answer": ans, "result": "abstain"})
-                return None
+        async def verify(args: dict, ans: str, traj: list[dict]):
+            """(problem or None, the reply): 'not covered' and refusals pass with code's text; answers are checked."""
+            reply = service.read_reply(args, ans, customer is not None)
+            if reply.kind != "answer":
+                checks.append({"answer": reply.text, "kind": reply.kind, "result": "abstain"})
+                return None, reply
             obs = [m.get("content") or "" for m in traj if m.get("role") == "tool"]
-            problem = service.grounding_problem(quote, obs, 8 if customer else service.MIN_QUOTE_CHARS)
-            if problem is None:  # the quote is real: does it state THIS answer to THIS question?
-                title, passage = service.source_of(str(quote), obs)
-                prompt = service.SUPPORT_PROMPT.format(question=task.query.strip(), answer=ans, quote=str(quote).strip(),
-                                                       title=title, passage=passage)
+            min_chars = 8 if customer else service.MIN_QUOTE_CHARS
+            problem = (service.grounding_problem(None, obs, min_chars) if not reply.quotes else
+                       next((p for q in reply.quotes if (p := service.grounding_problem(q, obs, min_chars))), None))
+            if problem is None:  # every quote is real: do they state THIS answer to THIS question?
+                prompt = service.support_prompt(task.query.strip(), ans, reply.quotes, obs)
                 check_arm = (dataclasses.replace(arm, thinking_token_budget=1024, max_tokens=2048) if arm.enable_thinking
                              else dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None,
                                                       temperature=0.7, top_p=0.8, max_tokens=300))
@@ -587,10 +604,10 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                     prompt_toks.append(cres.prompt_tokens)
                     completion_toks.append(cres.completion_tokens)
                 if not ok:
-                    problem = f"that sentence does not state this answer to the question ({why or cerr or 'no verdict'})"
-            checks.append({"answer": ans, "quote": quote, "result": "rejected" if problem else "grounded",
-                           "problem": problem})
-            return problem
+                    problem = f"the quotes do not state this answer to the question ({why or cerr or 'no verdict'})"
+            checks.append({"answer": ans, "quote": " | ".join(reply.quotes), "result": "rejected" if problem
+                           else "grounded", "problem": problem})
+            return problem, reply
     try:
         for step in range(max_turns):
             if on_event:
@@ -629,13 +646,16 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                 emit(calls_out, rec)
                 if step_out["answer"] is not None:
                     end_reason, answer, end_detail = "respond", step_out["answer"], step_out["detail"]
-                    reason, quote = step_out.get("reason"), step_out.get("quote")
+                    reason, quote, quotes = step_out.get("reason"), step_out.get("quote"), step_out.get("quotes")
                     break
-                if sum(c["result"] == "rejected" for c in checks) >= MAX_REJECTIONS:
-                    # two ungrounded answers: say so honestly rather than let a third guess through
-                    end_reason, end_detail = "respond", "grounding_fallback"
+                n_plain += step_out["plain_text"]
+                rejected = sum(c["result"] == "rejected" for c in checks) >= MAX_REJECTIONS
+                if rejected or n_plain > PLAIN_TEXT_RETRIES:
+                    # say so honestly rather than let an unchecked or a third ungrounded answer through
+                    end_reason, end_detail = "respond", "grounding_fallback" if rejected else "plain_text_fallback"
                     answer = service.FALLBACK_CUSTOMER if customer else service.FALLBACK_KNOWLEDGE
-                    reason = "No sentence in the passages shown states an answer to this question."
+                    reason = ("No sentence in the passages shown states an answer to this question." if rejected
+                              else "The agent did not give its answer through the checked answer form.")
                     break
                 continue
             action, text = parse_action(res.content)
@@ -692,7 +712,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             "end_detail": end_detail, "n_calls": n_calls, "n_format_errors": n_format, "n_sql_errors": n_sql_err,
             "n_searches": n_search, "n_truncations": n_trunc, "prompt_tokens_total": _sum(prompt_toks),
             "cached_tokens_total": _sum(cached_toks), "completion_tokens_total": _sum(completion_toks),
-            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "quote": quote,
+            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "quote": quote, "quotes": quotes,
             "grounding_checks": checks, "trajectory": trajectory}
 
 
@@ -1083,6 +1103,73 @@ def _selftest() -> int:
         check("13 grounding: an honest 'not covered' needs no quote and no support call",
               rec["answer"].startswith("Our knowledge base does not cover") and
               [c["result"] for c in rec["grounding_checks"]] == ["abstain"] and len(fake.bodies) == 2)
+
+        # 13b. plain text in a checked job: asked again once, then the honest fallback
+        def text_then(final):
+            state = {"n": 0}
+
+            def script(body):
+                state["n"] += 1
+                if body.get("tools") is None:
+                    return "It states it.\nVERDICT: yes"
+                if state["n"] == 1:
+                    return tc(("search_knowledge", {"query": "AI predict integration challenges", "limit": 3}))
+                if state["n"] == 2:
+                    return {"content": "The answer is artificial intelligence."}
+                return final(body)
+            return script
+
+        rec, _, fake = await one(kq, text_then(lambda b: tc(("respond", {"reason": "r", "quote": passage_from(b),
+                                                                         "answer": "Artificial intelligence."}))),
+                                 protocol=SERVICE_PROTOCOL)
+        nudged = any(m["role"] == "user" and m["content"] == RESPOND_NUDGE for m in fake.bodies[2]["messages"])
+        check("13b plain text in a knowledge job: not taken as the answer; asked again; respond then checked",
+              nudged and rec["answer"] == "Artificial intelligence." and rec["end_detail"] != "plain_text"
+              and [c["result"] for c in rec["grounding_checks"]] == ["grounded"], f"{rec['end_detail']}")
+        rec, _, _ = await one(kq, text_then(lambda b: {"content": "Still plain text."}), protocol=SERVICE_PROTOCOL)
+        check("13b plain text twice: the honest fallback, never the unchecked text",
+              rec["answer"] == service_fallback() and rec["end_detail"] == "plain_text_fallback", rec["end_detail"])
+        # 13c. kinds and quote lists: code writes refusals and "not covered"; every quote is checked
+        from crm import service as svc
+        cu = next(t for t in tasks if t.task_type == "private_customer_information" and t.split == "dev")
+        rec, _, fake = await one(cu, [tc(("respond", {"reason": "another customer", "kind": "privacy_refusal",
+                                                      "quotes": [], "answer": "Our knowledge base does not cover it."}))],
+                                 protocol=SERVICE_PROTOCOL)
+        check("13c customer privacy_refusal: the fixed refusal text, no support call",
+              rec["answer"] == svc.PRIVACY_REFUSAL and len(fake.bodies) == 1
+              and [c["result"] for c in rec["grounding_checks"]] == ["abstain"], rec["answer"])
+        rec, _, fake = await one(kq, [tc(("search_knowledge", {"query": "x y", "limit": 3})),
+                                      tc(("respond", {"reason": "r", "kind": "answer", "quotes": [],
+                                                      "answer": "Our knowledge base does not cover that."}))],
+                                 protocol=SERVICE_PROTOCOL)
+        check("13c kind answer with a 'not covered' text and no quotes: read as not_covered, no rejection",
+              rec["answer"].startswith("Our knowledge base does not cover") and len(fake.bodies) == 2
+              and [c["result"] for c in rec["grounding_checks"]] == ["abstain"], rec["answer"])
+
+        def two_quotes(second):
+            def script(body):
+                if body.get("tools") is None:
+                    return "Both stated.\nVERDICT: yes"
+                if not any(m["role"] == "tool" for m in body["messages"]):
+                    return tc(("search_knowledge", {"query": "AI predict integration challenges", "limit": 3}))
+                return tc(("respond", {"reason": "r", "kind": "answer", "answer": "Artificial intelligence.",
+                                       "quotes": [passage_from(body), second(body)]}))
+            return script
+
+        rec, _, fake = await one(kq, two_quotes(lambda b: passage_from(b)[:25]), protocol=SERVICE_PROTOCOL)
+        sup = next(b for b in fake.bodies if b.get("tools") is None)["messages"][0]["content"]
+        check("13c two real quotes: grounded, both shown to the support check, both recorded",
+              [c["result"] for c in rec["grounding_checks"]] == ["grounded"] and "Source sentence 2" in sup
+              and len(rec["quotes"]) == 2, str(rec["grounding_checks"]))
+        rec, _, _ = await one(kq, two_quotes(lambda b: "an invented sentence that is in no passage"),
+                              protocol=SERVICE_PROTOCOL)
+        check("13c one invented quote among real ones: rejected, naming that quote",
+              rec["grounding_checks"][0]["result"] == "rejected"
+              and "an invented sentence" in rec["grounding_checks"][0]["problem"], str(rec["grounding_checks"][:1]))
+        rt0 = next(t for t in tasks if t.task_type == "case_routing" and t.split == "dev")
+        rec, _, _ = await one(rt0, [{"content": "005Wt000003NIYnIAO"}], protocol=SERVICE_PROTOCOL)
+        check("13b plain text in routing (no answer check): taken as the answer, as before",
+              rec["answer"] == "005Wt000003NIYnIAO" and rec["end_detail"] == "plain_text", rec["end_detail"])
 
         # 14. q-judge: thinking on for knowledge (agent and support check), off for routing
         rec, _, fake = await one(kq, grounded_script("yes"), arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)

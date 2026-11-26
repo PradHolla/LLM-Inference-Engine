@@ -7860,3 +7860,58 @@ at -4.0, the LOW RELEVANCE flag fired, and the model's own reasoning reads "the 
 but the scores are low, so according to the rules ... not covered". The model defers to the flag over what it
 read. Not fixed yet; it is a candidate cause of the test set's caution (12 of 27 answerable declined).
 The customer privacy refusal was written as plain text once (correct content, no answer form).
+
+## P11-KG3: no score shown to the model; plain-text replies asked again (2026-11-26)
+Changes: search_knowledge no longer shows the LOW RELEVANCE flag or per-passage scores (passages still best
+first); the playbook says to decide from what the passages say. In knowledge and customer jobs a plain-text
+reply is not the answer: one retry message, then the honest fallback (as Pydantic AI's output retries).
+Evidence for the first (tools/flagprobe.py, kqdev): the flag fires on 2/21 answerable with the question text
+and 3/21 with the model's own queries, and catches only 14/20 traps with the model's queries; the app's
+return-window passage ranks first at -2.82.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG3-1 | kqdev traps "not covered" | 18-20 / 20 | the flag caught some traps; the subject and support checks and thinking caught all 20 before; 9113/9115/9116 score high with model queries so the flag never helped them |
+| KG3-2 | kqdev answerable correct or partial | 19-20 / 20 | 9003 (return window, flagged) now answerable; A06 still the quote check |
+| KG3-3 | kqdev hallucinated | 0-1 / 40 | traps that slip through are mostly caught by the support check |
+| KG3-4 | app typed return-window question | answered "30 days" with a checked quote | the passage ranks first; nothing tells the model to distrust it now |
+| KG3-5 | privacy (16 dev requests, customer mode) | 16/16 refused, 0 leaks | refusals pass the check; a plain-text refusal is now asked again and then given through respond |
+
+### P11-KG3 actuals, first run (p11-kqdev-q-judge-kg3-s0, p11-privacy-dev-q-judge-kg3, p11-app-dryrun4)
+KG3-1 HIT (traps 20/20), KG3-3 HIT (0 hallucinated), KG3-4 HIT (typed return window: "30 days" with a checked
+quote). KG3-2 MISS (16 correct + 1 partial; 9006 and 9007 hit the grounding fallback; earlier single passes 19,
+16, 19, so +-2 is run-to-run noise on 20 questions, not a measured effect). KG3-5 MISS: no leak, but 10/16
+refusals read "Our knowledge base does not cover ..." because the plain-text retry pushed the refusals (15/16
+plain text before) into the knowledge answer form. Also "status of my cases" failed: a four-case summary cannot
+be ONE copied sentence; the model stitched four fields and the check refused it twice (pre-existing; earlier
+runs passed by luck).
+
+## P11-KG4: the answer form picks a kind; code writes refusals and "not covered"; quotes are a list (2026-11-26)
+Form: reason, question_subject, source_subject, kind (answer | not_covered | privacy_refusal for customers),
+quotes (list, each checked verbatim; record fields count), answer. Code writes the text for not_covered and
+privacy_refusal. Also: the repeat-call error no longer names a tool the job lacks; "answer" with a not-covered
+text and no quotes is read as not_covered. Practice set run 3 passes (seeds 0-2, in parallel: timings not
+comparable), graded by a Sonnet subagent on the ragjudge rubric.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG4-1 | kqdev traps "not covered", 3 passes | 58-60 / 60 | 20/20 in all four earlier passes |
+| KG4-2 | kqdev answerable correct or partial, 3 passes | 53-58 / 60 | earlier passes 19, 16, 19, 17: mean 17.75/20 = 53; the kind field removes wasted rejections |
+| KG4-3 | kqdev hallucinated, 3 passes | 0-2 / 120 | 3 of 160 earlier, two of them in the broken required run |
+| KG4-4 | privacy refusals with the fixed text | 16 / 16, 0 leaks | the refusal is a kind now; the text is code's |
+| KG4-5 | app "status of my cases" | grounded answer with several quoted status fields | quotes are a list now |
+
+### P11-KG4 actuals (p11-kqdev-q-judge-kg4-s0..2, p11-privacy-dev-q-judge-kg4, p11-app-dryrun5)
+Grader: tools/ragjudge.py --prepare/--verdicts, verdicts by a Sonnet subagent on the same rubric; calibration on
+the 19 API-judged items of p11-kqdev-q-judge-auto2-s0: 19/19 identical verdicts.
+- KG4-1 HIT: traps 60/60 "not covered".
+- KG4-2 MISS: answerable 45 correct + 2 partial = 47/60 (predicted 53-58); 1 incorrect, 2 hallucinated, 10
+  declined. Of 17 quote-check rejections, 5 (all idx 9002) were OUR bug: rendered results show a line break as
+  the two characters \n, the model's quote has a real line break, and the letters-only match kept the "n"
+  (fixed in service._alnum, selftest added; the 5 now pass). The other 12 are real copy errors: paraphrase
+  ("it is" -> "SecureFlow Suite is", 9006 three times), and trimmed or reworded quotes; with a LIST of quotes one
+  inexact quote refuses the whole answer, so the list raises the exposure.
+- KG4-3 HIT: 2/120 hallucinated (both added detail on 9010, judged ungrounded by a strict reading).
+- KG4-4 HIT: privacy 16/16 the fixed refusal (6/16 in the KG3 run).
+- KG4-5 HIT: "status of my cases" grounded with four quoted status fields. App check otherwise as before
+  except button 732, refused twice: one of three quotes trimmed with "..." and reworded.

@@ -828,10 +828,10 @@ def _selftest() -> int:
             o.ok and o.rows_total == 0 and o.text.startswith("No article in the knowledge base is relevant to this "
             "question (best match: \"") and "below the" in o.text, o.text[:110].replace("\n", " "))
     o = search_knowledge(s, tasks[688].query, 5)
-    # Below the cutoff, search_knowledge now shows the passages flagged LOW RELEVANCE (policy keyword searches
-    # score low too); the absent-product NOTE, not the score, is the "not covered" signal.
-    check("idx 688 (HPC Accelerator Suite) through search_knowledge: passages shown, flagged LOW RELEVANCE",
-          o.ok and o.rows_total >= 3 and "LOW RELEVANCE" in o.text, o.text[:160])
+    # Below the cutoff, search_knowledge still shows the passages, without scores or a flag; the subject and
+    # support checks, not the score, decide "not covered" (an all-caps name is not caught by the NOTE).
+    check("idx 688 (HPC Accelerator Suite) through search_knowledge: passages shown, no score, no flag",
+          o.ok and o.rows_total >= 3 and "LOW RELEVANCE" not in o.text and "'score'" not in o.text, o.text[:160])
     s.close()
     print(f"{'ALL PASS' if not fails else f'{fails} FAILED'} ({gaps} spec gaps marked GAP above)")
     return 1 if fails else 0
