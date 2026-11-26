@@ -34,9 +34,10 @@ SCHEMA_REF = {"type": "object", "additionalProperties": False,
                              "why": {"type": "string"}}}
 REF_NOTE = ("\nAlso compare the answer with the reference answer: correct (same key information; paraphrase and "
             "extra correct detail are fine), partial (part of it), or incorrect.")
-SYSTEM = """You audit a customer-service agent's answer for grounding. You get the question, the agent's answer, the
-sentence it quoted as its source, and the passage that sentence came from.
-- grounded: true if every factual claim in the answer is supported by the quoted sentence or its passage.
+SYSTEM = """You audit a customer-service agent's answer for grounding. You get the question, the agent's answer, and
+its sources: either the sentence it quoted and the passage that sentence came from, or the sources it cited.
+- grounded: true if every factual claim in the answer is supported by its quoted sentence and passage, or by
+  its cited sources.
 - on_subject: true if the answer addresses the question asked AND the source is about the same product, industry
   or context the question names (a passage about EDA software does not answer a question about telecom networks).
   If the question names no specific product or context, judge only whether it addresses the question.
@@ -78,15 +79,21 @@ def judge_item(r: dict, refs: dict) -> tuple[dict, str | None, bool]:
     if abstains(r["answer"]):
         row.update(kind="missing", grounded=None, on_subject=None, why="answered not covered")
         return row, None, False
-    quotes = r.get("quotes") or ([r["quote"]] if r.get("quote") else [])
-    passages = [source_passage(q, r["trajectory"]) for q in quotes]
-    if not quotes or any(p is None for p in passages):
-        row.update(kind="ungrounded", grounded=False, on_subject=None, why="no quote, or a quote is in no tool result")
-        return row, None, False
     question = next(m["content"] for m in r["trajectory"] if m.get("role") == "user")
-    per = 2500 // len(quotes)
-    src = "\n\n".join(f"Quoted sentence {i}: {q}\n\nPassage it came from:\n{p[:per]}"
-                      for i, (q, p) in enumerate(zip(quotes, passages), 1))
+    if r.get("citations"):  # cited by label (P11-KG5 on): the exact source texts are in the record
+        cites = r["citations"]
+        per = 2500 // len(cites)
+        src = "\n\n".join(f"Cited source {i}: {c['title']}\n{c['text'][:per]}" for i, c in enumerate(cites, 1))
+    else:  # copied quotes (earlier runs): find the passage each quote came from
+        quotes = r.get("quotes") or ([r["quote"]] if r.get("quote") else [])
+        passages = [source_passage(q, r["trajectory"]) for q in quotes]
+        if not quotes or any(p is None for p in passages):
+            row.update(kind="ungrounded", grounded=False, on_subject=None,
+                       why="no quote, or a quote is in no tool result")
+            return row, None, False
+        per = 2500 // len(quotes)
+        src = "\n\n".join(f"Quoted sentence {i}: {q}\n\nPassage it came from:\n{p[:per]}"
+                          for i, (q, p) in enumerate(zip(quotes, passages), 1))
     user = f"Question: {question}\n\nAgent's answer: {r['answer']}\n\n{src}"
     if ref:
         user += f"\n\nReference answer: {ref['reference']}" + REF_NOTE

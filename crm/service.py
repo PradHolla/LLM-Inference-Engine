@@ -76,28 +76,48 @@ def _exists(session: TaskSession, table: str, rid: str, label: str, hint: str) -
 
 # ---------------------------------------------------------------- actions
 
-def _case_text(case: dict, emails: list[dict], chats: list[dict], hist: list[dict], body_cap: int) -> str:
-    lines = [f"CASE {case['Id']}: {case['Subject']}"]
+def _case_sections(case: dict, emails: list[dict], chats: list[dict], hist: list[dict],
+                   body_cap: int) -> list[tuple[str | None, str]]:
+    """The case file as (title, text) sections; titled ones are citable. Joined, they are the plain case file."""
+    det = [f"CASE {case['Id']}: {case['Subject']}"]
     for k in ("Status", "Priority", "CreatedDate", "ClosedDate", "OwnerId", "ContactId", "AccountId"):
-        lines.append(f"  {k}: {case[k]}")
-    lines.append(f"  Issue: {case['IssueId__c']} ({case['IssueName']})")
-    lines.append(f"  Product: {case['Product2Id']} ({case['ProductName']}), OrderItem {case['OrderItemId__c']}")
+        det.append(f"  {k}: {case[k]}")
+    det.append(f"  Issue: {case['IssueId__c']} ({case['IssueName']})")
+    det.append(f"  Product: {case['Product2Id']} ({case['ProductName']}), OrderItem {case['OrderItemId__c']}")
     if case.get("PurchaseDate"):
-        lines.append(f"  Purchased: {str(case['PurchaseDate'])[:10]}, {case['DaysSincePurchase']} days before this "
-                     "case was opened")
-    lines.append(f"  Description: {_clip(case['Description'], body_cap)}")
-    lines.append(f"EMAILS ({len(emails)}, oldest first):")
+        det.append(f"  Purchased: {str(case['PurchaseDate'])[:10]}, {case['DaysSincePurchase']} days before this "
+                   "case was opened")
+    det.append(f"  Description: {_clip(case['Description'], body_cap)}")
+    out: list[tuple[str | None, str]] = [(f"Case {case['Id']} details", "\n".join(det)),
+                                         (None, f"EMAILS ({len(emails)}, oldest first):")]
     for i, e in enumerate(emails, 1):
-        lines.append(f"[{i}] {e['MessageDate']} from {e['FromAddress']} | {e['Subject']}")
-        lines.append(_clip(e["TextBody"], body_cap))
-    lines.append(f"LIVE CHAT TRANSCRIPTS ({len(chats)}):")
+        out.append((f"Email {i} on case {case['Id']}", f"[{i}] {e['MessageDate']} from {e['FromAddress']} | "
+                    f"{e['Subject']}\n{_clip(e['TextBody'], body_cap)}"))
+    out.append((None, f"LIVE CHAT TRANSCRIPTS ({len(chats)}):"))
     for c in chats:
-        lines.append(f"chat {c['Id']} ended {c['EndTime']}, owner {c['OwnerId']}:")
-        lines.append(_clip(c["Body"], body_cap))
-    lines.append(f"HISTORY ({len(hist)}, oldest first):")
-    for h in hist:
-        lines.append(f"{h['CreatedDate']} {h['Field__c']}: {h['OldValue__c']} -> {h['NewValue__c']}")
-    return "\n".join(lines)
+        out.append((f"Chat {c['Id']} on case {case['Id']}",
+                    f"chat {c['Id']} ended {c['EndTime']}, owner {c['OwnerId']}:\n{_clip(c['Body'], body_cap)}"))
+    out.append((None, f"HISTORY ({len(hist)}, oldest first):"))
+    if hist:
+        out.append((f"History of case {case['Id']}", "\n".join(
+            f"{h['CreatedDate']} {h['Field__c']}: {h['OldValue__c']} -> {h['NewValue__c']}" for h in hist)))
+    return out
+
+
+def _case_text(case: dict, emails: list[dict], chats: list[dict], hist: list[dict], body_cap: int) -> str:
+    return "\n".join(text for _, text in _case_sections(case, emails, chats, hist, body_cap))
+
+
+def _block(session: TaskSession, title: str, text: str) -> str:
+    """One citable source as plain text: '[S3] title' then its text; registered for this run's citations."""
+    return f"[{session.label(title, text)}] {title}\n{text}"
+
+
+def _render(session: TaskSession, sections: list[tuple[str | None, str]], sep: str = "\n") -> str:
+    """Sections as plain text; in a checked job the titled ones become labelled, citable blocks."""
+    if not session.cite:
+        return sep.join(text for _, text in sections)
+    return sep.join(_block(session, t, text) if t else text for t, text in sections)
 
 
 LOGIN_RE = re.compile(r"logged in as Id:\s*(003[A-Za-z0-9]{12,15})")
@@ -116,10 +136,22 @@ def get_my_cases(session: TaskSession) -> Observation:
     """The logged-in customer's own cases, newest first."""
     if not session.customer_id:
         raise ActionError("get_my_cases is only available to a logged-in customer")
-    return session.query('SELECT c.Id, c.Subject, c.Status, c.CreatedDate, c.ClosedDate, p.Name AS Product '
-                         'FROM "Case" c LEFT JOIN OrderItem oi ON oi.Id = c.OrderItemId__c '
-                         'LEFT JOIN Product2 p ON p.Id = oi.Product2Id WHERE c.ContactId = ? '
-                         'ORDER BY c.CreatedDate DESC', [session.customer_id])
+    if not session.cite:
+        return session.query(MY_CASES_SQL, [session.customer_id])
+    # a checked job: the whole list is ONE labelled source, so a summary of every case cites one label
+    # (per-case labels hit the 3-citation cap on a 4-case summary, P11-KG5 app check)
+    t0 = time.monotonic()
+    rows = _rows(session, MY_CASES_SQL, [session.customer_id])
+    if not rows:
+        return _obs("You have no cases.", 0, 0, False, t0)
+    body = "\n\n".join(f"Case {r['Id']}\nSubject: {r['Subject']}\nStatus: {r['Status']}\nProduct: {r['Product']}\n"
+                       f"Opened: {r['CreatedDate']}\nClosed: {r['ClosedDate'] or 'not closed'}" for r in rows)
+    return _obs(_render(session, [(f"Your cases ({len(rows)})", body)]), len(rows), len(rows), False, t0)
+
+
+MY_CASES_SQL = ('SELECT c.Id, c.Subject, c.Status, c.CreatedDate, c.ClosedDate, p.Name AS Product '
+                'FROM "Case" c LEFT JOIN OrderItem oi ON oi.Id = c.OrderItemId__c '
+                'LEFT JOIN Product2 p ON p.Id = oi.Product2Id WHERE c.ContactId = ? ORDER BY c.CreatedDate DESC')
 
 
 def get_case(session: TaskSession, case_id) -> Observation:
@@ -147,6 +179,8 @@ def get_case(session: TaskSession, case_id) -> Observation:
     while len(text) > cap and body_cap > 100:  # shrink bodies until the whole file fits
         body_cap //= 2
         text = _case_text(cases[0], emails, chats, hist, body_cap)
+    if session.cite:  # label only the final, fitted version, so every label is one the agent sees
+        text = _render(session, _case_sections(cases[0], emails, chats, hist, body_cap))
     cut = len(text) > cap
     if cut:
         note = "\n[case file cut to fit the size limit]"
@@ -178,6 +212,15 @@ def search_knowledge(session: TaskSession, query, limit) -> Observation:
         notes.append("(unranked: the relevance model is unavailable; passages may not answer the question)")
     note = "".join(f"{n_}\n" for n_ in notes)
     # best first, without scores: rerank scores order passages but are not a relevance verdict (FLAG_RELEVANCE)
+    if session.cite:  # plain-text passages, each a labelled source; whole passages only, within the char cap
+        blocks, used = [], len(note)
+        for p in passages:
+            size = len(p.Title) + len(p.Id) + len(p.text) + 40
+            if blocks and used + size > session.char_cap:
+                break
+            blocks.append(_block(session, f"{p.Title} (article {p.Id})", p.text))
+            used += size
+        return _obs(note + "\n\n".join(blocks), len(passages), len(blocks), len(blocks) < len(passages), t0)
     text, shown, trunc = render_rows(["Id", "Title", "passage"], [(p.Id, p.Title, p.text) for p in passages],
                                      len(passages), session.char_cap - len(note))
     return _obs(note + text, len(passages), shown, trunc, t0)
@@ -208,6 +251,17 @@ def get_article(session: TaskSession, article_id) -> Observation:
     if not rows:
         raise ActionError(f"no knowledge article with Id {aid!r}. Use search_knowledge to find article Ids.")
     a = rows[0]
+    if session.cite:  # the summary and each paragraph of the answer, as labelled sources
+        paras = [p.strip() for p in re.split(r"\n\s*\n", str(a["FAQ_Answer__c"] or "")) if p.strip()]
+        sections = [(None, f"ARTICLE {a['Id']}: {a['Title']}"), (f"{a['Title']}: summary", str(a["Summary"] or ""))]
+        sections += [(f"{a['Title']}: part {i}", p) for i, p in enumerate(paras, 1)]
+        kept, used = [], 0
+        for s in sections:
+            if kept and used + len(s[1]) + 60 > session.char_cap:
+                break
+            kept.append(s)
+            used += len(s[1]) + 60
+        return _obs(_render(session, kept, "\n\n"), 1, 1, len(kept) < len(sections), t0)
     text = (f"ARTICLE {a['Id']}\nTitle: {a['Title']}\nSummary: {a['Summary']}\n"
             f"FAQ_Answer__c: {a['FAQ_Answer__c']}")
     cut = len(text) > session.char_cap
@@ -492,39 +546,38 @@ _RESPOND = _tool("respond", "Give the final answer. Call this once, when you are
                              "an Id, None, or one short sentence for a knowledge question."}},
                  ["reason", "answer"])
 
-MAX_QUOTES = 5
+MAX_SOURCES = 3  # citations per answer, as ALCE caps them (more rarely help)
+LABEL_RE = re.compile(r"^\[?\s*(S\d+)\s*\]?$", re.I)
 
 
 def respond_form(customer: bool) -> dict:
-    """The checked answer form: the model picks the kind of reply; code writes 'not covered' and refusals."""
+    """The checked answer form: the model picks the kind of reply and cites labels; code does the rest."""
     kinds = ["answer", "not_covered", "privacy_refusal"] if customer else ["answer", "not_covered"]
-    kind_desc = ("answer: the quotes state the answer. not_covered: nothing you were shown answers it, or the "
-                 "source is about a different subject (the reply is written for you)."
+    kind_desc = ("answer: the cited sources state the answer. not_covered: nothing you were shown answers it, or "
+                 "the sources are about a different subject (the reply is written for you)."
                  + (" privacy_refusal: they asked about another person, customer or company, or for internal "
                     "company data (the refusal is written for you)." if customer else ""))
     return _tool(
-        "respond", "Give the final answer. Write the reason first, then the subjects, the kind, the quotes and "
+        "respond", "Give the final answer. Write the reason first, then the subjects, the kind, the sources and "
         "the answer.",
-        {"reason": {"type": "string", "description": "Write this FIRST: which tool result answers the question "
+        {"reason": {"type": "string", "description": "Write this FIRST: which labelled source answers the question "
                     "and why it is about what was asked, or why none does."},
          "question_subject": {"type": "string", "description": "The product, industry or context the question asks "
                               "about (for example 'telecom networks', 'SecureAnalytics Pro', 'my cases', or "
                               "'general')."},
-         "source_subject": {"type": "string", "description": "What the tool result you would quote is about (for "
+         "source_subject": {"type": "string", "description": "What the sources you would cite are about (for "
                             "example 'EDA software security'). If it differs from question_subject, the kind is "
                             "not_covered."},
          "kind": {"type": "string", "enum": kinds, "description": kind_desc},
-         "quotes": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_QUOTES,
-                    "description": "For kind answer: each sentence, or each record field such as 'Status: Closed', "
-                    "that states part of the answer, copied exactly from a tool result you were shown. Empty "
-                    "for the other kinds."},
-         "answer": {"type": "string", "description": "For kind answer: one or two short sentences taken from "
-                    "the quotes. For the other kinds: empty."}},
-        ["reason", "question_subject", "source_subject", "kind", "quotes", "answer"])
+         "sources": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SOURCES,
+                     "description": "For kind answer: the labels (like S2) of the sources shown in brackets in the "
+                     "tool results that state the answer, at most 3. Empty for the other kinds."},
+         "answer": {"type": "string", "description": "For kind answer: one or two short sentences stating what "
+                    "the cited sources say. For the other kinds: empty."}},
+        ["reason", "question_subject", "source_subject", "kind", "sources", "answer"])
 
 ABSTAIN_PHRASES = ("does not cover", "do not cover", "doesn't cover", "not covered", "no information",
                    "no article", "not in our knowledge base", "not in the knowledge base")
-MIN_QUOTE_CHARS = 20
 
 
 REFUSAL_PHRASES = ("can't share", "cannot share", "can not share", "only help with your own", "for privacy")
@@ -539,21 +592,25 @@ PRIVACY_REFUSAL = ("I'm sorry, I can't share information about other customers o
 class Reply:
     kind: str  # answer | not_covered | privacy_refusal
     text: str  # what the user sees: the model's answer, or the text code writes for the other kinds
-    quotes: tuple[str, ...]
+    sources: tuple[str, ...]  # cited labels, normalised (S3); unparseable ones kept so the check can name them
 
 
 def read_reply(args: dict, answer: str, customer: bool) -> Reply:
-    """The respond form read as a Reply; an old-style form (one 'quote', no 'kind') is read by its wording."""
+    """The respond form read as a Reply; a form without a valid 'kind' is read by its wording."""
     kind = args.get("kind")
     if kind not in ("answer", "not_covered", "privacy_refusal") or (kind == "privacy_refusal" and not customer):
         kind = ("privacy_refusal" if customer and is_refusal(answer) else
                 "not_covered" if is_abstain(answer) else "answer")
-    raw = args.get("quotes")
-    quotes = [raw] if isinstance(raw, str) else list(raw) if isinstance(raw, list) else []
-    if not quotes and args.get("quote"):
-        quotes = [args["quote"]]
-    quotes = tuple(str(q).strip() for q in quotes if str(q or "").strip())[:MAX_QUOTES]
-    if kind == "answer" and not quotes:  # an "answer" that is really a refusal or a "not covered"
+    raw = args.get("sources")
+    raw = [raw] if isinstance(raw, str) else list(raw) if isinstance(raw, list) else []
+    labels = []
+    for x in raw:
+        m = LABEL_RE.match(str(x or "").strip())
+        lab = m.group(1).upper() if m else str(x or "").strip()
+        if lab and lab not in labels:
+            labels.append(lab)
+    labels = labels[:MAX_SOURCES]
+    if kind == "answer" and not labels:  # an "answer" that is really a refusal or a "not covered"
         kind = ("privacy_refusal" if customer and is_refusal(answer) else
                 "not_covered" if is_abstain(answer) else kind)
     if kind == "privacy_refusal":
@@ -564,7 +621,7 @@ def read_reply(args: dict, answer: str, customer: bool) -> Reply:
             return Reply(kind, FALLBACK_CUSTOMER, ())
         known = subject and subject.lower() not in ("general", "none", "n/a", "unknown")
         return Reply(kind, f"Our knowledge base does not cover {subject}." if known else FALLBACK_KNOWLEDGE, ())
-    return Reply(kind, answer, quotes)
+    return Reply(kind, answer, tuple(labels))
 
 
 def is_abstain(answer: str | None) -> bool:
@@ -573,25 +630,19 @@ def is_abstain(answer: str | None) -> bool:
 
 
 def is_refusal(answer: str | None) -> bool:
-    """The customer job's privacy refusal, which needs no source sentence."""
+    """The customer job's privacy refusal, which needs no source."""
     low = (answer or "").lower().replace("’", "'")
     return any(p in low for p in REFUSAL_PHRASES)
 
 
-def _alnum(s: str) -> str:
-    """Letters and digits only, lowercased: survives the escaping and spacing of rendered tool results."""
-    # rendered results show a line break as the two characters \n; drop the escape before the letters are kept
-    return re.sub(r"[^a-z0-9]", "", re.sub(r"\\[ntr]", " ", html.unescape(s or "")).lower())
-
-
-def grounding_problem(quote: str | None, observations: list[str], min_chars: int = MIN_QUOTE_CHARS) -> str | None:
-    """Why a knowledge answer's quote is not acceptable, or None: it must appear in a passage the agent was shown."""
-    q = (quote or "").strip()
-    if len(q) < min_chars:
-        return "a quote is missing or too short; copy the sentences or record fields that state the answer"
-    key = _alnum(q)
-    if not any(key in _alnum(o) for o in observations):
-        return f'the quote "{q[:80]}" does not appear in any tool result you were shown; copy it exactly'
+def citation_problem(labels: tuple[str, ...], shown: dict[str, tuple[str, str]]) -> str | None:
+    """Why an answer's citations are not acceptable, or None: each must be a label shown in this run."""
+    if not labels:
+        return "an answer must cite at least one source label (like S2) from the tool results shown"
+    bad = [lab for lab in labels if lab not in shown]
+    if bad:
+        return (f"{bad[0]!r} is not a label you were shown; cite the bracketed labels from the tool results, "
+                f"for example {next(iter(shown), 'S1')}")
     return None
 
 
@@ -599,39 +650,36 @@ SUPPORT_PROMPT = """Question: {question}
 Proposed answer: {answer}
 {sources}
 
-Does the source state this answer to THIS question? Check two things:
+Do the sources state this answer to THIS question? Check two things:
 1. Subject: the question asks about a specific product, industry or context (for example telecom networks, IoT
-   devices, vehicles, 5G, a named product). The source must be about that same thing. A source about EDA software
-   or another product does not answer a question about something else, even if the topic sounds similar. If the
-   question names no specific context, skip this check.
-2. Facts: the answer's key facts are stated in the source sentences or their passages.
+   devices, vehicles, 5G, a named product). The source must be about that same thing. A source about EDA
+   software or another product does not answer a question about something else, even if the topic sounds
+   similar. If the question names no specific context, skip this check.
+2. Facts: the answer's key facts are stated in the sources.
 Write one short line of reasoning, then on a new line VERDICT: yes (both checks pass) or VERDICT: no."""
-SOURCE_BUDGET = 3000  # characters of passage context in the support check, shared by the quotes
+SOURCE_BUDGET = 3000  # characters of source text in the support check, shared by the cited sources
 
 
-def support_prompt(question: str, answer: str, quotes: tuple[str, ...], observations: list[str]) -> str:
-    """The support check's prompt: each quote with the title and passage it came from."""
-    per = SOURCE_BUDGET // max(1, len(quotes))
-    parts = []
-    for i, q in enumerate(quotes, 1):
-        title, passage = source_of(q, observations)
-        parts.append(f'Source sentence {i}: "{q}"\nIt comes from: {title}\nIts passage: {passage[:per]}')
-    return SUPPORT_PROMPT.format(question=question, answer=answer, sources="\n".join(parts))
+def support_prompt(question: str, answer: str, cited: list[tuple[str, str]]) -> str:
+    """The support check's prompt: each cited source's title and exact text."""
+    per = SOURCE_BUDGET // max(1, len(cited))
+    parts = [f"Source {i}: {title}\n{text[:per]}" for i, (title, text) in enumerate(cited, 1)]
+    return SUPPORT_PROMPT.format(question=question, answer=answer, sources="\n\n".join(parts))
 
 
-def source_of(quote: str, observations: list[str]) -> tuple[str, str]:
-    """(title, passage text) of the tool result the quote came from; best effort, for the support check."""
-    key = _alnum(quote)
-    for obs in observations:
-        for m in re.finditer(r"'Title': (?:'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"), 'passage': "
-                             r"(?:'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\")", obs):
-            title, body = (m.group(1) or m.group(2) or ""), (m.group(3) or m.group(4) or "")
-            if key and key in _alnum(body):
-                return title, body.replace("\\n", " ")[:2000]
-        if key and key in _alnum(obs):
-            t = re.search(r"Title: (.+)", obs) or re.search(r"CASE \S+: (.+)", obs)
-            return (t.group(1).strip() if t else "a tool result"), obs[:2000]
-    return "unknown", ""
+def display_quote(answer: str, cited: list[tuple[str, str]]) -> str:
+    """For the answer card: the sentence of the cited sources sharing the most words with the answer."""
+    words = set(re.findall(r"[a-z0-9]+", answer.lower()))
+    best, score = "", -1
+    for _, text in cited:
+        for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
+            sent = sent.strip(" *-#")
+            n = len(words & set(re.findall(r"[a-z0-9]+", sent.lower())))
+            if sent and n > score:
+                best, score = sent, n
+    return best[:400]
+
+
 VERDICT_RE = re.compile(r"VERDICT:\s*(yes|no)", re.I)
 
 
@@ -810,59 +858,66 @@ def _selftest() -> int:
           service_tools("b2b", "free_question") is SERVICE_TOOLS
           and not {"check_offers", "route_case"} & {t["function"]["name"] for t in SERVICE_TOOLS})
 
-    # --- grounding: knowledge answers must quote a sentence the agent was shown
-    shown = ["[{'Id': 'ka0X', 'Title': 'T', 'passage': 'TechPulse\\'s tools use end-to-end encryption to protect "
-             "sensitive design data.\\nMore text.'}]"]
-    check("grounding: a quote copied from a shown passage passes (escapes and spacing ignored)",
-          grounding_problem("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
-          is None)
-    shown_nl = ["[{'Id': 'k1', 'Title': 'T', 'passage': '4. **Large Batch (Volume: 25)**  \\n   In cases where our "
-                "clients opt for 25 units, the timeline is 14 days.'}]"]
-    check("grounding: a quote with a real line break matches a passage rendered with \\n (P11-KG4, idx 9002)",
-          grounding_problem("4. **Large Batch (Volume: 25)**  \n   In cases where our clients opt for 25 units, "
-                            "the timeline is 14 days.", shown_nl) is None)
-    check("grounding: an invented quote is refused",
-          "does not appear" in (grounding_problem("QuantumPCB Modeler acts as middleware between HPC and quantum.",
-                                                  shown) or ""))
-    check("grounding: a missing or tiny quote is refused", grounding_problem("", shown) is not None
-          and grounding_problem("encryption", shown) is not None)
+    # --- citations: checked jobs label every source; answers cite labels and code fetches the exact text
+    shown = {"S1": ("Encryption guide (article ka0X)", "TechPulse's tools use end-to-end encryption."),
+             "S2": ("Return policy (article ka0Y)", "Customers can initiate a return request within 30 days.")}
+    check("citations: real labels pass; none, or an unshown label, is refused and named",
+          citation_problem(("S1", "S2"), shown) is None and "at least one" in citation_problem((), shown)
+          and "'S9'" in citation_problem(("S1", "S9"), shown))
     check("support verdict: reasoning then VERDICT yes / no / garbage",
           support_verdict("It names the tool.\nVERDICT: yes") == (True, "It names the tool.")
           and support_verdict("Different product.\nVERDICT: no")[0] is False and support_verdict("hmm")[0] is False)
     check("abstain and refusal phrases", is_abstain("Our knowledge base does not cover IDPS.")
           and is_refusal("I'm sorry, I can’t share information about other customers.")
           and not is_abstain("Encryption protects data."))
+    sp = support_prompt("Q?", "A.", [shown["S1"], shown["S2"]])
+    check("support prompt: every cited source with its title and exact text, and the subject rule",
+          "Source 2: Return policy" in sp and "within 30 days" in sp and "telecom networks" in sp)
+    check("display quote: the cited sentence sharing most words with the answer",
+          display_quote("The return window is 30 days.", [shown["S1"], shown["S2"]]).startswith("Customers can"))
     kt = service_tools("b2b", "knowledge_qa")
     kprops = kt[-1]["function"]["parameters"]["properties"]
-    check("knowledge job: search, article, respond with reason -> subjects -> kind -> quotes -> answer",
+    check("knowledge job: search, article, respond with reason -> subjects -> kind -> sources -> answer",
           [t["function"]["name"] for t in kt] == ["search_knowledge", "get_article", "respond"]
-          and list(kprops) == ["reason", "question_subject", "source_subject", "kind", "quotes", "answer"]
-          and kprops["kind"]["enum"] == ["answer", "not_covered"])
-    r = read_reply({"kind": "not_covered", "question_subject": "telecom networks", "quotes": ["x"]}, "", False)
-    check("reply: not_covered -> code writes the text naming the subject, no quotes",
+          and list(kprops) == ["reason", "question_subject", "source_subject", "kind", "sources", "answer"]
+          and kprops["kind"]["enum"] == ["answer", "not_covered"] and kprops["sources"]["maxItems"] == 3)
+    r = read_reply({"kind": "not_covered", "question_subject": "telecom networks", "sources": ["S1"]}, "", False)
+    check("reply: not_covered -> code writes the text naming the subject, no sources",
           r == Reply("not_covered", "Our knowledge base does not cover telecom networks.", ()))
     check("reply: not_covered with subject 'general' -> the generic text",
           read_reply({"kind": "not_covered", "question_subject": "general"}, "", False).text == FALLBACK_KNOWLEDGE)
     check("reply: privacy_refusal for a customer -> the fixed refusal; for staff it is not a kind",
           read_reply({"kind": "privacy_refusal"}, "", True) == Reply("privacy_refusal", PRIVACY_REFUSAL, ())
           and read_reply({"kind": "privacy_refusal"}, "Encryption.", False).kind == "answer")
-    r = read_reply({"kind": "answer", "quotes": ["Status: Closed", " ", "Status: New"]}, "One closed, one new.", True)
-    check("reply: answer keeps the model's text and its non-empty quotes", r == Reply(
-        "answer", "One closed, one new.", ("Status: Closed", "Status: New")))
-    check("reply: old form (one quote, no kind) read by its wording",
-          read_reply({"quote": "Q."}, "Encryption.", False) == Reply("answer", "Encryption.", ("Q.",))
-          and read_reply({}, "Our knowledge base does not cover IDPS.", False).kind == "not_covered"
+    r = read_reply({"kind": "answer", "sources": ["[S2]", "s1", "S2", " ", "S3", "S4"]}, "Two cases.", True)
+    check("reply: labels normalised, de-duplicated, empty dropped, at most 3", r == Reply(
+        "answer", "Two cases.", ("S2", "S1", "S3")))
+    check("reply: no kind -> read by its wording",
+          read_reply({}, "Our knowledge base does not cover IDPS.", False).kind == "not_covered"
           and read_reply({}, "I'm sorry, I can't share that.", True).kind == "privacy_refusal")
-    title, body = source_of("TechPulse's tools use end-to-end encryption to protect sensitive design data.", shown)
-    check("source_of: finds the title and passage the quote came from",
-          title == "T" and "end-to-end encryption" in body and "More text" in body, f"{title!r} {body[:60]!r}")
-    check("source_of: an unknown quote -> ('unknown', '')", source_of("nothing like it at all here", shown)
-          == ("unknown", ""))
     ct = service_tools("b2b", "free_question", "003Wt00000Jqt7DIAR")
     cprops = ct[-1]["function"]["parameters"]["properties"]
-    check("customer job: respond carries quotes and the privacy_refusal kind",
-          ct[-1]["function"]["name"] == "respond" and "quotes" in cprops
+    check("customer job: respond carries sources and the privacy_refusal kind",
+          ct[-1]["function"]["name"] == "respond" and "sources" in cprops
           and cprops["kind"]["enum"] == ["answer", "not_covered", "privacy_refusal"])
+    cs = CRMEnv("b2b").open_task()
+    cs.cite = True
+    o = execute(cs, "search_knowledge", {"query": "return policy for purchased items", "limit": 3}, "b2b")
+    check("cite mode: search shows plain-text labelled passages, each registered with its exact text",
+          o.ok and o.text.startswith("[S1] ") and "[S3] " in o.text and "{'Id'" not in o.text
+          and cs.sources["S1"][1] in o.text and "(article ka0" in cs.sources["S1"][0], o.text[:120])
+    aid = re.search(r"\(article (ka0\w+)\)", cs.sources["S1"][0]).group(1)
+    o = execute(cs, "get_article", {"article_id": aid}, "b2b")
+    check("cite mode: an article's summary and paragraphs are labelled sources, numbering continues",
+          o.ok and "[S4] " in o.text and cs.sources["S4"][0].endswith(": summary"), o.text[:120])
+    pc = next(t for t in tasks if t.task_type == "policy_violation_identification" and t.split == "dev")
+    pcid = re.search(r"Case Id to be considered is:\s*(\w+)", pc.required).group(1)
+    plain = execute(CRMEnv("b2b").open_task(), "get_case", {"case_id": pcid}, "b2b").text
+    cited = execute(cs, "get_case", {"case_id": pcid}, "b2b").text
+    check("get_case: plain mode unchanged for policy; cite mode labels the details, emails and chats",
+          plain.startswith(f"CASE {pcid}:") and "[S" not in plain and re.search(r"\[S\d+\] Case " + pcid, cited)
+          and re.sub(r"(?m)^\[S\d+\] [^\n]*\n", "", cited) == plain, cited[:100])
+    cs.close()
 
     # --- route_case: names in, the routing policy applied in code
     def routed(issue, product):

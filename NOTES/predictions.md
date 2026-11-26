@@ -7915,3 +7915,45 @@ the 19 API-judged items of p11-kqdev-q-judge-auto2-s0: 19/19 identical verdicts.
 - KG4-4 HIT: privacy 16/16 the fixed refusal (6/16 in the KG3 run).
 - KG4-5 HIT: "status of my cases" grounded with four quoted status fields. App check otherwise as before
   except button 732, refused twice: one of three quotes trimmed with "..." and reworded.
+
+## P11-KG5: cite by label; switches for code's first search and a general subject rule (2026-11-26)
+Base (arm q-judge): in checked jobs every passage, article part, case and case section is a plain-text block
+labelled [S1], [S2] ... (no Python repr); the answer form cites up to 3 labels (ALCE's cap); code checks each
+label was shown and gives the exact texts to the support check. Switches: q-judge-s (code runs the first search
+with the question itself; the agent may search again), q-judge-sg (also the subject rule stated generally,
+without the list of failed domains). Practice set 3 passes each, run in parallel (timings not comparable);
+privacy 16; app check alone. Graded by the Sonnet subagent (Haiku failed calibration: 66/69 but missed both
+ungrounded items). Baseline: KG4, answerable 47/60, traps 60/60, hallucinated 2/120.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG5-1 | q-judge answerable correct or partial, 3 passes | 52-58 / 60 | 12 of KG4's 13 misses were quote-copy refusals (5 line-break, 7 paraphrase or trim), now impossible; the support check stays |
+| KG5-2 | q-judge traps "not covered" | 58-60 / 60 | the subject and support checks are unchanged |
+| KG5-3 | q-judge hallucinated | 0-3 / 120 | citing is easier than copying, so a few borderline answers may now pass the label check and meet only the support check |
+| KG5-4 | q-judge-s vs q-judge, answerable | +0 to +3 | 9003 and similar short-query misses; the question text ranks the answer passage first |
+| KG5-5 | q-judge-s traps | 58-60 / 60 | the flagprobe showed question-text search makes traps look less relevant, not more |
+| KG5-6 | q-judge-sg vs q-judge-s, traps | -2 to 0 | the practice traps were written around the listed domains, so the general rule can only lose here; the real test is unseen domains |
+| KG5-7 | privacy refusals | 16 / 16 | unchanged path |
+| KG5-8 | app button 732 | answered, cited | it failed on a trimmed quote |
+
+### P11-KG5 actuals (p11-kqdev-{q-judge,q-judge-s,q-judge-sg}-kg5-s0..2, p11-privacy-dev-q-judge-kg5, p11-app-dryrun6/7)
+Grader: Sonnet subagents (judge agent, model sonnet) on the ragjudge rubric, one per arm, in parallel.
+
+| Arm (Qwen3-8B fp8, practice set x 3) | answerable correct | partial | hallucinated | not covered | traps not covered | model calls |
+|---|---|---|---|---|---|---|
+| KG4 baseline (copied quotes) | 45 | 2 | 2 (+1 incorrect) | 10 | 60/60 | 257 |
+| q-judge (cite by label) | 57 | 1 | 2 | 0 | 60/60 | 242 |
+| q-judge-s (+ code's first search) | 59 | 0 | 1 | 0 | 60/60 | 120 |
+| q-judge-sg (+ general subject rule) | 57 | 0 | 1 | 2 | 58/60 (2 ungrounded) | 123 |
+
+- KG5-1 HIT (58/60 correct or partial, above the range top). KG5-2 HIT (60/60). KG5-3 HIT (2/120).
+- KG5-4 HIT (+2: 59 vs 57) and code's first search halves the model calls (one search plus one answer).
+- KG5-5 HIT (60/60). KG5-6 HIT at the bottom (-2: idx 9109 "DevVision IDE ... Android" answered twice).
+  Decision: q-judge now includes auto_search; the general-subject switch is removed. Caveat kept: the subject
+  rule still names the domains the earlier failures came from, and this practice set cannot test unseen ones.
+- KG5-7 HIT: privacy 16/16 the fixed refusal.
+- KG5-8 HIT: 732 answered with a cited source (app check 6).
+- App check 6 found one failure: "status of my cases" refused twice (144 s): four per-case labels and a
+  citation cap of 3 (ALCE's cap is per statement; a four-case summary is four statements). Fix: in checked
+  jobs get_my_cases is ONE labelled source listing every case. App check 7 (final code, q-judge with auto
+  search): 19/19 correct or as designed; "my cases" grounded in 12.5 s; typed return window 12.7 s.

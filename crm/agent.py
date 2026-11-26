@@ -63,6 +63,7 @@ class Arm:
     think_on_judgement: bool = False  # think (budget 2048) on knowledge and customer answers; off elsewhere
     # "required" switches thinking off after step 1 on vLLM 0.27.1 (code-notes: tool_choice); the router uses it
     tool_choice: str = "auto"
+    auto_search: bool = False  # knowledge job: code runs the first search with the question itself (P11-KG5)
 
 
 THINKING = dict(enable_thinking=True, thinking_token_budget=2048, temperature=0.6, top_p=0.95, max_tokens=4096)
@@ -92,7 +93,9 @@ ARMS = {
     "q-b128-first": Arm("q-b128-first", "Qwen/Qwen3-8B", 0.6, 0.95, 20, 0.0, 2048, True, 128, think_first_only=True),
     # Thinking where the model makes a judgement (knowledge, customer answers, the support check); routing and
     # policy, whose rules run in code, stay thinking off (P11 dev comparison: no gain there, twice the time).
-    "q-judge": Arm("q-judge", "Qwen/Qwen3-8B", 0.7, 0.8, 20, 0.0, 2048, False, think_on_judgement=True),
+    # Code runs the first knowledge search with the question itself (P11-KG5: 59/60 vs 57/60 without, half the calls)
+    "q-judge": Arm("q-judge", "Qwen/Qwen3-8B", 0.7, 0.8, 20, 0.0, 2048, False, think_on_judgement=True,
+                   auto_search=True),
 }
 
 
@@ -391,6 +394,14 @@ def _text_tool_calls(content: str) -> list[dict]:
 def _preview(text: str) -> dict:
     """Observation fields for the UI, parsed from the rendered tool reply."""
     ok = not text.startswith("Error:")
+    parts = re.split(r"(?m)^\[(S\d+)\] ", text) if ok else []
+    if len(parts) >= 3:  # labelled sources (a checked job): one row per source
+        rows = []
+        for lab, body in zip(parts[1::2], parts[2::2]):
+            title, _, rest = body.partition("\n")
+            rows.append({"Source": lab, "Title": title.strip(), "Text": rest.strip()[:800]})
+        return {"ok": True, "rows_total": len(rows), "rows_shown": len(rows), "truncated": False,
+                "columns": ["Source", "Title", "Text"], "preview": rows, "error": None}
     body, total = text, None
     m = re.search(r"\[showing (\d+) of (\d+) rows", text)
     if m:
@@ -492,14 +503,17 @@ async def _tool_step(res: CallResult, session, messages: list[dict], trajectory:
             problem, checked = await verify(args, ans, trajectory) if verify else (None, None)
             if problem:  # not grounded: the answer is refused and the agent tries again
                 out["rejected"] = problem
-                reply = (f"Answer NOT accepted: {problem}. Either answer with quotes copied exactly from tool "
-                         "results you were shown, or use kind not_covered.")
+                reply = (f"Answer NOT accepted: {problem}. Either cite the labels of sources that state the "
+                         "answer, or use kind not_covered.")
             else:
-                if checked is not None:  # the text the user sees, and every quote, come from the checked reply
+                quote = None
+                if checked is not None:  # the text the user sees and its sources come from the checked reply
+                    from crm import service
                     ans = checked.text
-                    out.update(quotes=list(checked.quotes))
-                quotes = out.get("quotes") or ([args["quote"]] if args.get("quote") else [])
-                out.update(answer=ans, reason=why, quote=" … ".join(quotes) or None)
+                    cited = [(lab, *session.sources[lab]) for lab in checked.sources]
+                    out["citations"] = [{"label": lab, "title": t, "text": x} for lab, t, x in cited]
+                    quote = service.display_quote(ans, [(t, x) for _, t, x in cited]) if cited else None
+                out.update(answer=ans, reason=why, quote=quote)
                 reply = "Answer submitted."
         elif action_names is not None:
             prior = _seen_before(trajectory[:this_turn], name, args) if isinstance(args, dict) else None
@@ -574,7 +588,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
         tools = TOOLS if protocol == TOOLS_PROTOCOL else None
         messages = (v1_messages if tools else v0_messages)(task, _schema(task.org))
     trajectory = [dict(m) for m in messages]
-    end_reason = end_detail = answer = reason = quote = quotes = None
+    end_reason = end_detail = answer = reason = quote = citations = None
     n_calls = n_format = n_sql_err = n_search = n_trunc = n_plain = 0
     prompt_toks, cached_toks, completion_toks = [], [], []
     session = await asyncio.to_thread(env.open_task)
@@ -582,18 +596,18 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     checks: list[dict] = []
     verify = None
     if protocol == SERVICE_PROTOCOL and (task.task_type == "knowledge_qa" or customer):
+        session.cite = True  # tools label every passage and record; answers cite labels, code fetches the text
+
         async def verify(args: dict, ans: str, traj: list[dict]):
             """(problem or None, the reply): 'not covered' and refusals pass with code's text; answers are checked."""
             reply = service.read_reply(args, ans, customer is not None)
             if reply.kind != "answer":
                 checks.append({"answer": reply.text, "kind": reply.kind, "result": "abstain"})
                 return None, reply
-            obs = [m.get("content") or "" for m in traj if m.get("role") == "tool"]
-            min_chars = 8 if customer else service.MIN_QUOTE_CHARS
-            problem = (service.grounding_problem(None, obs, min_chars) if not reply.quotes else
-                       next((p for q in reply.quotes if (p := service.grounding_problem(q, obs, min_chars))), None))
-            if problem is None:  # every quote is real: do they state THIS answer to THIS question?
-                prompt = service.support_prompt(task.query.strip(), ans, reply.quotes, obs)
+            problem = service.citation_problem(reply.sources, session.sources)
+            if problem is None:  # every label is real: do those sources state THIS answer to THIS question?
+                cited = [session.sources[lab] for lab in reply.sources]
+                prompt = service.support_prompt(task.query.strip(), ans, cited)
                 check_arm = (dataclasses.replace(arm, thinking_token_budget=1024, max_tokens=2048) if arm.enable_thinking
                              else dataclasses.replace(arm, enable_thinking=False, thinking_token_budget=None,
                                                       temperature=0.7, top_p=0.8, max_tokens=300))
@@ -604,12 +618,27 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                     prompt_toks.append(cres.prompt_tokens)
                     completion_toks.append(cres.completion_tokens)
                 if not ok:
-                    problem = f"the quotes do not state this answer to the question ({why or cerr or 'no verdict'})"
-            checks.append({"answer": ans, "quote": " | ".join(reply.quotes), "result": "rejected" if problem
+                    problem = f"the cited sources do not state this answer to the question ({why or cerr or 'no verdict'})"
+            checks.append({"answer": ans, "sources": list(reply.sources), "result": "rejected" if problem
                            else "grounded", "problem": problem})
             return problem, reply
+    first = 0
+    if arm.auto_search and verify is not None and task.task_type == "knowledge_qa" and not customer:
+        # retrieve-then-answer: code searches with the question itself; the agent may still search again
+        args0 = {"query": task.query.strip(), "limit": 0}
+        obs0 = await asyncio.to_thread(executor, session, "search_knowledge", args0, task.org)
+        call = {"id": "auto_search", "type": "function",
+                "function": {"name": "search_knowledge", "arguments": json.dumps(args0)}}
+        new = [{"role": "assistant", "content": None, "tool_calls": [call]},
+               {"role": "tool", "tool_call_id": "auto_search", "content": obs0.text}]
+        messages.extend(dict(m) for m in new)
+        trajectory.extend(dict(m) for m in new)
+        n_search, first = n_search + 1, 1
+        if on_event:
+            on_event({"type": "step_start", "step": 0})
+            _emit_step(on_event, 0, new)
     try:
-        for step in range(max_turns):
+        for step in range(first, max_turns):
             if on_event:
                 on_event({"type": "step_start", "step": step})
             res, mt, reduced, end, err = await model_call(http_client, base_url, step_arm(arm, step), messages, seed,
@@ -646,7 +675,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
                 emit(calls_out, rec)
                 if step_out["answer"] is not None:
                     end_reason, answer, end_detail = "respond", step_out["answer"], step_out["detail"]
-                    reason, quote, quotes = step_out.get("reason"), step_out.get("quote"), step_out.get("quotes")
+                    reason, quote, citations = step_out.get("reason"), step_out.get("quote"), step_out.get("citations")
                     break
                 n_plain += step_out["plain_text"]
                 rejected = sum(c["result"] == "rejected" for c in checks) >= MAX_REJECTIONS
@@ -693,7 +722,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
     if on_event:
         wall = (time.perf_counter() - t0) * 1000
         if answer is not None:
-            on_event({"type": "answer", "text": answer, "reason": reason, "quote": quote,
+            on_event({"type": "answer", "text": answer, "reason": reason, "quote": quote, "citations": citations,
                       "checks": [{"result": c["result"], "problem": c.get("problem")} for c in checks],
                       "sources": _sources(trajectory, f"{reason or ''} {answer or ''}"),
                       "expected": None if task.reward_metric in ("none", "privacy_rejection") else list(task.answer),
@@ -712,7 +741,7 @@ async def run_task(task: Task, arm: Arm, env: CRMEnv, *, base_url: str, run_id: 
             "end_detail": end_detail, "n_calls": n_calls, "n_format_errors": n_format, "n_sql_errors": n_sql_err,
             "n_searches": n_search, "n_truncations": n_trunc, "prompt_tokens_total": _sum(prompt_toks),
             "cached_tokens_total": _sum(cached_toks), "completion_tokens_total": _sum(completion_toks),
-            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "quote": quote, "quotes": quotes,
+            "wall_ms": (time.perf_counter() - t0) * 1000, "started_at": started_at, "quote": quote, "citations": citations,
             "grounding_checks": checks, "trajectory": trajectory}
 
 
@@ -849,6 +878,8 @@ class FakeVLLM:
             if self.delay_s:
                 await asyncio.sleep(self.delay_s)
             item = self.script(body) if callable(self.script) else self.script.pop(0)
+            if callable(item):  # a scripted reply that depends on what the agent was shown
+                item = item(body)
         finally:
             self.inflight -= 1
         if isinstance(item, Exception):
@@ -1056,13 +1087,12 @@ def _selftest() -> int:
         check("12 actions_v1: respond without answer is a format error, not a crash",
               rec["n_format_errors"] == 1 and rec["end_reason"] == "respond", str(rec["n_format_errors"]))
 
-        # 13. knowledge grounding: invented quote refused, real quote + support "yes" accepted, two refusals fall back
+        # 13. knowledge citations: an unshown label refused, a real one + support "yes" accepted, two refusals fall back
         kq = by_idx[717]
 
-        def passage_from(body) -> str:
-            tool = next(m["content"] for m in reversed(body["messages"]) if m["role"] == "tool"
-                        and "'passage':" in m["content"])
-            return re.search(r"'passage': [\"']([^\"'\\\\]{30,80})", tool).group(1)
+        def labels_in(body) -> list[str]:
+            return [lab for m in body["messages"] if m["role"] == "tool"
+                    for lab in re.findall(r"(?m)^\[(S\d+)\] ", m["content"] or "")]
 
         def grounded_script(verdict: str):
             state = {"n": 0}
@@ -1074,34 +1104,38 @@ def _selftest() -> int:
                 if state["n"] == 1:
                     return tc(("search_knowledge", {"query": "AI predict integration challenges", "limit": 3}))
                 if state["n"] == 2:
-                    return tc(("respond", {"reason": "r", "quote": "QuantumPCB Modeler is middleware for HPC apps.",
+                    return tc(("respond", {"reason": "r", "kind": "answer", "sources": ["S99"],
                                            "answer": "QuantumPCB Modeler."}))
                 if state["n"] == 3:
-                    return tc(("respond", {"reason": "r", "quote": passage_from(body), "answer": "Artificial intelligence."}))
-                return tc(("respond", {"reason": "r", "quote": "still invented, nothing like the passages",
-                                       "answer": "A guess."}))
+                    return tc(("respond", {"reason": "r", "kind": "answer", "sources": labels_in(body)[:1],
+                                           "answer": "Artificial intelligence."}))
+                return tc(("respond", {"reason": "r", "kind": "answer", "sources": ["S98"], "answer": "A guess."}))
             return script
 
         rec, calls, fake = await one(kq, grounded_script("yes"), protocol=SERVICE_PROTOCOL)
         res = [c["result"] for c in rec["grounding_checks"]]
-        check("13 grounding: invented quote refused, real quote accepted after a 'yes' support check",
+        check("13 citations: an unshown label refused, a real one accepted after a 'yes' support check",
               res == ["rejected", "grounded"] and rec["answer"] == "Artificial intelligence." and rec["quote"]
-              and "does not appear" in rec["grounding_checks"][0]["problem"]
+              and "'S99'" in rec["grounding_checks"][0]["problem"] and len(rec["citations"]) == 1
+              and rec["citations"][0]["label"] == "S1" and rec["citations"][0]["text"]
               and sum(b.get("tools") is None for b in fake.bodies) == 1, f"{res} answer={rec['answer']!r}")
+        first_tool = next(m["content"] for m in fake.bodies[1]["messages"] if m["role"] == "tool")
+        check("13 citations: search results reach the model as plain-text labelled passages",
+              first_tool.startswith("[S1] ") and "{'Id'" not in first_tool, first_tool[:80])
         rejected_msg = next(m["content"] for m in fake.bodies[2]["messages"] if m["role"] == "tool"
                             and m["content"].startswith("Answer NOT accepted"))
-        check("13 grounding: the agent is told why its answer was refused", "copied exactly" in rejected_msg)
+        check("13 citations: the agent is told why its answer was refused", "cite the labels" in rejected_msg)
         rec, _, _ = await one(kq, grounded_script("no"), protocol=SERVICE_PROTOCOL)
         res = [c["result"] for c in rec["grounding_checks"]]
-        check("13 grounding: support 'no' refuses a real quote; two refusals -> honest fallback",
+        check("13 citations: support 'no' refuses a real label; two refusals -> honest fallback",
               res == ["rejected", "rejected"] and rec["answer"] == service_fallback()
               and rec["end_detail"] == "grounding_fallback", f"{res} answer={rec['answer']!r}")
         rec, _, fake = await one(kq, [tc(("search_knowledge", {"query": "x y", "limit": 3})),
-                                      tc(("respond", {"reason": "r", "quote": "",
-                                                      "answer": "Our knowledge base does not cover that."}))],
+                                      tc(("respond", {"reason": "r", "kind": "not_covered", "sources": [],
+                                                      "question_subject": "general", "answer": ""}))],
                                  protocol=SERVICE_PROTOCOL)
-        check("13 grounding: an honest 'not covered' needs no quote and no support call",
-              rec["answer"].startswith("Our knowledge base does not cover") and
+        check("13 citations: not_covered needs no source and no support call; code writes the text",
+              rec["answer"] == service_fallback() and
               [c["result"] for c in rec["grounding_checks"]] == ["abstain"] and len(fake.bodies) == 2)
 
         # 13b. plain text in a checked job: asked again once, then the honest fallback
@@ -1119,8 +1153,8 @@ def _selftest() -> int:
                 return final(body)
             return script
 
-        rec, _, fake = await one(kq, text_then(lambda b: tc(("respond", {"reason": "r", "quote": passage_from(b),
-                                                                         "answer": "Artificial intelligence."}))),
+        rec, _, fake = await one(kq, text_then(lambda b: tc(("respond", {
+            "reason": "r", "kind": "answer", "sources": labels_in(b)[:1], "answer": "Artificial intelligence."}))),
                                  protocol=SERVICE_PROTOCOL)
         nudged = any(m["role"] == "user" and m["content"] == RESPOND_NUDGE for m in fake.bodies[2]["messages"])
         check("13b plain text in a knowledge job: not taken as the answer; asked again; respond then checked",
@@ -1129,48 +1163,57 @@ def _selftest() -> int:
         rec, _, _ = await one(kq, text_then(lambda b: {"content": "Still plain text."}), protocol=SERVICE_PROTOCOL)
         check("13b plain text twice: the honest fallback, never the unchecked text",
               rec["answer"] == service_fallback() and rec["end_detail"] == "plain_text_fallback", rec["end_detail"])
-        # 13c. kinds and quote lists: code writes refusals and "not covered"; every quote is checked
+        # 13c. kinds, several citations, customer records
         from crm import service as svc
         cu = next(t for t in tasks if t.task_type == "private_customer_information" and t.split == "dev")
         rec, _, fake = await one(cu, [tc(("respond", {"reason": "another customer", "kind": "privacy_refusal",
-                                                      "quotes": [], "answer": "Our knowledge base does not cover it."}))],
+                                                      "sources": [], "answer": "Our knowledge base does not cover it."}))],
                                  protocol=SERVICE_PROTOCOL)
         check("13c customer privacy_refusal: the fixed refusal text, no support call",
               rec["answer"] == svc.PRIVACY_REFUSAL and len(fake.bodies) == 1
               and [c["result"] for c in rec["grounding_checks"]] == ["abstain"], rec["answer"])
         rec, _, fake = await one(kq, [tc(("search_knowledge", {"query": "x y", "limit": 3})),
-                                      tc(("respond", {"reason": "r", "kind": "answer", "quotes": [],
+                                      tc(("respond", {"reason": "r", "kind": "answer", "sources": [],
                                                       "answer": "Our knowledge base does not cover that."}))],
                                  protocol=SERVICE_PROTOCOL)
-        check("13c kind answer with a 'not covered' text and no quotes: read as not_covered, no rejection",
+        check("13c kind answer with a 'not covered' text and no sources: read as not_covered, no rejection",
               rec["answer"].startswith("Our knowledge base does not cover") and len(fake.bodies) == 2
               and [c["result"] for c in rec["grounding_checks"]] == ["abstain"], rec["answer"])
 
-        def two_quotes(second):
+        def cite_two(script_labels):
             def script(body):
                 if body.get("tools") is None:
                     return "Both stated.\nVERDICT: yes"
                 if not any(m["role"] == "tool" for m in body["messages"]):
                     return tc(("search_knowledge", {"query": "AI predict integration challenges", "limit": 3}))
                 return tc(("respond", {"reason": "r", "kind": "answer", "answer": "Artificial intelligence.",
-                                       "quotes": [passage_from(body), second(body)]}))
+                                       "sources": script_labels(body)}))
             return script
 
-        rec, _, fake = await one(kq, two_quotes(lambda b: passage_from(b)[:25]), protocol=SERVICE_PROTOCOL)
+        rec, _, fake = await one(kq, cite_two(lambda b: labels_in(b)[:2]), protocol=SERVICE_PROTOCOL)
         sup = next(b for b in fake.bodies if b.get("tools") is None)["messages"][0]["content"]
-        check("13c two real quotes: grounded, both shown to the support check, both recorded",
-              [c["result"] for c in rec["grounding_checks"]] == ["grounded"] and "Source sentence 2" in sup
-              and len(rec["quotes"]) == 2, str(rec["grounding_checks"]))
-        rec, _, _ = await one(kq, two_quotes(lambda b: "an invented sentence that is in no passage"),
-                              protocol=SERVICE_PROTOCOL)
-        check("13c one invented quote among real ones: rejected, naming that quote",
-              rec["grounding_checks"][0]["result"] == "rejected"
-              and "an invented sentence" in rec["grounding_checks"][0]["problem"], str(rec["grounding_checks"][:1]))
-        rt0 = next(t for t in tasks if t.task_type == "case_routing" and t.split == "dev")
-        rec, _, _ = await one(rt0, [{"content": "005Wt000003NIYnIAO"}], protocol=SERVICE_PROTOCOL)
-        check("13b plain text in routing (no answer check): taken as the answer, as before",
-              rec["answer"] == "005Wt000003NIYnIAO" and rec["end_detail"] == "plain_text", rec["end_detail"])
-
+        check("13c two real labels: grounded, both sources' text shown to the support check, both recorded",
+              [c["result"] for c in rec["grounding_checks"]] == ["grounded"] and "Source 2:" in sup
+              and len(rec["citations"]) == 2 and rec["citations"][1]["text"][:30] in sup, str(rec["grounding_checks"]))
+        mine = dataclasses.replace(cu, required="The customer you are interacting with is logged in as Id: "
+                                   "003Wt00000Jqt7DIAR.")  # the demo customer, who has four cases
+        rec, _, fake = await one(mine, [tc(("get_my_cases", {})), lambda b: tc(("respond", {
+            "reason": "their cases", "kind": "answer", "answer": "Here are your cases.",
+            "sources": labels_in(b)[:3]})), "They list them.\nVERDICT: yes"], protocol=SERVICE_PROTOCOL)
+        obs = next(m["content"] for m in fake.bodies[1]["messages"] if m["role"] == "tool")
+        check("13c customer: get_my_cases is one labelled source listing every case, so a summary cites one label",
+              obs.startswith("[S1] Your cases (4)") and obs.count("Status: ") == 4 and "[S2]" not in obs
+              and rec["citations"] and rec["citations"][0]["title"] == "Your cases (4)", obs[:80])
+        # 13d. q-judge: code's first search with the question itself
+        rec, calls, fake = await one(kq, [tc(("respond", {"reason": "r", "kind": "not_covered", "sources": [],
+                                                          "question_subject": "general", "answer": ""}))],
+                                     arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)
+        msgs = fake.bodies[0]["messages"]
+        auto = next((m for m in msgs if m["role"] == "assistant" and m.get("tool_calls")), None)
+        check("13d auto_search: the first model call already holds a search with the question itself, labelled",
+              auto is not None and json.loads(auto["tool_calls"][0]["function"]["arguments"])["query"]
+              == kq.query.strip() and msgs[-1]["role"] == "tool" and msgs[-1]["content"].startswith("[S1] ")
+              and rec["n_searches"] == 1 and calls[0]["step"] == 1, str(calls[0].get("step")))
         # 14. q-judge: thinking on for knowledge (agent and support check), off for routing
         rec, _, fake = await one(kq, grounded_script("yes"), arm=ARMS["q-judge"], protocol=SERVICE_PROTOCOL)
         tool_calls = [b for b in fake.bodies if b.get("tools")]

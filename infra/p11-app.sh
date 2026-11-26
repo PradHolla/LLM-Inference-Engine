@@ -4,6 +4,7 @@
 #   /opt/llm/infra/p11-app.sh launch qwen|xlam    # also what the app's model picker runs
 #   /opt/llm/infra/p11-app.sh app                 # (re)start only the app, live mode, on 127.0.0.1:8090
 #   /opt/llm/infra/p11-app.sh rerank              # (re)start only the GPU reranker on 127.0.0.1:8010
+#   /opt/llm/infra/p11-app.sh gateway             # (re)start only the chat gateway on 127.0.0.1:8080
 set -uo pipefail
 cd /opt/llm || exit 1
 PY=/opt/llm/.venv/bin/python
@@ -29,6 +30,26 @@ start_rerank() {
     done
     if [ "$ok" = 1 ]; then echo "P11_RERANK_UP $(curl -s "$RERANK_URL/health")"
     else echo "P11_WARN: GPU reranker not up; knowledge search uses the CPU reranker"; fi
+    return 0
+}
+
+start_gateway() {
+    # Chat gateway for the app's chat mode; if it fails, the CRM demo still comes up, so this only warns.
+    systemctl stop gateway 2>/dev/null
+    for i in $(seq 1 20); do ss -ltn | grep -q ':8080 ' || break; sleep 1; done
+    mkdir -p /opt/llm/logs
+    systemd-run --unit=gateway --collect --working-directory=/opt/llm \
+        --setenv=HF_HOME=/opt/llm/hf-cache --setenv=HF_HUB_OFFLINE=1 \
+        --setenv=GW_UPSTREAM=http://localhost:8000 --setenv=GW_METRICS=http://localhost:8000 \
+        --setenv=GW_TRACE=/opt/llm/logs/p11-gw-trace.jsonl \
+        "$PY" -m uvicorn gateway.app:app --host 127.0.0.1 --port 8080 >/dev/null 2>&1
+    ok=0
+    for i in $(seq 1 40); do
+        if curl -sf -m 3 http://localhost:8080/health >/dev/null; then ok=1; break; fi
+        sleep 1
+    done
+    if [ "$ok" = 1 ]; then echo "P11_GATEWAY_UP"
+    else echo "P11_WARN: gateway not up; chat mode will not work"; fi
     return 0
 }
 
@@ -77,12 +98,14 @@ case "${1:-}" in
   launch) launch "${2:-}" || { echo "P11_LAUNCH_FAIL ${2:-}"; exit 1; } ;;
   app) start_app || exit 1 ;;
   rerank) start_rerank ;;
+  gateway) start_gateway ;;
   up)
     served=$(curl -s -m 3 http://localhost:8000/v1/models | grep -o "$QWEN" | head -1)
     if [ "$served" != "$QWEN" ]; then launch qwen || { echo "P11_LAUNCH_FAIL qwen"; exit 1; }; fi
+    start_gateway
     start_app || exit 1
     ;;
-  *) echo "usage: p11-app.sh up | app | rerank | launch qwen|xlam"; exit 2 ;;
+  *) echo "usage: p11-app.sh up | app | rerank | gateway | launch qwen|xlam"; exit 2 ;;
 esac
 echo "P11_APP_DONE ${1}"
 exit 0

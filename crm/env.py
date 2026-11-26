@@ -80,9 +80,17 @@ class TaskSession:
         self._internal = False
         self._denied: str | None = None
         self.customer_id: str | None = None  # set for a logged-in customer: service actions scope to them
+        self.cite = False  # checked jobs: tools label each passage or record [S1], [S2] ... for citing
+        self.sources: dict[str, tuple[str, str]] = {}  # label -> (title, exact text), for this run only
         conn.execute("PRAGMA query_only = ON")
         conn.set_progress_handler(self._progress, 4000)
         conn.set_authorizer(self._authorize)
+
+    def label(self, title: str, text: str) -> str:
+        """Register one citable source and return its label (S1, S2, ... in the order shown)."""
+        lab = f"S{len(self.sources) + 1}"
+        self.sources[lab] = (title, text)
+        return lab
 
     def _progress(self) -> int:
         if self._deadline is not None and time.monotonic() > self._deadline:
