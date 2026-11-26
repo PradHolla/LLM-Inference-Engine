@@ -51,7 +51,7 @@ Each phase ends with something runnable and a measurement. The full write-up of 
 | 8 | **Inside one decode step** with Nsight Systems and the PyTorch profiler | The 6 ms gap to vLLM is not the math (identical cuBLAS kernels) but 2,079 unfused launches and the GPU idling between them. Replaying the step as a CUDA graph closed 3.5 ms of it | [report](docs/REPORT.md#phase-8) |
 | 9 | **Checking the book's checks**: perplexity as a quality test, and the cost of forcing JSON | Perplexity moved 0.2% on the exact arithmetic where int4 breaks 37% of answers: it never lets an error feed the next token. The planner's JSON schema costs 0.05% per token | [report](docs/REPORT.md#phase-9) |
 | 10 | **L4 vs A10G**: half the bandwidth, native fp8, the A10G's exact traffic replayed | 1.75x slower for one user in every format, and native fp8 is no help there. Under load it is the difference between collapsing (25 s waits) and matching the A10G for 19% less per hour | [report](docs/REPORT.md#phase-10) |
-| 11 | **A CRM service agent from the 8B model** on Salesforce's CRMArena-Pro: case routing, policy checks, knowledge answers | On 240 held-out tasks: routing 94% and policy checks 100% once the model reads and code applies the rules; knowledge hallucination 24% to 4% with checked, quoted sources. 89 of the benchmark's 100 B2B knowledge answers are not in its own articles | [report](docs/REPORT.md#phase-11) |
+| 11 | **A CRM service agent from the 8B model** on Salesforce's CRMArena-Pro: case routing, policy checks, knowledge answers | On 240 held-out tasks: routing 94% and policy checks 100% once the model reads and code applies the rules; knowledge hallucination 24% to 5% with cited, checked sources. 89 of the benchmark's 100 B2B knowledge answers are not in its own articles | [report](docs/REPORT.md#phase-11) |
 
 ## A few results worth a picture
 
@@ -104,13 +104,14 @@ fp8 on one A10G:
 |---|---|---|
 | Case routing | 94%, the same answer on every pass | 22% |
 | Policy violation check | 100%, all 60 violations caught | 75% |
-| Knowledge answers | 4% hallucinated (24% before), every answer quotes a checked source | - |
+| Knowledge answers | 5% hallucinated (24% at the start); answerable questions answered correctly or in part 14/27 (9/27 before citations); every answer cites a source that code checks | - |
 | Customer privacy | 16/16 requests for another customer's data refused, none of it reached the model | - |
 
-The design rule that got there: **the model reads, code decides.** The model picks the issue, names the
-fixes a support agent offered, or quotes the sentence it answers from; tools apply the routing policy,
-the policy records and the grounding checks. Thinking is on only where the model makes a judgement.
-The live app streams every step, the checked source and the answer.
+The design rule that got there: **the model reads and picks from menus, code decides.** The model picks
+the job for a typed question, the issue, the fixes a support agent offered, or the labels of the sources it
+answers from; code applies the routing policy, the policy records, fetches the cited text and checks it.
+Thinking is on only where the model makes a judgement. The live app streams every step, the cited source
+and the answer.
 ([details](docs/REPORT.md#phase-11))
 
 ## What this project demonstrates

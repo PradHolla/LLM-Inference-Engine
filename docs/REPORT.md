@@ -739,7 +739,7 @@ held-out test set (240) before anything was built; every design choice was made 
 |---|---|---|---|
 | Case routing | **94%** (225/240), identical answers on every pass | 22% (always the most common agent) | 3.2 s |
 | Policy violation check | **100%** (240/240), all 60 violations caught | 75% (always "no violation") | 5.4 s |
-| Knowledge answers | **4% hallucinated** (was 24%); see below | - | 16 s |
+| Knowledge answers | **5% hallucinated** (was 24%); answerable questions 14/27 correct or partial; see below | - | 11 s |
 | Privacy (customer mode, 16 practice requests for another customer's data) | **16/16 refused**, other customer's data reached the model 0 times | - | 4.5 s |
 
 ### The pattern behind every fix: the model reads, code decides
@@ -798,25 +798,40 @@ no such traps (its unanswerable questions named fake products, which the agent a
 new practice set was written from the articles, without the benchmark's questions: 20 answerable and
 20 traps. The fixes, tuned on it:
 
-- every knowledge answer must quote a sentence from a passage the agent was shown (checked by code),
-  and a focused check by the same model confirms the sentence states the answer, on the same subject,
-  with the source's title and passage in view; refused twice, the agent says "not covered";
+- every knowledge answer must be grounded in what the agent was shown, checked by code, and a focused
+  check by the same model confirms the source states the answer, on the same subject, with the
+  source's title and text in view; refused twice, the agent says "not covered";
 - the answer form names the question's subject and the source's subject before the answer;
-- search results below a calibrated relevance score are flagged as possibly not covering the question;
 - thinking on for these answers.
 
-| Knowledge, held-out test, 80 questions x 3 passes, same grader (Claude Sonnet 5.5) | Before | After |
-|---|---|---|
-| Hallucinated answers (off subject or ungrounded) | 58/240 = **24%** | 10/240 = **4%** |
-| "Not covered" | 138 | 207 |
-| Answerable (27): correct / partial / wrong / hallucinated / not covered | 1 / 14 / 5 / 7 / 0 | 5 / 4 / 4 / 2 / 12 |
-| CRAG-style score per answer | -0.18 | -0.01 |
-| p50 time | 4.3 s | 16 s |
+That version made the agent copy its source sentence word for word, and the live-app dry run showed
+the cost: an 8B model paraphrases what it "copies", so correct answers were refused (12 of 17 refusals on
+the practice set; 5 more were a line-break escaping bug in the check itself). **The final design cites
+instead of copying**, the way Anthropic's citations API and the ALCE benchmark do it: search results,
+article paragraphs and case records reach the model as plain-text blocks labelled `[S1]`, `[S2]`; the
+answer lists up to three labels; code checks each was shown and hands the exact text to the support
+check. Two more changes held up in a three-way comparison on the practice set: code runs the first
+search with the question itself (retrieve-then-answer, which also halves the model calls), and the
+model no longer sees reranker scores (a low score on the right passage made it decline answers it had
+found; cross-encoder scores order passages but are not calibrated across queries). The model picks
+the reply's kind (answer, not covered, privacy refusal) and code writes the text for the last two.
 
-On the new practice set: traps 20/20 "not covered", answerable 19/20 correct, none hallucinated. The
-cost is caution: of the 12 answerable answers now declined, four of the five questions were already
-labelled borderline. The fix was informed by failures seen on the test set, so the "after" column is
-a post-fix measurement, not a blind one; all tuning used the synthetic practice set.
+| Knowledge, held-out test, 80 questions x 3 passes | Start | Checked quotes | Final: cited sources |
+|---|---|---|---|
+| Hallucinated answers (off subject or ungrounded) | 58/240 = **24%** | 10/240 = **4%** | 11/240 = **5%** |
+| "Not covered" | 138 | 207 | 185 |
+| Answerable (27): correct / partial / wrong / hallucinated / not covered | 1 / 14 / 5 / 7 / 0 | 5 / 4 / 4 / 2 / 12 | 7 / 7 / 3 / 4 / 6 |
+| CRAG-style score per answer | -0.18 | -0.01 | **+0.04** |
+| p50 time | 4.3 s | 16 s | **11 s** |
+
+Graded the same way throughout (Claude Sonnet 5.5 on one rubric; the final column by Sonnet subagents,
+which matched the API judge on 19/19 calibration items). On the practice set the final design scores
+59/60 answerable correct and 60/60 traps "not covered" (3 passes). What citing bought on the test set
+is answers: twice as many correct, half as many declined, a third faster. What it did not buy is fewer
+hallucinations: the remaining ones are mostly questions about another domain (IoT, "industrial systems")
+answered from an EDA article, so the subject check is now the weakest part. The checked-quote fix was
+informed by failures seen on the test set, so the last two columns are post-fix measurements, not
+blind ones; all tuning used the synthetic practice set.
 
 ### Search, and making room for a second model on one GPU
 

@@ -7957,3 +7957,28 @@ Grader: Sonnet subagents (judge agent, model sonnet) on the ragjudge rubric, one
   citation cap of 3 (ALCE's cap is per statement; a four-case summary is four statements). Fix: in checked
   jobs get_my_cases is ONE labelled source listing every case. App check 7 (final code, q-judge with auto
   search): 19/19 correct or as designed; "my cases" grounded in 12.5 s; typed return window 12.7 s.
+
+## P11-KG6: held-out knowledge test on the final design (2026-11-26)
+Run p11-ktest-q-judge-kg5-s0..2 (80 test knowledge questions x 3, q-judge = cite by label + code's first
+search), graded by Sonnet subagents on the ragjudge rubric with crm/kq_labels_b2b.json references, against the
+P11-KG2 baseline on the same 240 (hallucinated 10/240 = 4%; answerable 27: 5 correct, 4 partial, 4 incorrect,
+2 hallucinated, 12 not covered; CRAG-style -0.008; p50 16.2 s). Written before reading any result.
+
+| # | Quantity | Prediction | Derivation |
+|---|---|---|---|
+| KG6-1 | hallucinated (off subject or ungrounded) | 3-10 / 240 | the subject and support checks are unchanged; the remaining ones were vague questions ("the design suites") that citing does not touch |
+| KG6-2 | answerable 27: not covered | 3-8 | 1 of the 12 was a quote refusal (753); the rest the agent declined on borderline items, which the first search with the question text may partly recover |
+| KG6-3 | answerable 27: correct + partial | 11-18 | 9 before, plus what KG6-2 recovers |
+| KG6-4 | CRAG-style score | -0.01 to +0.06 | more correct answers on 27 of 240; hallucinations about flat |
+| KG6-5 | p50 time per question | 10-16 s | one model call fewer per question on the practice set (half the calls), but 3 passes in parallel at concurrency 4 |
+
+### P11-KG6 actuals (p11-ktest-q-judge-kg5-s0..2; s2 had 2 duplicate records from an overlapping resume, first kept)
+Graded by three Sonnet subagents (judge agent, model sonnet), ragjudge rubric, kq_labels_b2b.json references.
+- KG6-1 MISS by one: 11/240 = 5% hallucinated (predicted 3-10; was 10). By kind: 8 ungrounded, 3 off subject;
+  answerable 4 hallucinated (was 2). The remaining failures are mostly another domain answered from an EDA
+  article (712 and 746 IoT, 749 "safety standards", 719 support delay answered from a billing article).
+- KG6-2 HIT: answerable not covered 6/27 (was 12).
+- KG6-3 HIT: answerable correct + partial 14/27 (7 + 7; was 5 + 4).
+- KG6-4 HIT: CRAG-style +0.042 (was -0.008).
+- KG6-5 HIT: p50 11.0 s (was 16.2 s); p95 43.6 s.
+Reading: citing recovered answers, not safety. The subject check is now the limiting part.
