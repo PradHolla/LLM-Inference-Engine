@@ -73,9 +73,10 @@ try {
   check("a long gap (hidden tab) catches up in one frame", nextReveal(target, 3, 5000, false) === target.length);
   check("nothing pending returns the full length", nextReveal("abc", 3, 16.7, false) === 3);
 
-  // CRM agent: timeline rendering, SSE reader and argument formatting.
+  // CRM agent: the answer-first run view, the SSE reader and argument formatting.
   const crm = await server.ssrLoadModule("/src/lib/crm.ts");
   const { RunTimeline } = await server.ssrLoadModule("/src/components/crm/RunTimeline.tsx");
+  const { StepCard } = await server.ssrLoadModule("/src/components/crm/StepCard.tsx");
   const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
   const events = JSON.parse(readFileSync(new URL("./crm-fixture-handle_time_881.json", import.meta.url), "utf8"));
   const timeline = (list, props = {}) => renderToStaticMarkup(createElement(TooltipProvider, null,
@@ -85,77 +86,83 @@ try {
 
   let crmHtml = timeline(events);
   let crmText = text(crmHtml);
-  check("timeline shows the action verbs", ["Summarize records", "Respond"].every((verb) => crmText.includes(verb)), crmText);
-  check("filters render as field op value chips", crmText.includes("Field__c = Owner Assignment")
-    && crmText.includes("CreatedDate >= 2022-09-01") && crmText.includes("ClosedDate is not null"), crmText);
-  check("raw JSON is not shown until toggled", !crmHtml.includes("&quot;filters&quot;") && crmHtml.includes(">Raw<"));
-  check("timeline shows the Matches the expected answer badge", crmText.includes("Matches the expected answer"), crmText);
-  check("timeline shows the row counts", crmText.includes("118 rows") && crmText.includes("showing 2 of 118"), crmText);
-  check("timeline shows the estimated cost with 4 decimals", crmText.includes("$0.0017") || crmText.includes("$0.0016"), crmText);
-  check("timeline shows steps, time and tokens", crmText.includes("4.9 s") && crmText.includes("15,210 / 13,840 / 212"), crmText);
-  check("timeline shows context chips", crmText.includes("Today 2022-01-18") && crmText.includes("Staff mode")
-    && crmText.includes("Handle Time Policy"), crmText);
-  check("Salesforce Ids use the monospace class", (crmHtml.match(/class="crm-id"/g) ?? []).length >= 4);
-  check("one step card per step", (crmHtml.match(/class="crm-step"/g) ?? []).length === 3);
-  check("a finished run shows no working indicator", !crmText.includes("Working"));
+  check("a finished run shows the answer and its badge", crmText.includes("005Wt000003NJ6gIAG")
+    && crmText.includes("Matches the expected answer"), crmText);
+  check("the steps are folded into one 'How I got this' line with the step count and time",
+    crmText.includes("How I got this · 2 steps · 4.9 s") && !crmText.includes("Summarize records"), crmText);
+  check("a finished run shows no live status", !crmText.includes("Working on it") && !crmHtml.includes("crm-activity"));
+  check("the run header carries no developer chips (model, today, policy, ids)",
+    !crmText.includes("Qwen") && !crmText.includes("Today") && !crmText.includes("Handle Time Policy"), crmText);
 
   const answerAt = events.findIndex((event) => event.type === "answer");
   const withAnswer = (patch) => events.map((event, index) => index === answerAt ? { ...event, ...patch } : event);
+  crmText = text(timeline(withAnswer({ display: { text: "Emiko Tanaka", detail: "Support agent 005Wt000003NIYnIAO" } })));
+  check("a resolved answer shows the name first and the Id as detail", crmText.includes("Emiko Tanaka")
+    && crmText.includes("Support agent 005Wt000003NIYnIAO") && !crmText.includes("005Wt000003NJ6gIAG"), crmText);
+  crmText = text(timeline(withAnswer({ correct: null, expected: null, quote: "Customers can return within 30 days.",
+    citations: [{ label: "S1", title: "Return Policy (article ka0Wt000000EqQ9IAK)", text: "..." },
+                { label: "S2", title: "Exchanges", text: "..." }] })));
+  check("a cited answer shows the checked source title (without the article Id) and the sentence",
+    crmText.includes("Checked against 2 sources") && crmText.includes("Return Policy and 1 more")
+    && !crmText.includes("(article ka0") && crmText.includes("Customers can return within 30 days."), crmText);
+  check("an ungraded answer shows no badge", !crmText.includes("Matches") && !crmText.includes("Expected"), crmText);
   crmText = text(timeline(withAnswer({ correct: false, expected: ["005AAA"] })));
-  check("a wrong answer shows what was expected", crmText.includes("Does not match (expected: 005AAA)")
+  check("a wrong answer shows what was expected", crmText.includes("Expected 005AAA")
     && !crmText.includes("Matches the expected answer"), crmText);
-  crmText = text(timeline(withAnswer({ correct: null, expected: null })));
-  check("an ungraded answer shows no badge", !crmText.includes("Matches") && !crmText.includes("Does not match")
-    && crmText.includes("005Wt000003NJ6gIAG"), crmText);
 
   const partial = events.slice(0, 3);
   crmText = text(timeline(partial, { running: true }));
-  check("a running run shows the working indicator", crmText.includes("Working, step 1"), crmText);
-  check("a pending action shows it is waiting", crmText.includes("Waiting for the result"), crmText);
+  check("a running run lists what it did and what it is doing now", crmText.includes("Summarize records")
+    && crmText.includes("Working on it") && /\d+ s/.test(crmText) && !crmText.includes("How I got this"), crmText);
   crmText = text(timeline([], { running: true, question: "Who owns case 5?", mode: "customer" }));
-  check("before run_start the question and mode come from props",
-    crmText.includes("Who owns case 5?") && crmText.includes("Customer mode"), crmText);
+  check("before run_start the question and the customer chip come from props", crmText.includes("Who owns case 5?")
+    && crmText.includes("Customer") && crmText.includes("Reading the question"), crmText);
+  crmText = text(timeline(events.map((event) => event.type === "run_start"
+    ? { ...event, question: "Who should handle this new case?", detail: "Install fails. The setup stops at 40%." } : event)));
+  check("an example shows its plain question and the case text under it",
+    crmText.includes("Who should handle this new case?") && crmText.includes("Install fails."), crmText);
 
   const failing = [events[0], events[1], { ...events[2] }, { ...events[3], ok: false, rows_total: 0, rows_shown: 0,
     columns: [], preview: [], error: "unknown field 'Foo'" }, { type: "error", message: "gateway timeout" }];
   crmText = text(timeline(failing));
-  check("a failed observation and an error event render", crmText.includes("Failed")
-    && crmText.includes("unknown field 'Foo'") && crmText.includes("gateway timeout")
-    && crmText.includes("The run did not complete"), crmText);
+  check("an error event renders, with the steps folded", crmText.includes("gateway timeout")
+    && crmText.includes("The run did not complete") && crmText.includes("How I got this"), crmText);
   crmText = text(timeline(partial, { stopped: true }));
   check("a stopped run says so", crmText.includes("Stopped before the run finished"), crmText);
-  check("a stopped run does not spin on the unfinished action", crmText.includes("No result received")
-    && !crmText.includes("Waiting for the result"), crmText);
 
-  const thought = [events[0], events[1], { type: "thinking", step: 0, text: "Count owner changes first" }, ...events.slice(2)];
-  crmHtml = timeline(thought);
-  check("thinking is collapsed under its step", text(crmHtml).includes("Thinking") && !crmHtml.includes("Count owner changes first"));
-
+  const stepHtml = (step) => renderToStaticMarkup(createElement(TooltipProvider, null,
+    createElement(StepCard, { step, live: false, last: true })));
+  const view = crm.buildRun([events[0], events[1], events[2], events[3]]).steps[0];
+  crmHtml = stepHtml(view);
+  crmText = text(crmHtml);
+  check("a step card shows its action, readable filters and row counts", crmText.includes("Summarize records")
+    && crmText.includes("Field__c = Owner Assignment") && crmText.includes("118 rows"), crmText);
+  check("raw JSON is not shown until toggled", !crmHtml.includes("&quot;filters&quot;") && crmHtml.includes(">Raw<"));
   const wide = { ...events[3], columns: ["Id", "A", "B", "C", "D", "E"], rows_total: 1, rows_shown: 1,
     preview: [{ Id: "500Wt00000DDDfwIAH", A: 1, B: null, C: "x", D: "y", E: "z" }] };
-  crmHtml = timeline([events[0], events[1], events[2], wide]);
+  crmHtml = stepHtml(crm.buildRun([events[0], events[1], events[2], wide]).steps[0]);
   check("a single wide row renders as a field list", crmHtml.includes('class="crm-record"')
     && !crmHtml.includes('class="crm-table"') && text(crmHtml).includes("1 row"), crmHtml);
+  const withRespond = crm.buildRun([events[0], { type: "step_start", step: 0 },
+    { type: "action", step: 0, call_id: "r", name: "respond", args: { answer: "x" } }]).steps[0];
+  check("the final respond call gets no card of its own", !text(stepHtml(withRespond)).includes("Respond"));
 
-  // Agent picker, example grouping and the run header's agent chip.
-  const { AgentPicker } = await server.ssrLoadModule("/src/components/crm/AgentPicker.tsx");
+  const call = (name, args, rows) => ({ action: { type: "action", step: 0, call_id: "c", name, args },
+    observation: rows === undefined ? null : { rows_total: rows } });
+  check("activity lines read as plain sentences",
+    crm.activityLine(call("search_knowledge", { query: "q" }, 5)) === "Searched the knowledge base: 5 passages"
+    && crm.activityLine(call("check_offers", { offered: ["A"] })) === "Checked 1 offered fix against policy"
+    && crm.activityLine(call("choose_job", { job: "Route a case" })) === "Picked the job: Route a case"
+    && crm.activityLine(call("get_case", { case_id: "500X" })) === "Opened case 500X");
+  check("live status follows the last action", crm.liveStatus({ steps: [] }) === "Reading the question"
+    && crm.liveStatus({ steps: [{ calls: [call("search_knowledge", {})] }] }) === "Reading the sources and writing the answer"
+    && crm.liveStatus({ steps: [{ calls: [call("respond", {})] }] }) === "Checking the answer against its source");
+  check("source titles drop the article Id", crm.sourceTitle("Return Policy (article ka0Wt000000EqQ9IAK)") === "Return Policy"
+    && crm.sourceTitle("Your cases (4)") === "Your cases (4)");
+
   const { ExampleCards } = await server.ssrLoadModule("/src/components/crm/ExampleCards.tsx");
-  const agents = [
-    { id: "service", label: "Service desk agent", description: "Routes new cases", protocol: "service_v1", jobs: [] },
-    { id: "general", label: "General CRM agent", description: "Open questions", protocol: "actions_v1", jobs: [] },
-  ];
-  const pickerHtml = (value, disabled = false) => renderToStaticMarkup(createElement(AgentPicker,
-    { agents, value, disabled, onChange: () => {} }));
-  let pick = pickerHtml("service");
-  check("the agent picker renders both labels with the chosen one checked", pick.includes("Service desk agent")
-    && pick.includes("General CRM agent") && /aria-checked="true"[^>]*>Service desk agent/.test(pick)
-    && /aria-checked="false"[^>]*>General CRM agent/.test(pick), pick);
-  check("the agent picker shows the description as a tooltip", pick.includes('title="Routes new cases"'), pick);
-  check("the agent picker is disabled while a run is active", !pickerHtml("general").includes("disabled")
-    && (pickerHtml("general", true).match(/disabled=""/g) ?? []).length === 2);
-
   const job = (id, label, n) => Array.from({ length: n }, (_, i) => ({ id: `${id}_${i}`, title: `${label} ${i}`,
-    question: "q", task_type: id, skill: "workflow", today: null, context_summary: "", mode: "staff",
+    question: `question ${i}`, detail: `detail ${i}`, task_type: id, skill: "workflow", today: null, mode: "staff",
     has_expected: false, job: label }));
   const jobs = ["Route a new case", "Check a case against policy", "Answer from the knowledge base"];
   const grouped = [...job("case_routing", jobs[0], 3), ...job("policy_violation_identification", jobs[1], 3),
@@ -167,17 +174,12 @@ try {
   check("service examples group under the three job headings", headings.join("|") === jobs.join("|"), headings.join("|"));
   check("each job group holds its three example cards", (cardsHtml.match(/class="crm-example"/g) ?? []).length === 9
     && cardsHtml.split("<section").slice(1).every((part) => (part.match(/class="crm-example"/g) ?? []).length === 3));
+  check("cards show one line: the case for routing, the question for policy, none for knowledge",
+    text(cardsHtml).includes("Route a new case 0 detail 0") && text(cardsHtml).includes("Check a case against policy 0 question 0")
+    && !text(cardsHtml).includes("Answer from the knowledge base 0 question"), text(cardsHtml));
   cardsHtml = cards(grouped.map(({ job: _job, ...rest }, i) => ({ ...rest, skill: i < 5 ? "database" : "policy" })));
   check("examples without a job still group by skill",
     [...cardsHtml.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]).join("|") === "Database|Policy", cardsHtml);
-
-  crmText = text(timeline(events.map((event) => event.type === "run_start" ? { ...event, agent: "service" } : event)));
-  check("the run header shows the agent chip from run_start", crmText.includes("Service desk agent"), crmText);
-  crmText = text(timeline([], { running: true, question: "Q?", mode: "staff", agent: "general" }));
-  check("before run_start the agent chip comes from props", crmText.includes("General CRM agent"), crmText);
-  check("a run with no agent shows no agent chip", !/Service desk agent|General CRM agent/.test(text(timeline(events))));
-  check("the remembered agent defaults to the service desk agent without storage",
-    crm.loadAgent() === "service" && crm.AGENT_LABELS.general === "General CRM agent");
 
   const steps = crm.buildRun([events[0], { type: "step_start", step: 0 },
     { type: "action", step: 0, call_id: "a", name: "get_record", args: {} },

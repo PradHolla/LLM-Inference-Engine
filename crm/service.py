@@ -668,10 +668,14 @@ def support_prompt(question: str, answer: str, cited: list[tuple[str, str]]) -> 
 
 
 def display_quote(answer: str, cited: list[tuple[str, str]]) -> str:
-    """For the answer card: the sentence of the cited sources sharing the most words with the answer."""
+    """For the answer card: the sentence of the cited articles sharing the most words with the answer.
+
+    Case records are not quoted: a field line like "Product: X" reads as noise; their title is enough."""
     words = set(re.findall(r"[a-z0-9]+", answer.lower()))
     best, score = "", -1
-    for _, text in cited:
+    for title, text in cited:
+        if not ("(article " in title or re.search(r": (summary|part \d+)$", title)):
+            continue
         for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
             sent = sent.strip(" *-#")
             n = len(words & set(re.findall(r"[a-z0-9]+", sent.lower())))
@@ -875,6 +879,8 @@ def _selftest() -> int:
           "Source 2: Return policy" in sp and "within 30 days" in sp and "telecom networks" in sp)
     check("display quote: the cited sentence sharing most words with the answer",
           display_quote("The return window is 30 days.", [shown["S1"], shown["S2"]]).startswith("Customers can"))
+    check("display quote: case records are not quoted (their title is shown instead)",
+          display_quote("Two closed.", [("Your cases (4)", "Case 500X\nStatus: Closed")]) == "")
     kt = service_tools("b2b", "knowledge_qa")
     kprops = kt[-1]["function"]["parameters"]["properties"]
     check("knowledge job: search, article, respond with reason -> subjects -> kind -> sources -> answer",

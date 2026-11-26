@@ -474,6 +474,26 @@ button { color: inherit; }
 .crm-error strong { font-size: 13px; }
 .crm-error p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .crm-error > div { min-width: 0; }
+.crm-question h2 { margin-bottom: 6px; }
+.crm-question-detail { display: -webkit-box; margin: 0 0 10px; overflow: hidden; color: var(--text-soft); font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.crm-activity { display: grid; gap: 7px; margin: 16px 0 0; color: var(--text-soft); font-size: 13px; }
+.crm-activity-item { display: flex; align-items: center; gap: 8px; margin: 0; }
+.crm-activity-item svg { flex: none; color: var(--success); }
+.crm-activity-now { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--text); }
+.crm-answer-detail { margin: 4px 0 0; color: var(--text-faint); font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.crm-source { display: grid; gap: 4px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); color: var(--text-soft); font-size: 13.5px; }
+.crm-source-head { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-strong); font-size: 11.5px; font-weight: 600; }
+.crm-source strong { color: var(--text); font-weight: 600; }
+.crm-source q { font-family: var(--reading-font); line-height: 1.55; }
+.crm-answer > .crm-badge { margin: 12px 0 0; }
+.crm-howto { margin-top: 12px; }
+.crm-howto-trigger { display: inline-flex; align-items: center; gap: 7px; padding: 6px 0; border: 0; color: var(--text-faint); background: transparent; font-size: 12.5px; cursor: pointer; }
+.crm-howto-trigger:hover { color: var(--text); }
+.crm-howto-trigger[data-state="open"] svg { transform: rotate(180deg); }
+.crm-howto-why { margin: 8px 0 0; color: var(--text-soft); font-size: 13.5px; line-height: 1.55; }
+.crm-howto-why span { display: block; margin-bottom: 3px; color: var(--text-faint); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+.crm-stats-line { margin: 2px 0 0; color: var(--text-faint); font-size: 11.5px; }
+.crm-suggestions { margin-top: 18px; }
 .crm-stopped { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--warning-text); font-size: 12px; }
 
 @keyframes crm-spin { to { transform: rotate(360deg); } }

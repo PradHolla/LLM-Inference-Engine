@@ -1,42 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { Briefcase, ChevronDown, Menu, Send, Square, Trash2 } from "lucide-react";
-import { FALLBACK_AGENTS, askCrm, getCrmAgents, getCrmExamples, loadAgent, saveAgent, type AgentInfo, type AskRequest,
-  type CrmAgent, type CrmEvent, type CrmExample, type CrmMode } from "../../lib/crm";
+import { askCrm, getCrmExamples, type AskRequest, type CrmEvent, type CrmExample, type CrmMode } from "../../lib/crm";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
-import { AgentPicker } from "./AgentPicker";
 import { ExampleCards } from "./ExampleCards";
 import { ModelPicker } from "./ModelPicker";
 import { RunTimeline } from "./RunTimeline";
 
 type RunStatus = "running" | "done" | "stopped" | "failed";
-type RunRecord = { id: string; question: string; mode: CrmMode; agent: CrmAgent; events: CrmEvent[]; status: RunStatus };
+type RunRecord = { id: string; question: string; mode: CrmMode; events: CrmEvent[]; status: RunStatus };
 
 const MODE_HINTS: Record<CrmMode, string> = {
-  staff: "Answer as a support agent with access to all records",
-  customer: "Answer as a customer asking about their own records",
+  staff: "You are a support employee: all cases, policy checks and the knowledge base",
+  customer: "You are the customer Kofi Nkrumah: only his own cases and the public knowledge base",
 };
 
-const WELCOME: Record<CrmAgent, { title: string; sub: string }> = {
-  service: {
-    title: "Your service desk agent",
-    sub: "It routes new cases, checks cases against company policy and answers from the knowledge base, one visible step at a time.",
+const WELCOME = {
+  staff: {
+    title: "Ask the service desk agent",
+    sub: "Route a new case, check a case against company policy, or ask anything the knowledge base covers. Type a question or try one below.",
   },
-  general: {
-    title: "Ask the agent about your CRM",
-    sub: "Watch it plan, look up records and answer, one step at a time.",
+  customer: {
+    title: "Hi Kofi, how can we help?",
+    sub: "Ask about your own cases or about our products. Other customers' information stays private.",
   },
 };
+const CUSTOMER_SUGGESTIONS = ["What's the status of my cases?", "What is the window for requesting a return?",
+  "Can you check the order for Lucia Rossi?"];
 
-/** The CRM agent page: header controls, example questions, the run history and the question box. */
+/** The CRM agent page: header, example questions, the run history and the question box. */
 export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: () => void }) {
   const [examples, setExamples] = useState<CrmExample[] | null>(null);
   const [examplesError, setExamplesError] = useState(false);
-  const [agents, setAgents] = useState<AgentInfo[] | null>(null);
-  const [agent, setAgent] = useState<CrmAgent>(loadAgent);
   const [mode, setMode] = useState<CrmMode>("staff");
-  const [thinking, setThinking] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [question, setQuestion] = useState("");
@@ -50,25 +47,10 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
 
   useEffect(() => {
     let live = true;
-    getCrmAgents().then((list) => { if (live) setAgents(list); })
-      .catch(() => { if (live) setAgents(FALLBACK_AGENTS); });
-    return () => { live = false; };
-  }, []);
-
-  useEffect(() => {
-    let live = true;
-    setExamples(null);
-    setExamplesError(false);
-    getCrmExamples(agent).then((list) => { if (live) setExamples(list); })
+    getCrmExamples().then((list) => { if (live) setExamples(list); })
       .catch(() => { if (live) setExamplesError(true); });
     return () => { live = false; };
-  }, [agent]);
-
-  const chooseAgent = (next: CrmAgent) => {
-    if (active) return;
-    setAgent(next);
-    saveAgent(next);
-  };
+  }, []);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -93,7 +75,7 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
     const controller = new AbortController();
     abortRef.current = controller;
     pinnedRef.current = true;
-    setRuns((list) => [...list, { id, question: label, mode: body.mode, agent: body.agent, events: [], status: "running" }]);
+    setRuns((list) => [...list, { id, question: label, mode: body.mode, events: [], status: "running" }]);
     let failed = false;
     try {
       for await (const event of askCrm(body, controller.signal)) {
@@ -113,17 +95,22 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
     }
   };
 
+  const askText = (text: string) => {
+    if (!text.trim() || blocked) return;
+    void startRun({ question: text.trim(), example_id: null, mode }, text.trim());
+  };
+
   const ask = () => {
     const text = question.trim();
     if (!text || blocked) return;
     setQuestion("");
-    void startRun({ question: text, example_id: null, mode, thinking, agent }, text);
+    askText(text);
   };
 
   const runExample = (example: CrmExample) => {
     if (blocked) return;
     setMode(example.mode);
-    void startRun({ question: null, example_id: example.id, mode: example.mode, thinking, agent }, example.question);
+    void startRun({ question: null, example_id: example.id, mode: example.mode }, example.question);
   };
 
   const stop = () => abortRef.current?.abort();
@@ -131,8 +118,10 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
   const handleBusy = useCallback((busy: boolean) => setSwitching(busy), []);
 
   const empty = runs.length === 0;
-  const pickers = examples && examples.length > 0
-    ? <ExampleCards examples={examples} disabled={blocked} onRun={runExample} /> : null;
+  const pickers = mode === "customer"
+    ? <div className="prompt-suggestions crm-suggestions">{CUSTOMER_SUGGESTIONS.map((text) =>
+      <button key={text} type="button" disabled={blocked} onClick={() => askText(text)}>{text}</button>)}</div>
+    : examples && examples.length > 0 ? <ExampleCards examples={examples} disabled={blocked} onRun={runExample} /> : null;
 
   return <MotionConfig reducedMotion="user">
     <main className="crm-main" hidden={hidden}>
@@ -141,10 +130,9 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
           onClick={onOpenMenu}><Menu size={18} /></Button>
         <div className="crm-title">
           <span className="crm-title-icon"><Briefcase size={16} aria-hidden="true" /></span>
-          <div><h1>CRM agent</h1><p>Answers questions from Salesforce service and sales data</p></div>
+          <div><h1>Service desk agent</h1><p>Qwen3-8B on one GPU, over a Salesforce service org</p></div>
         </div>
         <div className="crm-controls">
-          {agents && <AgentPicker agents={agents} value={agent} disabled={active} onChange={chooseAgent} />}
           <ModelPicker onBusyChange={handleBusy} />
           <div className="crm-segments" role="radiogroup" aria-label="Mode">
             {(["staff", "customer"] as CrmMode[]).map((value) => <button key={value} type="button" role="radio"
@@ -165,18 +153,16 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
         <div className={`crm-page ${empty ? "empty" : ""}`}>
           {empty && <motion.section className="crm-welcome" initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24 }}>
-            <p className="welcome-kicker">Tool-using agent</p>
-            <h2>{WELCOME[agent].title}</h2>
-            <p className="crm-welcome-sub">{WELCOME[agent].sub}</p>
+            <h2>{WELCOME[mode].title}</h2>
+            <p className="crm-welcome-sub">{WELCOME[mode].sub}</p>
             {pickers}
             {!pickers && <p className="crm-muted">{examplesError ? "Example questions could not be loaded. You can still type a question below."
               : examples ? "No example questions yet. Type a question below." : "Loading examples"}</p>}
           </motion.section>}
           {runs.map((run) => <RunTimeline key={run.id} events={run.events} running={run.status === "running"}
-            stopped={run.status === "stopped"} question={run.question} mode={run.mode}
-            agent={run.agent} />)}
-          {!empty && pickers && <Collapsible className="crm-more">
-            <CollapsibleTrigger className="crm-more-trigger">Try another example
+            stopped={run.status === "stopped"} question={run.question} mode={run.mode} />)}
+          {!empty && !active && pickers && <Collapsible className="crm-more">
+            <CollapsibleTrigger className="crm-more-trigger">Try another question
               <ChevronDown size={14} className="reasoning-chevron" /></CollapsibleTrigger>
             <CollapsibleContent>{pickers}</CollapsibleContent>
           </Collapsible>}
@@ -187,7 +173,8 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
         <div className="composer-wrap">
           <form className="composer" onSubmit={(event) => { event.preventDefault(); ask(); }}>
             <textarea ref={areaRef} rows={1} value={question} disabled={blocked} aria-label="Question"
-              placeholder={switching ? "Waiting for the model to finish switching" : "Ask a question about the CRM data"}
+              placeholder={switching ? "Waiting for the model to finish switching"
+                : mode === "customer" ? "Ask about your cases or our products" : "Ask about a case, a policy or a product"}
               onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -197,14 +184,6 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
               }} />
             <div className="composer-controls">
               <div className="composer-options">
-                <div className="search-control" role="radiogroup" aria-label="Show model thinking">
-                  <span className="search-label">Thinking</span>
-                  <span className="search-segments">
-                    {[false, true].map((value) => <button key={String(value)} type="button" role="radio"
-                      aria-checked={thinking === value} disabled={active}
-                      onClick={() => setThinking(value)}>{value ? "On" : "Off"}</button>)}
-                  </span>
-                </div>
                 {!empty && <Button className="crm-clear" variant="ghost" size="sm" onClick={clear} disabled={active}
                   aria-label="Clear runs"><Trash2 size={14} />Clear</Button>}
               </div>
@@ -212,7 +191,7 @@ export function CrmView({ hidden, onOpenMenu }: { hidden: boolean; onOpenMenu: (
                 ? <Button className="send-button stop-button" variant="danger" onClick={stop}
                   aria-label="Stop the run"><Square size={15} fill="currentColor" /><span>Stop</span></Button>
                 : <Button className="send-button" variant="default" type="submit"
-                  disabled={!question.trim() || switching}><Send size={15} /><span>Run</span></Button>}
+                  disabled={!question.trim() || switching}><Send size={15} /><span>Ask</span></Button>}
             </div>
           </form>
         </div>

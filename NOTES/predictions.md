@@ -7982,3 +7982,19 @@ Graded by three Sonnet subagents (judge agent, model sonnet), ragjudge rubric, k
 - KG6-4 HIT: CRAG-style +0.042 (was -0.008).
 - KG6-5 HIT: p50 11.0 s (was 16.2 s); p95 43.6 s.
 Reading: citing recovered answers, not safety. The subject check is now the limiting part.
+
+## P11-NLI: an off-the-shelf NLI cross-encoder as an extra answer check, offline (2026-11-26)
+Decision rule written before the run: adopt only if it catches at least half of the graded hallucinations while
+refusing at most 2 of the graded good answers. Data: tools/p11-nli-pairs.jsonl, every graded answer of the final
+design (held-out 3 passes + practice q-judge-s 3 passes): 12 bad (ungrounded or off subject), 103 good. Premise =
+the cited sources, hypothesis = the answer; tools/nliprobe.py on the box CPU.
+
+| Model | best trade (P(entail) threshold) | caught | good answers refused |
+|---|---|---|---|
+| cross-encoder/nli-deberta-v3-large | 0.5 | 5/12 | 42/103 |
+| cross-encoder/nli-deberta-v3-base | 0.1 | 7/12 | 30/103 |
+
+REJECTED: at every threshold it refuses 29-45% of good answers. A tested candidate before that, a code rule
+"the question's subject words appear in the cited text", was also rejected on the same data (caught 1/11, refused
+11/45). ALCE notes NLI cannot detect partial support; here grounded answers are mostly paraphrased summaries of
+long passages, which an NLI model reads as not entailed. The 5% stays a stated limitation.

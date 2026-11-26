@@ -3,38 +3,15 @@
 import { request } from "./api";
 
 export type CrmMode = "staff" | "customer";
-export type CrmAgent = "service" | "general";
-export type AgentInfo = {
-  id: CrmAgent; label: string; description: string; protocol: string;
-  jobs: { task_type: string; label: string }[];
-};
-export const DEFAULT_AGENT: CrmAgent = "service";
-export const AGENT_LABELS: Record<CrmAgent, string> = { service: "Service desk agent", general: "General CRM agent" };
-/** Used when /api/crm/agents cannot be loaded, so the picker still works. */
-export const FALLBACK_AGENTS: AgentInfo[] = (Object.keys(AGENT_LABELS) as CrmAgent[]).map((id) => ({
-  id, label: AGENT_LABELS[id], description: "", protocol: "", jobs: [],
-}));
-const AGENT_KEY = "crm-agent";
-
-/** The remembered agent choice; falls back to the service desk agent when storage is empty or blocked. */
-export function loadAgent(): CrmAgent {
-  try {
-    const value = window.localStorage.getItem(AGENT_KEY);
-    return value === "service" || value === "general" ? value : DEFAULT_AGENT;
-  } catch { return DEFAULT_AGENT; }
-}
-
-export function saveAgent(agent: CrmAgent): void {
-  try { window.localStorage.setItem(AGENT_KEY, agent); } catch { /* storage unavailable */ }
-}
+export type CrmAgent = "service";
 
 export type RunContext = { today: string | null; focus_ids: string[]; policy_title: string | null;
   customer?: string | null };
 export type RunExample = { id: string; task_type: string; skill: string };
 
 export type RunStartEvent = {
-  type: "run_start"; run_id: string; question: string; model: string; mode: CrmMode; agent?: CrmAgent;
-  context: RunContext; example: RunExample | null;
+  type: "run_start"; run_id: string; question: string; detail?: string | null; model: string; mode: CrmMode;
+  agent?: CrmAgent; context: RunContext; example: RunExample | null;
 };
 export type StepStartEvent = { type: "step_start"; step: number };
 export type ThinkingEvent = { type: "thinking"; step: number; text: string };
@@ -50,6 +27,8 @@ export type AnswerEvent = {
   type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null;
   reason?: string | null; sources?: { id: string; title: string }[];
   quote?: string | null; checks?: { result: string; problem?: string | null }[];
+  citations?: { label: string; title: string; text: string }[] | null;
+  display?: { text: string; detail: string | null } | null;
 };
 export type StatsEvent = {
   type: "stats"; steps: number; actions: number; wall_ms: number; prompt_tokens: number;
@@ -65,18 +44,14 @@ export const CRM_EVENT_TYPES = ["run_start", "step_start", "thinking", "action",
   "stats", "error", "done"] as const;
 
 export type CrmExample = {
-  id: string; title: string; question: string; task_type: string; skill: string; today: string | null;
-  context_summary: string; mode: CrmMode; has_expected: boolean; job?: string;
+  id: string; title: string; question: string; detail?: string | null; task_type: string; skill: string;
+  today: string | null; mode: CrmMode; has_expected: boolean; job?: string;
 };
 export type CrmModelOption = { id: string; label: string; note: string };
 export type CrmModels = { current: string; switching: boolean; options: CrmModelOption[]; picker?: boolean };
-export type AskRequest = {
-  question: string | null; example_id: string | null; mode: CrmMode; thinking: boolean; agent: CrmAgent;
-};
+export type AskRequest = { question: string | null; example_id: string | null; mode: CrmMode };
 
-export const getCrmAgents = () => request<AgentInfo[]>("/api/crm/agents");
-export const getCrmExamples = (agent: CrmAgent) =>
-  request<CrmExample[]>(`/api/crm/examples?agent=${encodeURIComponent(agent)}`);
+export const getCrmExamples = () => request<CrmExample[]>("/api/crm/examples");
 export const getCrmModels = () => request<CrmModels>("/api/crm/models");
 export const setCrmModel = (id: string) => request<CrmModels>("/api/crm/model", {
   method: "POST", body: JSON.stringify({ id }),
@@ -181,6 +156,44 @@ export function humanize(name: string): string {
 
 export function actionLabel(name: string): string {
   return ACTION_LABELS[name] ?? humanize(name);
+}
+
+/** One plain line for a finished step, for the live activity list. */
+export function activityLine(call: CallView): string {
+  const { name, args } = call.action;
+  const rows = call.observation?.rows_total;
+  const offered = Array.isArray(args.offered) ? args.offered.length : null;
+  switch (name) {
+    case "choose_job": return `Picked the job: ${String(args.job ?? "")}`;
+    case "search_knowledge": return rows ? `Searched the knowledge base: ${rows} passages` : "Searched the knowledge base";
+    case "get_article": return "Read the article in full";
+    case "get_case": return `Opened case ${String(args.case_id ?? "")}`;
+    case "route_case": return `Applied the routing policy for "${String(args.issue ?? "")}"`;
+    case "check_offers": return offered === null ? "Checked the offered fixes against policy"
+      : `Checked ${offered} offered fix${offered === 1 ? "" : "es"} against policy`;
+    case "get_my_cases": return "Looked up your cases";
+    default: return actionLabel(name);
+  }
+}
+
+const NEXT_STATUS: Record<string, string> = {
+  choose_job: "Working on it", search_knowledge: "Reading the sources and writing the answer",
+  get_article: "Reading the article", get_case: "Reading the case", route_case: "Writing the answer",
+  check_offers: "Writing the answer", get_my_cases: "Reading your cases",
+};
+
+/** What the agent is doing right now, from the last thing it did. */
+export function liveStatus(run: RunView): string {
+  const calls = run.steps.flatMap((step) => step.calls);
+  const last = calls[calls.length - 1];
+  if (!last) return "Reading the question";
+  if (last.action.name === "respond") return "Checking the answer against its source";
+  return NEXT_STATUS[last.action.name] ?? "Working on it";
+}
+
+/** A cited source's title without the trailing "(article ka0...)". */
+export function sourceTitle(title: string): string {
+  return title.replace(/\s*\(article [0-9A-Za-z]+\)\s*$/, "");
 }
 
 const ID_RE = /^[0-9A-Za-z]{15}(?:[0-9A-Za-z]{3})?$/;

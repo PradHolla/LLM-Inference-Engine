@@ -79,8 +79,7 @@ function ActionCard({ call, live }: { call: CallView; live: boolean }) {
   const [raw, setRaw] = useState(false);
   const Icon = ICONS[action.name] ?? Code;
   const items = formatArgs(action.name, action.args);
-  const final = action.name === "respond";
-  return <div className={`crm-call ${final ? "final" : ""}`}>
+  return <div className="crm-call">
     <div className="crm-call-head">
       <span className="crm-call-icon"><Icon size={15} aria-hidden="true" /></span>
       <strong>{actionLabel(action.name)}</strong>
@@ -90,7 +89,7 @@ function ActionCard({ call, live }: { call: CallView; live: boolean }) {
     </div>
     {raw ? <pre className="crm-code raw">{JSON.stringify(action.args, null, 2)}</pre>
       : items.length > 0 && <dl className="crm-args">{items.map((item, index) => <ArgRow key={index} item={item} />)}</dl>}
-    {final ? <p className="crm-call-note">Sent the final answer.</p> : <Observation call={call} live={live} />}
+    <Observation call={call} live={live} />
   </div>;
 }
 
@@ -114,7 +113,8 @@ export function StepCard({ step, live, last }: { step: StepView; live: boolean; 
     <div className="crm-step-marker" aria-hidden="true"><span>{step.step + 1}</span></div>
     <div className="crm-step-body">
       {step.thinking && <Thinking text={step.thinking} />}
-      {step.calls.map((call) => <ActionCard key={call.action.call_id} call={call} live={live} />)}
+      {step.calls.filter((call) => call.action.name !== "respond")  // the answer card shows the final answer
+        .map((call) => <ActionCard key={call.action.call_id} call={call} live={live} />)}
       {waiting && <div className="crm-step-wait" role="status"><span className="pipeline-dot" />Deciding the next action</div>}
     </div>
   </motion.section>;

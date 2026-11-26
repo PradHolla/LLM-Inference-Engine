@@ -1,6 +1,4 @@
-import { ListChecks } from "lucide-react";
 import { humanize, type CrmExample } from "../../lib/crm";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 /** Group by job when the examples carry one (service agent), otherwise by skill. */
 function group(examples: CrmExample[]): [string, string, CrmExample[]][] {
@@ -14,6 +12,15 @@ function group(examples: CrmExample[]): [string, string, CrmExample[]][] {
   return [...groups.entries()].map(([key, [label, items]]) => [key, label, items]);
 }
 
+/** One helpful line under the title: the case description for routing, the question for policy, none for knowledge. */
+function subline(example: CrmExample): string | null {
+  if (example.task_type === "knowledge_qa") return null;
+  if (example.task_type !== "case_routing") return example.question;
+  const detail = example.detail ?? "";
+  const lead = `${example.title}.`;
+  return (detail.startsWith(lead) ? detail.slice(lead.length) : detail).trim() || null;
+}
+
 /** Showcase questions grouped by job or skill; clicking one runs it. */
 export function ExampleCards({ examples, disabled, onRun }: {
   examples: CrmExample[]; disabled: boolean; onRun: (example: CrmExample) => void;
@@ -22,20 +29,14 @@ export function ExampleCards({ examples, disabled, onRun }: {
     {group(examples).map(([key, label, items]) => <section key={key} className="crm-example-group">
       <h3>{label}</h3>
       <div className="crm-example-grid">
-        {items.map((example) => <button key={example.id} type="button" className="crm-example" disabled={disabled}
-          title={example.context_summary || undefined} onClick={() => onRun(example)}>
-          <span className="crm-example-meta">
-            {!example.job && <span className="crm-tag">{humanize(example.task_type)}</span>}
-            {example.mode === "customer" && <span className="crm-tag soft">Customer</span>}
-            {example.has_expected && <Tooltip>
-              <TooltipTrigger><span className="crm-graded" aria-label="Checked against an expected answer">
-                <ListChecks size={13} aria-hidden="true" /></span></TooltipTrigger>
-              <TooltipContent>Checked against an expected answer</TooltipContent>
-            </Tooltip>}
-          </span>
-          <strong>{example.title}</strong>
-          <span className="crm-example-q">{example.question}</span>
-        </button>)}
+        {items.map((example) => {
+          const line = subline(example);
+          return <button key={example.id} type="button" className="crm-example" disabled={disabled}
+            title={example.detail || example.question} onClick={() => onRun(example)}>
+            <strong>{example.title}</strong>
+            {line && <span className="crm-example-q">{line}</span>}
+          </button>;
+        })}
       </div>
     </section>)}
   </div>;
