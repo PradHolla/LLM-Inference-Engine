@@ -23,12 +23,15 @@ export type ObservationEvent = {
   truncated: boolean; columns: string[]; preview: Record<string, unknown>[]; error: string | null;
   elapsed_ms: number; text?: string | null;
 };
+/** A sentence in customer-written case text that is aimed at the agent; "by" is who caught it. */
+export type AnswerFlag = { source: string; sentence: string; by: "model" | "phrase" };
 export type AnswerEvent = {
   type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null;
   reason?: string | null; sources?: { id: string; title: string }[];
   quote?: string | null; checks?: { result: string; problem?: string | null }[];
   citations?: { label: string; title: string; text: string }[] | null;
   display?: { text: string; detail: string | null } | null;
+  flags?: AnswerFlag[] | null;
 };
 export type StatsEvent = {
   type: "stats"; steps: number; actions: number; wall_ms: number; prompt_tokens: number;
@@ -44,7 +47,7 @@ export const CRM_EVENT_TYPES = ["run_start", "step_start", "thinking", "action",
   "stats", "error", "done"] as const;
 
 export type CrmExample = {
-  id: string; title: string; question: string; detail?: string | null; task_type: string; skill: string;
+  id: string; title: string; question: string; detail?: string | null; note?: string | null; task_type: string; skill: string;
   today: string | null; mode: CrmMode; has_expected: boolean; job?: string;
 };
 export type CrmModelOption = { id: string; label: string; note: string };

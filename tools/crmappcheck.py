@@ -25,6 +25,8 @@ CASES = [  # (label, request body)
     ("kq 732", {"example_id": "knowledge_qa_732"}),
     ("kq 768", {"example_id": "knowledge_qa_768"}),
     ("kq 762 trap", {"example_id": "knowledge_qa_762"}),
+    ("planted route 1489", {"example_id": "case_routing_1489_planted"}),
+    ("planted policy 1412", {"example_id": "policy_violation_identification_1412_planted"}),
     # typed staff questions: the router picks the job
     ("typed kq return window", {"question": "What is the window for requesting a return after buying a product?"}),
     ("typed kq trap telecom", {"question": "What is a critical aspect of access control in telecom networks?"}),
@@ -65,6 +67,7 @@ def summary(label: str, res: dict) -> dict:
             "actions": [e.get("name") for e in ev if e["type"] == "action"],
             "thinking_events": types.count("thinking"),
             "answer": ans and ans.get("text"), "quote": ans and ans.get("quote"),
+            "flags": ans and [f["sentence"][:80] for f in ans.get("flags") or []],
             "checks": ans and [c["result"] for c in ans.get("checks") or []],
             "correct": ans and ans.get("correct"), "expected": ans and ans.get("expected"),
             "errors": errs, "done": types[-1:] == ["done"], "unknown_types": sorted(set(types) - KNOWN)}

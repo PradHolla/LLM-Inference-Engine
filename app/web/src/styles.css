@@ -363,6 +363,7 @@ button { color: inherit; }
 .crm-example:disabled { cursor: default; opacity: .55; }
 .crm-example strong { font-size: 13.5px; font-weight: 600; line-height: 1.3; }
 .crm-example-q { overflow: hidden; color: var(--text-soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.crm-example.planted .crm-example-q { white-space: normal; }
 .crm-example-meta { display: flex; align-items: center; gap: 6px; min-height: 20px; }
 .crm-tag { padding: 1px 8px; border-radius: 999px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 13%, transparent); font-size: 10.5px; font-weight: 550; }
 .crm-tag.soft { color: var(--text-soft); background: var(--surface-muted); }
@@ -486,6 +487,13 @@ button { color: inherit; }
 .crm-source strong { color: var(--text); font-weight: 600; }
 .crm-source q { font-family: var(--reading-font); line-height: 1.55; }
 .crm-answer > .crm-badge { margin: 12px 0 0; }
+.crm-flag { display: grid; gap: 6px; margin: 12px 0 0; padding: 10px 12px; border-radius: 9px; color: var(--warning-text); background: var(--warning-bg); font-size: 13.5px; line-height: 1.45; }
+.crm-flag-head { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 0 6px; margin: 0; }
+.crm-flag-head svg { margin-top: 2px; }
+.crm-flag-head strong { font-weight: 650; }
+.crm-flag-item { display: grid; gap: 1px; margin: 0; padding-left: 21px; min-width: 0; }
+.crm-flag-item p { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-style: italic; color: color-mix(in srgb, var(--warning-text) 82%, transparent); }
+.crm-flag-item cite { font-size: 11.5px; font-style: normal; overflow-wrap: anywhere; color: color-mix(in srgb, var(--warning-text) 70%, transparent); }
 .crm-howto { margin-top: 12px; }
 .crm-howto-trigger { display: inline-flex; align-items: center; gap: 7px; padding: 6px 0; border: 0; color: var(--text-faint); background: transparent; font-size: 12.5px; cursor: pointer; }
 .crm-howto-trigger:hover { color: var(--text); }

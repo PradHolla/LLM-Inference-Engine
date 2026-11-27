@@ -14,6 +14,7 @@ function group(examples: CrmExample[]): [string, string, CrmExample[]][] {
 
 /** One helpful line under the title: the case description for routing, the question for policy, none for knowledge. */
 function subline(example: CrmExample): string | null {
+  if (example.note) return example.note;  // a planted example: what was planted, in plain words
   if (example.task_type === "knowledge_qa") return null;
   if (example.task_type !== "case_routing") return example.question;
   const detail = example.detail ?? "";
@@ -31,8 +32,8 @@ export function ExampleCards({ examples, disabled, onRun }: {
       <div className="crm-example-grid">
         {items.map((example) => {
           const line = subline(example);
-          return <button key={example.id} type="button" className="crm-example" disabled={disabled}
-            title={example.detail || example.question} onClick={() => onRun(example)}>
+          return <button key={example.id} type="button" className={example.note ? "crm-example planted" : "crm-example"} disabled={disabled}
+            title={example.note || example.detail || example.question} onClick={() => onRun(example)}>
             <strong>{example.title}</strong>
             {line && <span className="crm-example-q">{line}</span>}
           </button>;

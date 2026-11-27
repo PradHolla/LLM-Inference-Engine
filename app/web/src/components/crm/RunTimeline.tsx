@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Check, ChevronDown, CircleAlert, Lock, ShieldCheck, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Lock, ShieldAlert, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { activityLine, buildRun, formatCell, formatCost, formatInt, formatSeconds, liveStatus, sourceTitle,
-  type AnswerEvent, type CrmEvent, type CrmMode, type RunView, type StatsEvent } from "../../lib/crm";
+  type AnswerEvent, type AnswerFlag, type CrmEvent, type CrmMode, type RunView, type StatsEvent } from "../../lib/crm";
 import { StepCard } from "./StepCard";
 
 function Badge({ answer }: { answer: AnswerEvent }) {
@@ -18,13 +18,27 @@ function Badge({ answer }: { answer: AnswerEvent }) {
   return null;
 }
 
+/** A calm notice that case text addressed to the agent was found; the agent flags it and carries on. */
+function PlantedNotice({ flags }: { flags: AnswerFlag[] }) {
+  return <div className="crm-flag" role="note">
+    <p className="crm-flag-head"><ShieldAlert size={15} aria-hidden="true" />
+      <span><strong>Needs review</strong> This case contains text addressed to the agent.</span></p>
+    {flags.slice(0, 3).map((flag, index) => <blockquote key={index} className="crm-flag-item">
+      <p>{`\u201C${flag.sentence}\u201D`}</p>
+      <cite>from {flag.source}</cite>
+    </blockquote>)}
+  </div>;
+}
+
 /** The answer as a person reads it: the answer itself, then the checked source it came from. */
 function AnswerCard({ answer }: { answer: AnswerEvent }) {
   const text = answer.display?.text ?? answer.text;
   const cites = answer.citations ?? [];
+  const flags = (answer.flags ?? []).filter((flag) => flag.sentence);
   return <motion.section className="crm-answer" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
     transition={{ duration: 0.26, ease: "easeOut" }} aria-label="Answer">
     <p className="crm-answer-text">{text}</p>
+    {flags.length > 0 && <PlantedNotice flags={flags} />}
     {answer.display?.detail && <p className="crm-answer-detail">{answer.display.detail}</p>}
     {cites.length > 0 && <div className="crm-source">
       <span className="crm-source-head"><ShieldCheck size={13} aria-hidden="true" />

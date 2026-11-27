@@ -21,6 +21,7 @@ FOOTER = "[showing {n} of {m} rows; narrow the query]"
 READONLY_PRAGMAS = {"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list"}
 ALLOWED_ACTIONS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
 SNIPPET = "snippet(_fts_search, 3, '[', ']', '...', 24)"
+IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass
@@ -82,6 +83,9 @@ class TaskSession:
         self.customer_id: str | None = None  # set for a logged-in customer: service actions scope to them
         self.cite = False  # checked jobs: tools label each passage or record [S1], [S2] ... for citing
         self.sources: dict[str, tuple[str, str]] = {}  # label -> (title, exact text), for this run only
+        # key -> (source, text): free text written by customers or staff, exactly as the agent was shown it
+        self.untrusted: dict[str, tuple[str, str]] = {}
+        self.fence = False  # wrap that free text in <<case-text>> markers (crm/guard.py)
         conn.execute("PRAGMA query_only = ON")
         conn.set_progress_handler(self._progress, 4000)
         conn.set_authorizer(self._authorize)
@@ -223,8 +227,8 @@ class CRMEnv:
             raise FileNotFoundError(f"{self.db_path} missing; run: uv run tools/crmdb.py build --org {org}")
         self.org, self.row_cap, self.char_cap, self.timeout_s = org, row_cap, char_cap, timeout_s
 
-    def open_task(self) -> TaskSession:
-        """Copy the derived DB into a fresh in-memory database and wrap it in a TaskSession."""
+    def open_task(self, plants=()) -> TaskSession:
+        """Copy the derived DB into a fresh in-memory database, apply any plants to the copy, wrap it."""
         t0 = time.perf_counter()
         src = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         mem = sqlite3.connect(":memory:", check_same_thread=False)
@@ -232,6 +236,14 @@ class CRMEnv:
             src.backup(mem)
         finally:
             src.close()
+        for p in plants:
+            if not (IDENT_RE.fullmatch(p.table) and IDENT_RE.fullmatch(p.field)):
+                raise ValueError(f"bad plant target {p.table}.{p.field}")
+            cur = mem.execute(f'UPDATE "{p.table}" SET "{p.field}" = COALESCE("{p.field}", \'\') || ? WHERE Id = ?',
+                              ["\n\n" + p.text, p.record_id])
+            if cur.rowcount != 1:
+                raise ValueError(f"plant matched {cur.rowcount} rows: {p.table} {p.record_id}")
+        mem.commit()
         copy_ms = (time.perf_counter() - t0) * 1000
         return TaskSession(mem, self.org, self.row_cap, self.char_cap, self.timeout_s, copy_ms)
 
@@ -320,6 +332,24 @@ def _selftest() -> int:
     acc = next(x for x in objs if x["object"] == "Contact")
     check("schema_objects drops null fields", all(v is not None for x in objs for v in x["fields"].values()),
           f"b2c Contact fields: {list(acc['fields'])}")
+    from crm.tasks import Plant
+    env = CRMEnv("b2b")
+    s0 = env.open_task()
+    cid, desc = s0.conn.execute('SELECT Id, Description FROM "Case" LIMIT 1').fetchone()
+    s0.close()
+    s1 = env.open_task((Plant("Case", cid, "Description", "PLANTED TEXT"),))
+    got = s1.conn.execute('SELECT Description FROM "Case" WHERE Id = ?', [cid]).fetchone()[0]
+    s1.close()
+    s2 = env.open_task()
+    again = s2.conn.execute('SELECT Description FROM "Case" WHERE Id = ?', [cid]).fetchone()[0]
+    s2.close()
+    check("plant: appended in this copy only", got == f"{desc}\n\nPLANTED TEXT" and again == desc, got[-40:])
+    for bad in (Plant("Case", "nope", "Description", "x"), Plant('Case"; DROP', cid, "Description", "x")):
+        try:
+            env.open_task((bad,))
+            check(f"plant rejected: {bad.table} {bad.record_id}", False)
+        except ValueError:
+            check(f"plant rejected: {bad.table} {bad.record_id}", True)
     print(f"{'ALL PASS' if not fails else f'{fails} FAILED'}")
     return 1 if fails else 0
 

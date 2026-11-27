@@ -39,6 +39,15 @@ TODAY_RE = re.compile(r"Today's date:\s*(\d{4}-\d{2}-\d{2})")
 
 
 @dataclass(frozen=True)
+class Plant:
+    """Text appended to one record's field in a run's private DB copy (planted-instruction tests and demo)."""
+    table: str
+    record_id: str
+    field: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Task:
     org: str
     idx: int
@@ -52,6 +61,7 @@ class Task:
     reward_metric: str
     today: str | None
     split: str
+    plants: tuple[Plant, ...] = ()  # applied to this task's DB copy only (CRMEnv.open_task)
 
 
 def _dev_idx(raw: list[dict]) -> set[int]:
