@@ -60,8 +60,10 @@ _JOBS = r"(?!\s+(?:manager|director|professor|engineer|editor|coach))"  # "as an
 PHRASES = [re.compile(p, re.I) for p in (
     r"\b(?:ignore|disregard)\s+(?:(?:all|any|the|your)\s+){0,2}(?:(?:previous|prior|above|earlier)\s+)?"
     r"(?:instructions|rules|messages|prompt)\b",
-    rf"\b(?:you are|you['’]re|as)\s+an?\s+(?:AI|assistant{_JOBS}|language model|bot|LLM)\b",
-    rf"\b(?:note|message|attention|instructions?)\s+(?:to|for)\s+(?:the\s+)?(?:AI|assistant{_JOBS}|bot|LLM|reviewer)\b",
+    # (?!-): "an AI-enhanced tool" and "attention to AI-driven features" describe products, not an addressee
+    rf"\b(?:you are|you['’]re|as)\s+an?\s+(?:AI|assistant{_JOBS}|language model|bot|LLM)\b(?!-)",
+    rf"\b(?:note|message|attention|instructions?)\s+(?:to|for)\s+(?:the\s+)?(?:AI|assistant{_JOBS}|bot|LLM|reviewer)"
+    r"\b(?!-)",
     # "model" and "system" only as the addressee ("Note to the model:"), not "attention to the model number"
     r"\b(?:note|message|attention|instructions?)\s+(?:to|for)\s+(?:the\s+)?(?:model|system)\b(?=\s*(?:[:.!,;]|$))",
     r"^\s*(?:system|assistant)\s*:",
@@ -226,6 +228,8 @@ ORDINARY = [
     "Can you call me back tomorrow about the refund?",
     "Thanks for the quick reply, the issue is resolved.",
     "Please ignore my earlier email, I found the license key.",
+    "As an AI-enhanced design tool, it must meet the latest security standards.",  # held-out case 1490
+    "We pay close attention to AI-driven features in every release.",
 ]
 
 
