@@ -498,6 +498,12 @@ button { color: inherit; }
 .crm-flag-item { display: grid; gap: 1px; margin: 0; padding-left: 21px; min-width: 0; }
 .crm-flag-item p { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-style: italic; color: color-mix(in srgb, var(--warning-text) 82%, transparent); }
 .crm-flag-item cite { font-size: 11.5px; font-style: normal; overflow-wrap: anywhere; color: color-mix(in srgb, var(--warning-text) 70%, transparent); }
+.crm-flag-more { display: inline-flex; align-items: center; gap: 5px; width: fit-content; margin-top: 4px; padding: 0; border: 0; color: var(--warning-text); background: none; font: inherit; font-size: 12px; font-weight: 550; cursor: pointer; }
+.crm-flag-more:hover { text-decoration: underline; text-underline-offset: 3px; }
+.crm-flag-more:focus-visible { outline: 2px solid var(--warning-text); outline-offset: 2px; border-radius: 3px; }
+.crm-flag-more[data-state="open"] svg { transform: rotate(180deg); }
+.crm-flag-context { max-height: 260px; margin-top: 6px; padding: 9px 11px; overflow: auto; border: 1px solid color-mix(in srgb, var(--warning-text) 22%, transparent); border-radius: 7px; color: var(--text-soft); background: var(--page-raised); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.crm-flag-context mark { padding: 1px 2px; border-radius: 3px; color: var(--warning-text); background: var(--warning-bg); font-weight: 600; }
 .crm-howto { margin-top: 12px; }
 .crm-howto-trigger { display: inline-flex; align-items: center; gap: 7px; padding: 6px 0; border: 0; color: var(--text-faint); background: transparent; font-size: 12.5px; cursor: pointer; }
 .crm-howto-trigger:hover { color: var(--text); }

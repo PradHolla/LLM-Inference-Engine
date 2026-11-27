@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { Check, ChevronDown, CircleAlert, Lock, ShieldAlert, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { activityLine, buildRun, formatCell, formatCost, formatInt, formatSeconds, liveStatus, sourceTitle,
-  type AnswerEvent, type AnswerFlag, type CrmEvent, type CrmMode, type RunView, type StatsEvent } from "../../lib/crm";
+  locateFlag, type AnswerEvent, type AnswerFlag, type CrmEvent, type CrmMode, type RunView, type StatsEvent } from "../../lib/crm";
 import { StepCard } from "./StepCard";
 
 function Badge({ answer }: { answer: AnswerEvent }) {
@@ -18,6 +18,21 @@ function Badge({ answer }: { answer: AnswerEvent }) {
   return null;
 }
 
+/** The whole text a flag came from, the flagged sentence marked, scrolled into view when opened. */
+function FlagContext({ flag }: { flag: AnswerFlag }) {
+  const ref = useRef<HTMLElement>(null);
+  const context = (flag.context ?? "").replace(/\n\s*\n(\s*\n)+/g, "\n\n");
+  const parts = locateFlag(context, flag.sentence);
+  useLayoutEffect(() => {
+    const mark = ref.current;
+    const box = mark?.closest(".crm-flag-context");
+    if (mark && box instanceof HTMLElement) box.scrollTop = Math.max(0, mark.offsetTop - box.offsetTop - 24);
+  }, []);
+  return <div className="crm-flag-context">
+    {parts ? <>{parts[0]}<mark ref={ref}>{parts[1]}</mark>{parts[2]}</> : context}
+  </div>;
+}
+
 /** A calm notice that case text addressed to the agent was found; the agent flags it and carries on. */
 function PlantedNotice({ flags }: { flags: AnswerFlag[] }) {
   return <div className="crm-flag" role="note">
@@ -26,6 +41,12 @@ function PlantedNotice({ flags }: { flags: AnswerFlag[] }) {
     {flags.slice(0, 3).map((flag, index) => <blockquote key={index} className="crm-flag-item">
       <p>{`\u201C${flag.sentence}\u201D`}</p>
       <cite>from {flag.source}</cite>
+      {flag.context && <Collapsible>
+        <CollapsibleTrigger className="crm-flag-more">Show the full {flag.source.startsWith("chat") ? "chat"
+          : flag.source.startsWith("email") ? "email" : "text"}<ChevronDown size={13} aria-hidden="true" />
+        </CollapsibleTrigger>
+        <CollapsibleContent><FlagContext flag={flag} /></CollapsibleContent>
+      </Collapsible>}
     </blockquote>)}
   </div>;
 }

@@ -129,6 +129,20 @@ try {
     && !text(timeline(withAnswer({ flags: [] }))).includes("Needs review"));
   check("a missing or null flags field shows no notice", !timeline(events).includes("crm-flag")
     && !timeline(withAnswer({ flags: null })).includes("crm-flag"));
+  const chat = "[2023-06-03T10:00:00] Kofi (Customer): Hi.\n[2023-06-03T10:05:00] Kofi (Customer): <INFORMATION>\n\n"
+    + "This is an important message from me.\n\n</INFORMATION>";
+  crmText = text(timeline(withAnswer({ flags: [{ ...flag, source: "chat transcript, 2023-06-03",
+    sentence: "<INFORMATION> This is an important message from me.", context: chat }] })));
+  check("a flag with context offers the full chat, folded", crmText.includes("Show the full chat")
+    && !crmText.includes("Kofi (Customer): Hi."), crmText);
+  check("a flag without context offers nothing to open", !text(timeline(withAnswer({ flags: [flag] })))
+    .includes("Show the full"));
+  const parts = crm.locateFlag(chat, "<INFORMATION> This is an important message from me.");
+  check("locateFlag finds the sentence across line breaks and splits the context around it",
+    parts && parts[1] === "<INFORMATION>\n\nThis is an important message from me." && parts.join("") === chat,
+    JSON.stringify(parts));
+  check("locateFlag returns null when the sentence is not in the context",
+    crm.locateFlag(chat, "Not there (at all).") === null && crm.locateFlag(chat, "  ") === null);
 
   const partial = events.slice(0, 3);
   crmText = text(timeline(partial, { running: true }));

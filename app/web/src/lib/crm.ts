@@ -23,8 +23,19 @@ export type ObservationEvent = {
   truncated: boolean; columns: string[]; preview: Record<string, unknown>[]; error: string | null;
   elapsed_ms: number; text?: string | null;
 };
-/** A sentence in customer-written case text that is aimed at the agent; "by" is the check that caught it. */
-export type AnswerFlag = { source: string; sentence: string; by: "phrase" };
+/** A sentence in customer-written case text that is aimed at the agent; "by" is the check that caught it,
+ *  "context" the whole text it was found in (an email, a chat, a description) for a reviewer to read. */
+export type AnswerFlag = { source: string; sentence: string; by: "phrase"; context?: string };
+
+/** context split around the flagged sentence, matched word by word across any spacing; null if not found. */
+export function locateFlag(context: string, sentence: string): [string, string, string] | null {
+  const words = sentence.trim().split(/\s+/).filter(Boolean)
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!words.length) return null;
+  const match = new RegExp(words.join("\\s+")).exec(context);
+  if (!match) return null;
+  return [context.slice(0, match.index), match[0], context.slice(match.index + match[0].length)];
+}
 export type AnswerEvent = {
   type: "answer"; text: string; expected: unknown[] | null; correct: boolean | null;
   reason?: string | null; sources?: { id: string; title: string }[];
