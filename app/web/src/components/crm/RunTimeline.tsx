@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Check, ChevronDown, CircleAlert, Lock, ShieldAlert, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
@@ -103,6 +103,28 @@ function HowIGotThis({ run }: { run: RunView }) {
   </Collapsible>;
 }
 
+/** The case text under the question: three lines, with "Show all" only when the text is actually cut. */
+function QuestionDetail({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return <>
+    <p ref={ref} id={id} className={`crm-question-detail${open ? " open" : ""}`}>{text}</p>
+    {(cut || open) && <button type="button" className="crm-detail-toggle" aria-expanded={open}
+      aria-controls={id} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>}
+  </>;
+}
+
 /** One question and its answer, rendered live from the run's events. */
 export function RunTimeline({ events, running, stopped = false, question, mode }: {
   events: CrmEvent[]; running: boolean; stopped?: boolean; question?: string; mode?: CrmMode;
@@ -115,7 +137,7 @@ export function RunTimeline({ events, running, stopped = false, question, mode }
   return <article className="crm-run">
     <header className="crm-question">
       <h2>{start?.question ?? question ?? ""}</h2>
-      {start?.detail && <p className="crm-question-detail">{start.detail}</p>}
+      {start?.detail && <QuestionDetail text={start.detail.replace(/\n\s*\n(\s*\n)+/g, "\n\n")} />}
       {shownMode === "customer" && <span className="crm-chip meta"><Lock size={12} aria-hidden="true" />
         Customer{customer ? `: ${customer}` : ""}, sees only their own records</span>}
     </header>

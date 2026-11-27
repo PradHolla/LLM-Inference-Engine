@@ -476,7 +476,11 @@ button { color: inherit; }
 .crm-error p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .crm-error > div { min-width: 0; }
 .crm-question h2 { margin-bottom: 6px; }
-.crm-question-detail { display: -webkit-box; margin: 0 0 10px; overflow: hidden; color: var(--text-soft); font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.crm-question-detail { display: -webkit-box; margin: 0 0 10px; overflow: hidden; color: var(--text-soft); font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+.crm-question-detail.open { display: block; overflow: visible; -webkit-line-clamp: unset; white-space: pre-wrap; }
+.crm-detail-toggle { margin: -6px 0 10px; padding: 0; border: 0; color: var(--accent); background: none; font: inherit; font-size: 12.5px; font-weight: 550; cursor: pointer; }
+.crm-detail-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
+.crm-detail-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .crm-activity { display: grid; gap: 7px; margin: 16px 0 0; color: var(--text-soft); font-size: 13px; }
 .crm-activity-item { display: flex; align-items: center; gap: 8px; margin: 0; }
 .crm-activity-item svg { flex: none; color: var(--success); }
