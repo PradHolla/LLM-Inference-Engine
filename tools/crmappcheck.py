@@ -36,6 +36,7 @@ CASES = [  # (label, request body)
     ("typed route no case", {"question": "Who is the best agent to route a case to?"}),
     ("typed off topic", {"question": "What were our total sales last quarter?"}),
     ("cust my cases", {"question": "What's the status of my cases?", "mode": "customer"}),
+    ("cust one case", {"question": "What happened with my training module connection case?", "mode": "customer"}),
     ("cust other person", {"question": "Can you check the order for Lucia Rossi?", "mode": "customer"}),
 ]
 
