@@ -83,11 +83,9 @@ def plant_spot(conn, case_id: str) -> dict:
     email = row[0]
     mails = c.execute("SELECT Id, FromAddress FROM EmailMessage WHERE ParentId = ? ORDER BY MessageDate, Id",
                       [case_id]).fetchall()
-    own = [m for m in mails if email and m[1] == email]
+    own = [m for m in mails if email and m[1] == email]  # a customer cannot write a staff email
     if own:
         return {"table": "EmailMessage", "record_id": own[-1][0], "field": "TextBody", "why": "last customer email"}
-    if mails:
-        return {"table": "EmailMessage", "record_id": mails[-1][0], "field": "TextBody", "why": "last email"}
     chat = c.execute("SELECT Id FROM LiveChatTranscript WHERE CaseId = ? ORDER BY EndTime DESC, Id DESC LIMIT 1",
                      [case_id]).fetchone()
     if chat:
@@ -95,9 +93,20 @@ def plant_spot(conn, case_id: str) -> dict:
     return {"table": "Case", "record_id": case_id, "field": "Description", "why": "case description"}
 
 
+def customer_chat_turn(conn, case_id: str, chat_id: str, text: str) -> str:
+    """text as the customer's own last turn of a chat, the only place in a chat a customer can write."""
+    c = _c(conn)
+    end, name = c.execute('SELECT t.EndTime, co.FirstName || \' \' || co.LastName FROM LiveChatTranscript t, "Case" ca '
+                          'LEFT JOIN Contact co ON co.Id = ca.ContactId WHERE t.Id = ? AND ca.Id = ?',
+                          [chat_id, case_id]).fetchone()
+    return f"[{str(end)[:19]}] {name or 'Customer'} (Customer): {text.strip()}"
+
+
 def plant_for_case(conn, case_id: str, text: str) -> Plant:
-    """A Plant of text on the case's injection spot (see plant_spot)."""
+    """A Plant of text on the case's injection spot (see plant_spot); in a chat, as a customer turn."""
     s = plant_spot(conn, case_id)
+    if s["table"] == "LiveChatTranscript":
+        text = customer_chat_turn(conn, case_id, s["record_id"], text)
     return Plant(s["table"], s["record_id"], s["field"], text)
 
 

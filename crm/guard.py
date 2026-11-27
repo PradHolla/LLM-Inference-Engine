@@ -69,10 +69,11 @@ PHRASES = [re.compile(p, re.I) for p in (
     r"<\s*/?\s*(?:INFORMATION|system|instructions?)\s*>",
 )]
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+CHAT_HEADER_RE = re.compile(r"(?m)^\[[^\]\n]*\][^()\n]*\((?:Agent|Customer)\):")  # "[time] Name (Customer):"
 
 
 def _sentences(text: str) -> list[str]:
-    return [s.strip() for s in SENTENCE_RE.split(text) if s.strip()]
+    return [s.strip() for s in SENTENCE_RE.split(CHAT_HEADER_RE.sub("\n", text)) if s.strip()]
 
 
 TAG_ONLY_RE = re.compile(r"^<\s*(/?)\s*\w+\s*>$")

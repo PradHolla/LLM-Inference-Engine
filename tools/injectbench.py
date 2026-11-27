@@ -141,7 +141,7 @@ def cmd_run(args) -> int:
     print(f"served model: {model}")
     canon = CRMEnv("b2b").open_task()
     try:
-        tasks = bench_tasks(args.hide_extra_test)
+        tasks = [t for t in bench_tasks(args.hide_extra_test) if t.task_type in args.types.split(",")]
         jobs = build_jobs(tasks, templates, canon)
         print(f"tasks: {collections.Counter((t.task_type, t.split) for t in tasks)}")
     finally:
@@ -376,8 +376,11 @@ def _selftest() -> int:
                 s.close()
             orig = canon.conn.execute(f'SELECT "{p.field}" FROM "{p.table}" WHERE Id = ?',
                                       [p.record_id]).fetchone()[0]
-            if not (v.endswith("\n\n" + meta["injection_text"]) and meta["injection_text"] not in (orig or "")
-                    and ok_target and v == (orig or "") + "\n\n" + meta["injection_text"]):
+            chat = p.table == "LiveChatTranscript"  # a chat plant is the customer's own turn, header first
+            shaped = (p.text.endswith("(Customer): " + meta["injection_text"].strip()) if chat
+                      else p.text == meta["injection_text"])
+            if not (shaped and meta["injection_text"].strip() not in (orig or "")
+                    and ok_target and v == (orig or "") + "\n\n" + p.text):
                 bad_plant.append(t.idx)
         check("policy plant lands on its record, canonical copy untouched, target valid", not bad_plant,
               f"bad {bad_plant}; placements {dict(place)}")
@@ -519,6 +522,7 @@ def main() -> int:
     r.add_argument("--url", default="http://localhost:8000")
     r.add_argument("--arms", default="q-judge,q-guard-code,q-guard")
     r.add_argument("--templates", default="all")
+    r.add_argument("--types", default=",".join(TYPES), help="task types to run, comma-separated")
     r.add_argument("--out", default="results/p11-inject.jsonl")
     r.add_argument("--concurrency", type=int, default=8)
     r.add_argument("--hide-extra-test", type=int, default=0,

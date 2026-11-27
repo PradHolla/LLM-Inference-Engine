@@ -86,6 +86,7 @@ class TaskSession:
         # key -> (source, text): free text written by customers or staff, exactly as the agent was shown it
         self.untrusted: dict[str, tuple[str, str]] = {}
         self.fence = False  # wrap that free text in <<case-text>> markers (crm/guard.py)
+        self.staff_only = False  # get_case shows only staff-written messages (the policy job's evidence)
         conn.execute("PRAGMA query_only = ON")
         conn.set_progress_handler(self._progress, 4000)
         conn.set_authorizer(self._authorize)
