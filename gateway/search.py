@@ -7,6 +7,7 @@ separately, because the phase headline is where the user's wait actually goes.
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 import re
 import sys
@@ -18,7 +19,7 @@ from pathlib import Path
 import httpx
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
-N_RESULTS = int(os.environ.get("GW_SEARCH_N", "3"))
+N_RESULTS = int(os.environ.get("GW_SEARCH_N", "5"))  # still one Brave call; more chances of a fetchable page
 FETCH_TIMEOUT_S = float(os.environ.get("GW_FETCH_TIMEOUT_S", "2.0"))
 CHARS_PER_SOURCE = int(os.environ.get("GW_CHARS_PER_SOURCE", "6000"))
 CHARS_PER_TOKEN = float(os.environ.get("GW_CHARS_PER_TOKEN", "4.0"))
@@ -45,6 +46,26 @@ class Source:
     tokens_est: int = 0
     ok: bool = False
     error: str | None = None
+    snippet: str = ""  # Brave's own excerpts of the page, the fallback when the page cannot be fetched
+    kind: str = "page"  # "page": text fetched from the site; "summary": Brave's excerpts only
+
+
+# A short page saying one of these is a bot wall or an outage notice, not content (autotrader, 2026-11-27)
+BLOCK_MAX_CHARS = int(os.environ.get("GW_BLOCK_MAX_CHARS", "800"))
+BLOCK_RE = re.compile(r"access denied|site is currently unavailable|are you a (?:human|robot)|verify you are (?:a )?human|"
+                      r"enable javascript|unusual traffic|request (?:was )?blocked|captcha|incident number|"
+                      r"pardon our interruption|request unsuccessful", re.I)
+SNIPPET_CHARS = int(os.environ.get("GW_SNIPPET_CHARS", "1500"))
+
+
+def blocked(text: str) -> bool:
+    """A short page that is a bot wall or an outage notice rather than the content asked for."""
+    return len(text) <= BLOCK_MAX_CHARS and bool(BLOCK_RE.search(text))
+
+
+def _plain(fragment: str) -> str:
+    """Brave's snippet HTML (<strong>, entities) as plain text."""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", fragment or ""))).strip()
 
 
 @dataclass
@@ -133,15 +154,26 @@ async def brave(query: str, client: httpx.AsyncClient, n: int = N_RESULTS,
         return [], 0.0, "no BRAVE_API_KEY"
     t0 = time.perf_counter()
     try:
-        r = await client.get(BRAVE_URL, params={"q": query, "count": n},
+        r = await client.get(BRAVE_URL, params={"q": query, "count": n, "extra_snippets": "true"},
                              headers={"Accept": "application/json",
                                       "X-Subscription-Token": key}, timeout=10.0)
         r.raise_for_status()
         hits = (r.json().get("web") or {}).get("results") or []
     except Exception as e:
         return [], (time.perf_counter() - t0) * 1e3, f"{type(e).__name__}: {e}"
-    out = [Source(url=h.get("url", ""), title=h.get("title", "")) for h in hits[:n] if h.get("url")]
+    out = [Source(url=h.get("url", ""), title=_plain(h.get("title", "")), snippet=_snippet(h))
+           for h in hits[:n] if h.get("url")]
     return out, (time.perf_counter() - t0) * 1e3, None
+
+
+def _snippet(hit: dict) -> str:
+    """The hit's description and extra snippets, deduplicated, as one capped plain-text excerpt."""
+    parts = []
+    for raw in [hit.get("description", ""), *(hit.get("extra_snippets") or [])]:
+        text = _plain(raw)
+        if text and text not in parts:
+            parts.append(text)
+    return " ... ".join(parts)[:SNIPPET_CHARS]
 
 
 async def _fetch_one(src: Source, client: httpx.AsyncClient, timeout: float) -> None:
@@ -184,12 +216,17 @@ async def run_search(query: str, client: httpx.AsyncClient, n: int = N_RESULTS,
     out.fetch_ms = await fetch_all(sources, client)
     t0 = time.perf_counter()
     for s in sources:
+        if s.ok:
+            s.text = extract(s.text, cap_chars)
+            s.ok = len(s.text) > 0
+            if s.ok and blocked(s.text):
+                s.ok, s.error = False, "blocked page"
+        if not s.ok and s.snippet:  # the site refused us; Brave's excerpts are what we know of it
+            s.text, s.ok, s.kind = s.snippet, True, "summary"
         if not s.ok:
-            continue
-        s.text = extract(s.text, cap_chars)
+            s.text = ""
         s.chars = len(s.text)
         s.tokens_est = int(s.chars / CHARS_PER_TOKEN)
-        s.ok = s.chars > 0
     out.extract_ms = (time.perf_counter() - t0) * 1e3
     out.n_sources = sum(1 for s in sources if s.ok)
     return out
@@ -200,8 +237,12 @@ def render_block(out: SearchOutcome) -> str:
     good = [s for s in out.sources if s.ok]
     if not good:
         return ""
-    parts = [f"[{i}] {s.title}\n{s.url}\n{s.text}" for i, s in enumerate(good, 1)]
+    parts = [f"[{i}] {s.title}\n{s.url}\n" + (SUMMARY_NOTE if s.kind == "summary" else "") + s.text
+             for i, s in enumerate(good, 1)]
     return "Search results:\n\n" + "\n\n".join(parts)
+
+
+SUMMARY_NOTE = "(This page could not be opened; below is only the search engine's excerpt of it.)\n"
 
 
 def selftest() -> int:
@@ -242,6 +283,50 @@ def selftest() -> int:
         fails.append(f"render_block wrong: {block!r}")
     if "[2]" in block:
         fails.append("render_block included a failed source")
+
+    wall = "We're sorry for any inconvenience, but the site is currently unavailable. Incident Number: 18.c6"
+    if not blocked(wall) or blocked("Access denied. " + "Real article content. " * 60) or blocked("Real article."):
+        fails.append("blocked(): a short outage page must count, a long page or a plain short page must not")
+    hit = {"description": "Search from <strong>133</strong> Used Ford Mustang cars &amp; trucks",
+           "extra_snippets": ["This 2014 Ford Mustang V6 Premium Coupe, 61,000 miles.",
+                              "Search from 133 Used Ford Mustang cars & trucks"]}
+    if _snippet(hit) != ("Search from 133 Used Ford Mustang cars & trucks ... "
+                         "This 2014 Ford Mustang V6 Premium Coupe, 61,000 miles."):
+        fails.append(f"_snippet: tags and entities stripped, repeats dropped: {_snippet(hit)!r}")
+    mixed = SearchOutcome(query="q", sources=[
+        Source(url="a", title="A", text="page text", ok=True),
+        Source(url="b", title="B", text="the excerpt", ok=True, kind="summary"),
+        Source(url="c", error="HTTP 403")])
+    block = render_block(mixed)
+    if ("[2] B\nb\n" + SUMMARY_NOTE + "the excerpt") not in block or SUMMARY_NOTE in block.split("[2]")[0] \
+            or "[3]" in block:
+        fails.append(f"render_block: a summary source is labelled, a page is not, a source with nothing is left out")
+
+    async def _fallback():
+        async def fake_brave(query, client, n=N_RESULTS, key=None):
+            return [Source(url="https://x/blocked", title="X", snippet="2017 Mustang GT, $18,900."),
+                    Source(url="https://y/wall", title="Y", snippet="Y's excerpt."),
+                    Source(url="https://z/gone", title="Z")], 1.0, None
+
+        async def fake_fetch(sources, client, timeout=FETCH_TIMEOUT_S):
+            sources[0].error = "HTTP 403"
+            sources[1].text, sources[1].ok = f"<html><body><p>{wall}</p></body></html>", True
+            sources[2].error = "ConnectTimeout"
+            return 1.0
+        global brave, fetch_all
+        saved = brave, fetch_all
+        brave, fetch_all = fake_brave, fake_fetch
+        try:
+            async with httpx.AsyncClient() as c:
+                return await run_search("q", c)
+        finally:
+            brave, fetch_all = saved
+    fb = asyncio.run(_fallback())
+    got = [(s.ok, s.kind, s.error, s.text) for s in fb.sources]
+    if got != [(True, "summary", "HTTP 403", "2017 Mustang GT, $18,900."),
+               (True, "summary", "blocked page", "Y's excerpt."), (False, "page", "ConnectTimeout", "")] \
+            or fb.n_sources != 2:
+        fails.append(f"run_search fallback: 403 and wall pages fall back to their excerpts, no excerpt drops: {got}")
 
     async def _degrade():
         async with httpx.AsyncClient() as c:

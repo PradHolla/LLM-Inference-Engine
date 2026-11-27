@@ -211,7 +211,8 @@ def cap_block(queries: list[str], sources: list[gsearch.Source],
         trimmed = [dataclasses.replace(source, text=source.text[:chars]) for source in sources]
         rendered = gsearch.render_block(gsearch.SearchOutcome(query="; ".join(queries),
                                                               sources=trimmed))
-        block = prompts.search_block(queries, rendered)
+        block = prompts.search_block(queries, rendered,
+                                     [i for i, s in enumerate(trimmed, 1) if s.kind == "summary"])
         size = budget.count_tokens(block)
         if size <= cap or chars == 0:
             return block, trimmed
@@ -301,7 +302,8 @@ async def search(state: AgentState) -> dict:
             # The early search started with the planner; when it already found enough, the
             # planner's extra query would only add a serial round trip to the first token.
             outcomes.append(await spec)
-            if sum(source.ok for source in outcomes[0].sources) >= config.EARLY_SEARCH_ENOUGH:
+            # only opened pages count: a search-engine excerpt is not enough to skip the second query
+            if sum(s.ok and s.kind == "page" for s in outcomes[0].sources) >= config.EARLY_SEARCH_ENOUGH:
                 run, queries = [], [state["user_text"]]
                 write({"type": "status", "stage": "searching", "query": queries[0],
                        "queries": queries})
@@ -314,6 +316,12 @@ async def search(state: AgentState) -> dict:
     write({"type": "sources", "sources": source_cards(used)})
     write({"type": "_stats", "search_ms": (time.perf_counter() - started) * 1000,
            "search_early": spec is not None})
+    if (state["thinking"] == config.AUTO and not state["plan"]["think"]
+            and any(s.kind == "summary" for s in used)):
+        # excerpts are noisy (filter menus, site-wide price ranges); without thinking the 8B blended them
+        # into confident claims about items (car search, 2026-11-27)
+        write({"type": "_stats", "think_for_excerpts": True})
+        return {"block": block, "plan": {**state["plan"], "think": True}}
     return {"block": block}
 
 

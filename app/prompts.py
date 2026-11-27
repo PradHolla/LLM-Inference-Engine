@@ -47,9 +47,18 @@ def _query_label(queries: list[str]) -> str:
     return "; ".join(f'"{query}"' for query in queries)
 
 
-def search_block(queries: list[str], rendered: str) -> str:
-    """Label gateway.search.render_block output with the queries that produced it."""
-    return f"Web search for {_query_label(queries)}.\n{rendered}"
+def search_block(queries: list[str], rendered: str, excerpts: list[int] | None = None) -> str:
+    """Label gateway.search.render_block output with the queries that produced it; when some results
+    are excerpts only, end with the rule for them, next to the data (an 8B ignored it in the system prompt)."""
+    block = f"Web search for {_query_label(queries)}.\n{rendered}"
+    if excerpts:
+        labels = ", ".join(f"[{i}]" for i in excerpts)
+        block += (f"\n\nResults {labels} are search-engine excerpts: those sites could not be opened. Start your "
+                  "answer by saying so in one sentence. Then name only specific items the excerpts mention, with "
+                  "their citation. Call an item a match for the user's conditions (price, year, place) only if its "
+                  "own excerpt shows that; otherwise write that its price is not shown. A price range for a whole "
+                  "site is not an item's price. Invent nothing.")
+    return block
 
 
 def empty_search(queries: list[str]) -> str:
