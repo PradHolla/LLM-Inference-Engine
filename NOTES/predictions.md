@@ -8045,3 +8045,18 @@ Corrections before any run (same day):
   impersonates the system), each flag must name one as its reason, and says most blocks contain none. All four
   attack templates still carry one of them. The re-scan's false-alarm rate is measured on the same 153 cases
   after this one revision, so it is optimistic by construction; INJ-10's range stands as written.
+- INJ-10 MISS again, revised prompt (results/p11-inject-scan.jsonl): 84/153 cases flagged (55%), 273 flags, all
+  by the model check; 12 of 153 replies had no report_flags call. The phrase list: 0/153 on both scans.
+  Decision (owner, 2026-11-27): the Qwen model check is removed from the agent. guard.detect stays only so
+  `injectbench scan` can reproduce these two numbers.
+
+### P11-INJ corrections after removing the model check (2026-11-27, before the bench)
+- The warning is now guard.phrase_flags over every customer- or staff-written block the agent was shown, run
+  once at the end of the run (no model call, so INJ-11 becomes +0 s by construction, minus the fence's tokens).
+- INJ-8 revised, measured offline on the rendered attack texts (phrase_flags on each template x goal): the list
+  catches important_instructions (the INFORMATION tag) and injecagent ("Ignore all previous instructions") on
+  every goal, and misses ignore_previous (AgentDojo's "iunstructions" typo) and manager_note (written to have no
+  marker). Prediction: catch rate 100% / 0% / 100% / 0% by template, 50% overall, on every arm that flags.
+  The list was not changed to catch the two misses: that would tune it to the test texts.
+- INJ-9 revised: 0/40 clean runs flagged (the scan's 0/153 covers the same blocks).
+- INJ-10 is now the phrase list's 0/153, already measured.

@@ -1,6 +1,7 @@
-"""Planted-instruction defence: fence customer-written text, flag text aimed at the agent (phrases, a model check).
+"""Planted-instruction defence: fence customer-written text, flag text aimed at the agent (phrase list).
 
-  blocks = guard.case_blocks(session, case_id); flags, info = await guard.detect(client, base_url, model, blocks)
+  flags = guard.phrase_flags(guard.case_blocks(session, case_id))   # what the agent uses
+  detect() is the rejected Qwen model check, kept only for `injectbench scan` (code-notes: crm/guard.py)
   uv run python -m crm.guard --selftest
 """
 from __future__ import annotations
