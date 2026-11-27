@@ -106,12 +106,15 @@ fp8 on one A10G:
 | Policy violation check | 100%, all 60 violations caught | 75% |
 | Knowledge answers | 5% hallucinated (24% at the start); answerable questions answered correctly or in part 14/27 (9/27 before citations); every answer cites a source that code checks | - |
 | Customer privacy | 16/16 requests for another customer's data refused, none of it reached the model | - |
+| Instructions planted in customer text (AgentDojo attacks, practice set) | hiding a violation 69% -> 0/92; routing hijacks 59% -> 25%; held-out accuracy unchanged on all 160 tasks | no defence |
 
 The design rule that got there: **the model reads and picks from menus, code decides.** The model picks
 the job for a typed question, the issue, the fixes a support agent offered, or the labels of the sources it
 answers from; code applies the routing policy, the policy records, fetches the cited text and checks it.
-Thinking is on only where the model makes a judgement. The live app streams every step, the cited source
-and the answer.
+Thinking is on only where the model makes a judgement. Against planted instructions the same rule holds:
+the answer comes from the tool, and the policy check reads only what staff wrote, so a customer's text cannot
+argue a verdict away; text aimed at the AI raises a "Needs review" warning. The live app streams every step,
+the cited source and the answer.
 ([details](docs/REPORT.md#phase-11))
 
 ## What this project demonstrates
